@@ -314,7 +314,11 @@ function mcpManifestProblems(toolRoot, info) {
 // 太通用的值（example/demo/test/… 与占位符形态）被过滤掉，否则模板自身会天天误报。
 const L1_SCAN_DIRS = ['agents', 'commands', 'skills', 'schemas', 'drivers-skeleton',
   'mcp-skeleton', 'scripts', 'tests', 'docs', '.qoder', '.githooks'];
-const L1_SCAN_FILES = ['README.md', 'package.json', '.gitignore'];
+// 根目录那些“随仓库一起发布、但不进 dist”的文档同样得扫：它们是用户先看到的东西。
+// 两份适配说明原本不在名单里 → 其中一份整份躺 \r\r\n 而没人发现，直到一次普通编辑
+// 把 250 行文件重排成 500 行（工具按行读写时把多余 CR 当成空行）。纯度与行尾两条体检共用这份名单。
+const L1_SCAN_FILES = ['README.md', 'package.json', '.gitignore',
+  'qoder适配说明.md', 'opencode适配说明.md'];
 // 只有这些 L2 字段值得当“事实”比对：模块名/分支名一类高复用词（order、dev）会淹没信号。
 const FACT_FIELDS = [
   ['identity.code', (d) => d?.identity?.code],

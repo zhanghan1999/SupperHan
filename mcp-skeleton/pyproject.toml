@@ -1,0 +1,24 @@
+# supperh_contract: the shared driver contract (envelope / exit codes / guards /
+# private-root lookup). Shipped as an importable package so a project adapter
+# imports the same guard the script channel runs - duplicated guards drift.
+#
+#   pip install -e mcp-skeleton        # from the L1 tool root
+#
+# shell.py does not need the install: running it as a script puts this directory on
+# sys.path[0], so the package resolves from place.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "supperh-contract"
+version = "0.1.0"
+description = "Shared envelope, exit-code table and read-only guards for supperH data drivers (both channels)."
+requires-python = ">=3.9"
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+server = ["mcp>=1.2.0"]
+
+[tool.setuptools]
+packages = ["supperh_contract"]

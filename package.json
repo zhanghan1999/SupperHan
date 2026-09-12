@@ -1,0 +1,35 @@
+{
+  "name": "supper-han-java",
+  "version": "0.1.0",
+  "description": "Cross-tool universal Java bug/learn workflow agents (L1 layer).",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "setup:check": "node scripts/setup.mjs --check",
+    "sync": "node scripts/sync-assets.mjs",
+    "sync:check": "node scripts/sync-assets.mjs --check",
+    "validate": "node scripts/validate-project.mjs",
+    "test": "node --test \"tests/**/*.test.mjs\"",
+    "resolve-project": "node scripts/resolve-project.mjs",
+    "init-project": "node scripts/init-project.mjs",
+    "migrate-registry": "node scripts/migrate-registry.mjs",
+    "bootstrap": "node scripts/bootstrap.mjs",
+    "detect-ide": "node scripts/detect-ide.mjs",
+    "setup:hooks": "git config core.hooksPath .githooks"
+  },
+  "keywords": [
+    "agent",
+    "opencode",
+    "qoder",
+    "java",
+    "multi-agent"
+  ],
+  "author": "zhanghan1999",
+  "license": "MIT",
+  "dependencies": {
+    "yaml": "^2.3.4"
+  }
+}

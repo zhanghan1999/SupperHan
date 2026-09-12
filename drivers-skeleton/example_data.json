@@ -1,0 +1,34 @@
+{
+  "_comment": "supperH example dataset. All values below are fictional and safe to publish. Used by example_json_driver.py to demonstrate the driver contract without touching any real backend.",
+  "version": 1,
+  "datasets": {
+    "demo": {
+      "columns": ["id", "name", "status", "amount", "created_at"],
+      "rows": [
+        [1, "alpha-order", "open", 100.5, "2024-01-05T10:15:00Z"],
+        [2, "bravo-order", "closed", 20.0, "2024-01-06T11:20:00Z"],
+        [3, "charlie-order", "open", 345.67, "2024-01-07T12:25:00Z"],
+        [4, "delta-order", "pending", 12.0, "2024-01-08T13:30:00Z"],
+        [5, "echo-order", "closed", 999.99, "2024-01-09T14:35:00Z"]
+      ]
+    },
+    "users": {
+      "columns": ["id", "login", "role", "active"],
+      "rows": [
+        [1, "alice", "admin", true],
+        [2, "bob", "developer", true],
+        [3, "carol", "viewer", false],
+        [4, "dave", "developer", true]
+      ]
+    },
+    "invoices": {
+      "columns": ["invoice_no", "customer", "gross", "currency", "issued_on"],
+      "rows": [
+        ["INV-0001", "Acme Corp", 1200.00, "USD", "2024-02-01"],
+        ["INV-0002", "Globex Inc", 450.75, "EUR", "2024-02-03"],
+        ["INV-0003", "Initech LLC", 8900.10, "USD", "2024-02-04"],
+        ["INV-0004", "Umbrella Co", 320.50, "JPY", "2024-02-05"]
+      ]
+    }
+  }
+}

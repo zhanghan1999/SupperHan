@@ -1,0 +1,50 @@
+# ═════════ 构建产物 ═════════
+dist/
+node_modules/
+
+# ═════════ 私有根（防止误在仓库内创建同名目录） ═════════
+supper-Han-private/
+
+# ═════════ 本地凭据/私有配置 ═════════
+*.local.json
+*.local.yaml
+*.local.yml
+project.yaml
+project.local.yaml
+block-doc.local.json
+log-diagnose.config.json
+devops.config.json
+
+# ═════════ 学习数据（防回退到仓库内目录） ═════════
+context/
+tasks/
+.prelearn-state.json
+
+# ═════════ 编辑器 / 系统 ═════════
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ═════════ Python ═════════
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+
+# ═════════ 日志 / 临时 ═════════
+*.log
+tmp/
+.tmp/
+
+# ═════════ 允许追踪（覆盖上面某些通配） ═════════
+!.gitignore
+!.qoder/rules/**
+!.githooks/**
+!package-lock.json

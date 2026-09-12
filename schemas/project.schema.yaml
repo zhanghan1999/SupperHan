@@ -1,0 +1,285 @@
+# ═══════════════════════════════════════════════════════════════════
+# project.schema.yaml
+# L2 项目契约文件（project.yaml）的 JSON Schema 定义
+# 上传到本仓库；用户 clone 后按此结构在 supper-Han-private/project.yaml 填真实值
+# ═══════════════════════════════════════════════════════════════════
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "https://example.invalid/supper-han-java/project.schema.yaml"
+title: "L2 Project Contract"
+description: "Per-project facts consumed by sync-assets.mjs for placeholder replacement."
+type: object
+additionalProperties: false
+# `db` 与 `drivers` 刻意**不在** required 里：接不接外部数据源是用户的选择，不是注册的硬前置。
+# 一旦把它们写成 required，/supperH-init 就只能逼人交生产库地址，或者更糟——
+# 用户答"不接"后把模板的 example_* 假值静默留在盘上（旧实现的真实形态，见 F-7）。
+# 缺席的语义是「纯代码模式」：/supperH-bug 只用代码与学习数据取证，DB 步骤记为缺口。
+# 存在时则全字段 required：填一半 = 意图不明，交给 validate 与 init 一起拦下，不补默认值。
+# `branches` 同样**不在** required 里，理由与上面两段同源但不同名：它不是「有没有这个源」，
+# 而是「我们是否真的知道这个环境对应哪个分支」。旧形态把它写成 required 且模板带值
+# （release-main / staging / develop），于是扫描没检出的项目会把三个看着像真名字的字面量
+# 静默烤进配置，而 `--env` 诊断基线只读这个字段 —— 报出一个仓里根本不存在的现场（F-8）。
+# 现在：检出或用户亲自确认过的才写；一个都没有 = 整段不写（= 「未登记分支映射」，
+# 读法是「环境结论只能来自 db.schemas 那一侧，或干脆别要环境证据」，不是「随便有个默认分支」）。
+required:
+  - schemaVersion
+  - identity
+  - codeRoot
+  - packageRoot
+  - modules
+  - build
+  - naming
+
+properties:
+  schemaVersion:
+    type: integer
+    const: 1
+    description: "Structure version; mismatch blocks sync."
+
+  identity:
+    type: object
+    additionalProperties: false
+    required: [code, displayName]
+    properties:
+      code:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{1,30}$"
+        description: "Machine-readable project id, used as context partition name."
+      displayName:
+        type: string
+        minLength: 1
+        maxLength: 100
+      aliases:
+        type: array
+        items: { type: string }
+        uniqueItems: true
+        description: "Display-only names, substitutable into prompts via the PROJECT.identity.aliases[] placeholder. NOT matched by the resolver: --project takes identity.code (filename as fallback), an alias here does not make a project addressable."
+      workspaces:
+        type: array
+        items: { type: string, minLength: 2 }
+        uniqueItems: true
+        description: "Workspace folders bound to this project. Written by /supperH-init and scripts/migrate-registry.mjs; the resolver matches cwd against these plus codeRoot (see scripts/resolve-project.mjs boundRootsOf). Must stay declared here, otherwise additionalProperties:false rejects every registered project."
+
+  codeRoot:
+    type: string
+    minLength: 2
+    description: "Absolute path to the Java project being analyzed."
+
+  effectiveRoot:
+    type: string
+    description: "Optional; defaults to codeRoot. Set by sync dynamically for git-worktree scenarios."
+
+  packageRoot:
+    type: string
+    pattern: "^[a-z][a-z0-9_.]*$"
+    description: "Top-level Java package (dot-separated), used for glob patterns."
+
+  modules:
+    type: array
+    minItems: 1
+    description: "Business module list. Each maps to a partition under CONTEXT_ROOT."
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, entryPattern]
+      properties:
+        name:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{0,30}$"
+        entryPattern:
+          type: string
+          description: "Glob relative to codeRoot, e.g. '**/order/controller/*.java'"
+        description:
+          type: string
+
+  build:
+    type: object
+    additionalProperties: false
+    required: [tool, jdk, compileCmd, testCmd]
+    properties:
+      tool:
+        enum: [maven, gradle, other]
+      jdk:
+        type: string
+      compileCmd:
+        type: string
+        description: "Full command; may itself contain '{{PROJECT.modules[].name}}' style iteration."
+      testCmd:
+        type: string
+      packageCmd:
+        type: string
+
+  db:
+    type: object
+    additionalProperties: false
+    required: [host, port, schemas, readonlyUser, writableUser, forbidWriteSchemas]
+    description: "Optional. ABSENT = this project connects no database (pure-code mode): DB-backed evidence steps in /supperH-bug are reported as gaps, and --env is rejected with exit 36 because there is no environment to sample from. When present EVERY key below is required on purpose - a half-filled db section is an undecided intent, and the undecided fields would keep their example_* template values, which read as real credentials and real schema names. That decoupling is exactly what validate-project.mjs' write-guard check fails."
+    properties:
+      host: { type: string, minLength: 1 }
+      port: { type: integer, minimum: 1, maximum: 65535 }
+      schemas:
+        type: object
+        additionalProperties: false
+        required: [prod, uat, test]
+        properties:
+          prod: { type: string, minLength: 1 }
+          uat:  { type: string, minLength: 1 }
+          test: { type: string, minLength: 1 }
+      readonlyUser: { type: string, minLength: 1 }
+      writableUser: { type: string, minLength: 1 }
+      forbidWriteSchemas:
+        type: array
+        minItems: 1
+        items: { type: string }
+        description: "DB gate: any write target in this list must be blocked. Must cover db.schemas.prod and db.schemas.uat - a non-empty list whose entries match no real schema protects nothing (validate-project.mjs fails such a config; /supperH-init rebuilds this list from the values it just wrote)."
+
+  branches:
+    type: object
+    additionalProperties: false
+    # 写了这一段就得说清生产分支：没有 prod 映射就没有部署目标，半截比不写更糟（同 db 段的理由）。
+    required: [prod]
+    properties:
+      # minLength 拦住 `prod: ""`：空串在 JSON Schema 眼里是合法值，但在 --env 那里会长成一个
+      # 「环境名合法、branch 取不到」的现场，而 resolveDiagnoseBaseline 已经会把它从合法名清单里滤掉。
+      prod: { type: string, minLength: 1 }
+      uat:  { type: string, minLength: 1 }
+      dev:  { type: string, minLength: 1 }
+    description: "环境名 → 该环境**真实存在**的分支名（可选）。只登记 git 里检出过、或用户明确确认过的键；没把握的键整段/整行删掉，别拿形似名字占位。resolve-project.mjs --env 的合法环境名 = 本段与 db.schemas 的键并集，未出现的名字一律 exit 36（不默认成任何一个）。值必须是仓里取得到的分支：诊断基线会把这个字符串当现场交给用户复核。"
+
+  drivers:
+    type: object
+    additionalProperties: false
+    description: "Slot registration for private driver implementations. Values point under DRIVERS_ROOT. Optional and every slot is optional: registering a project must not invent drivers. A registered project with no drivers section is pure-code mode - the connectivity gate then reports 0 configured drivers explicitly instead of pretending a probe passed. Note the asymmetry validate-project.mjs enforces: drivers.database WITHOUT a db section is an error (the ReadOnlyGuard then has no forbidWriteSchemas list to deny anything with - an empty list never blocks a write), while a db section without that driver is only a warning (no channel can reach it)."
+    properties:
+      database:     { $ref: "#/definitions/driverSlot" }
+      logs:         { $ref: "#/definitions/driverSlot" }
+      tickets:      { $ref: "#/definitions/driverSlot" }
+      efficiency:   { $ref: "#/definitions/driverSlot" }
+      # A pre-flight slot ("vpnPreCheck") was removed. Measured against the company
+      # tunnel: a bare TCP connect succeeds on EVERY port of any host in the VPN range
+      # (the zero-trust gateway answers the handshake locally), and ICMP is filtered —
+      # so no standalone "is the network up" signal exists that isn't already answered
+      # better, and faster, by each slot's own healthCheck. The key stays declared so
+      # already-registered files keep parsing; validate-project.mjs warns on it.
+      # Evidence: docs/architecture.md §10.8.
+      vpnPreCheck:  { $ref: "#/definitions/driverSlot" }
+
+  naming:
+    type: object
+    additionalProperties: false
+    required: [commandPrefix]
+    properties:
+      commandPrefix:
+        type: string
+        pattern: "^/[A-Za-z][A-Za-z0-9_-]*$"
+        description: "Slash-prefixed command namespace. For this repo the convention is /supperH."
+      logPrefix:
+        type: string
+
+  paths:
+    type: object
+    additionalProperties: false
+    description: "Optional overrides; defaults computed by sync."
+    properties:
+      contextRoot: { type: string }
+      tasksRoot:   { type: string }
+
+  # ────────────────────────────────────────────────────────────────
+  # /supperH-bug 快路径（fast path）准入门禁的 L2 覆盖。
+  # 全部可选：缺省即用 L1 内置 DEFAULTS（maxDiffLines 40 / maxFiles 2）。
+  # 语义是「只允许收紧」——数值会被脚本夹到 HARD_CAPS（80 / 4），
+  # 写大了不报错但不会生效（防笔误把规模门禁形同虚设）。不写这一段是最安全的。
+  # ────────────────────────────────────────────────────────────────
+  fastPath:
+    type: object
+    additionalProperties: false
+    description: "Optional per-project overrides for the /supperH-bug fast-path gate. Tighten-only: values are clamped to HARD_CAPS by scripts/fastpath-gate.mjs."
+    properties:
+      enabled:
+        type: boolean
+        description: "Master switch. false = this project never takes the fast path (gate short-circuits to exit 30 before reading any learning data)."
+      maxDiffLines:
+        type: integer
+        minimum: 1
+        description: "Diff budget in lines. Tighten-only; clamped to <= 80 (HARD_CAPS.maxDiffLines)."
+      maxFiles:
+        type: integer
+        minimum: 1
+        description: "Diff budget in touched files. Tighten-only; clamped to <= 4 (HARD_CAPS.maxFiles)."
+      allowAnchorKinds:
+        type: array
+        uniqueItems: true
+        minItems: 0
+        description: "Optional anchor-kind whitelist. Absent/null = unrestricted (any kind the gate supports). Listing a subset narrows it; a directly-usable kind omitted here is rejected with exit 30."
+        items:
+          type: string
+          enum: [route, fqn, fileLine]
+
+  # ────────────────────────────────────────────────────────────────
+  # git 交付与回滚快照（skills/auto-fix「Snapshot 语义」/ docs/architecture.md §10.10）。
+  # 全部可选，缺省即最安全的形态：不 commit、改动留在工作区给人核对。
+  #
+  # 这两个值是**运行期输入**，由脚本在 --preflight 时读出并显式递出，
+  # 绝不允许烤进 L1 产物（不写 {{PROJECT.git.deliveryMode}} 占位符）：
+  # 与 drivers.<slot>.kind / fallback / mcp 同纪律——改动 L2 值只需重跑一次任务，
+  # 不必重跑 sync、不必重启 IDE（对照 docs/placeholders.md §3 的登记表成本）。
+  # ────────────────────────────────────────────────────────────────
+  git:
+    type: object
+    additionalProperties: false
+    description: "Optional delivery/rollback policy for a fix. Read at runtime by scripts/resolve-project.mjs --preflight; never baked into L1 artifacts. Absent section = the safest defaults below."
+    properties:
+      deliveryMode:
+        type: string
+        enum: [none, local-commit, push-pr]
+        description: "What happens to the working tree after Verify passes. none (default) = create no commit at all; the diff stays in the working tree so the user can inspect it in the IDE and commit themselves. local-commit = the fix agent commits on the current branch, no push. push-pr is REJECTED in phase 1: an outbound git write is the one action the safety rule ('sacrifice speed for safety on anything that modifies') cannot trade away, so ask the user to do it manually."
+      snapshotTtlDays:
+        type: integer
+        minimum: 0
+        maximum: 365
+        description: "How long rollback snapshot refs (refs/supperh/snap/<task_id>) survive. Swept best-effort inside --preflight; 0 = never sweep automatically (you clean up by hand). Default 7. A failed sweep is silent and never changes any exit code."
+
+definitions:
+  driverSlot:
+    type: object
+    additionalProperties: false
+    required: [impl, healthCheck]
+    properties:
+      impl:
+        type: string
+        description: "Absolute path or '{{DRIVERS_ROOT}}/...' template pointing to the driver script. The resolver expands it, so L1 artifacts must never prepend a second DRIVERS_ROOT prefix."
+      healthCheck:
+        type: string
+        description: "Command that returns exit 0 when the data source is actually usable. Always a local script, even when kind=mcp: deterministic gating may only come from a local exit code. It must speak the real protocol (open a DB connection with the configured account, or issue an HTTP request and accept ANY status line - a 401 proves the service is alive and only credentials are missing). A ping, an adapter/VPN-client name, or a bare TCP connect are all forbidden as the criterion: on a zero-trust tunnel they report healthy while nothing works. Budget: <=8s per endpoint, <=20s total, never hang. Do NOT tighten that to 2-3s: measured on the same HTTPS endpoint, the cold-start TLS handshake through the tunnel took >3s (a 3s budget reports 'unreachable' for a perfectly alive service = false block), while a warm one answers in 0.2s - size the budget for the cold case."
+      config:
+        type: object
+        description: "Driver-specific extras (index pattern, table prefix, etc). Free-form."
+      # ---- call channel (see skills/driver-contract/SKILL.md §调用通道) ----
+      kind:
+        type: string
+        enum: [script, mcp]
+        description: "How the impl is invoked. script = bash + exit code (default, and the only channel that can carry a deterministic decision, since an MCP call has no exit code). mcp = a registered MCP tool; the agent call shape changes, the envelope/exit-code semantics do not. Absent means script."
+      fallback:
+        type: string
+        enum: [script, none]
+        description: "What to do when the mcp channel is unavailable (server failed to start, tool silently missing from the list). script keeps working but must be decided by the registration-time probe, never by the model. Absent means script."
+      mcp:
+        $ref: "#/definitions/mcpBinding"
+  mcpBinding:
+    type: object
+    additionalProperties: false
+    required: [server, sources]
+    description: "MCP binding for a slot. Only consulted when kind=mcp; it names a server and the sources this slot may reach through it."
+    properties:
+      server:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{1,40}$"
+        description: "Registered MCP server id, e.g. supperh-drivers. Must match a server the IDE has; the shell server loads per-project adapters from DRIVERS_ROOT/<code>/."
+      sources:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items: { type: string, minLength: 1 }
+        description: "Closed whitelist of source names reachable through this server for this slot. An unlisted source is rejected (exit 2 semantics) rather than guessed."
+      healthTool:
+        type: string
+        description: "Optional tool name used for liveness diagnostics. Never replaces the script healthCheck used by the registration gate - and nothing that decides a branch may read its result."

@@ -1,0 +1,133 @@
+# ═══════════════════════════════════════════════════════════════════
+# project.example.yaml
+# L1 模板：/supperH-init（scripts/init-project.mjs）与 scripts/bootstrap.mjs 以它为文本基底。
+#
+# 为什么 db / drivers 两段是注释形态（而不是假数据）：
+#   这两段代表**外部数据源**，接不接由用户决定。旧模板把 example_prod /
+#   example_readonly / <DRIVERS_ROOT>/db-example.py 直接写死在这里，于是只要用户答
+#   "不接"，渲染器就会把这些假值原样写进 projects/<code>.yaml：结构合法、validate 退 0、
+#   连通门禁因"0 个已配置驱动"自动放行——三份机制全都看不出它没被配好（F-7）。
+#   现在：不接 = 整段不写（纯代码模式）；接 = 渲染器按用户给的真值**生成**整段，
+#   禁写清单跟着库名重建。所以下面两段只做人看的字段说明书，不是可被误用的配置。
+# branches 同理（F-8）：旧模板在这里写死了 release-main / staging / develop，
+#   而渲染器只改写 git 里真检出的那几个键 —— 没检出的就继承这三行假值，还因为
+#   schema 把它们列成 required 而能过校验。现在整段也是注释形态：没检出 = 不写。
+# 本文件因此能通过 node scripts/validate-project.mjs（不再带任何可被当真值用的假值）。
+# ═══════════════════════════════════════════════════════════════════
+schemaVersion: 1
+
+identity:
+  code: example-proj
+  displayName: "Example Java Project"
+  aliases: [example, ex]
+
+codeRoot: /absolute/path/to/example-java-project
+packageRoot: com.example.proj
+
+modules:
+  - name: order
+    entryPattern: "src/main/java/com/example/proj/order/controller/*.java"
+    description: "订单模块"
+  - name: pay
+    entryPattern: "src/main/java/com/example/proj/pay/controller/*.java"
+    description: "支付模块"
+  - name: inventory
+    entryPattern: "src/main/java/com/example/proj/inventory/controller/*.java"
+
+build:
+  tool: maven
+  jdk: "21"
+  compileCmd: "mvn -q compile -pl {{PROJECT.modules[].name}} -am"
+  testCmd:    "mvn -q test -pl {{PROJECT.modules[].name}}"
+  packageCmd: "mvn -q package -DskipTests"
+
+# ────────────────────────────────────────────────────────────────
+# db（可选）：本项目接不接数据库。七个值全要，缺一项 init 在写盘前就退 2（不补默认值）。
+# db.schemas.prod / uat 的值会同时决定禁写清单：driver 侧 ReadOnlyGuard 与
+# agents/bug-dev.md 的 DB 门禁只比对这个列表，清单不命中 = 写保护不存在。
+# 不接 = 整段不写（纯代码模式：DB 取证步骤记为缺口，--env 退 36）。需要时才取消注释：
+# db:
+#   host: <内网端点>
+#   port: 5432
+#   schemas:
+#     prod: <生产库名>          # 进禁写清单
+#     uat:  <预发库名>          # 进禁写清单
+#     test: <测试库名>          # 唯一允许写的库
+#   readonlyUser: <只读账号>
+#   writableUser: <可写账号>
+#   forbidWriteSchemas:         # 由 init 按上面三个库名重建，不要手填
+#     - <生产库名>
+#     - <预发库名>
+
+# ────────────────────────────────────────────────
+# branches（可选）：环境名 → 该环境**真实存在**的分支名。至多 prod / uat / dev 三个键，
+# 写了就必须至少包含 prod（没有生产分支映射 = 没有部署目标，半截比不写更糟）。
+# /supperH-init 只把 git branch 里真检出过、或你亲口确认过的键写进来；没把握的键不写。
+# 拿不准就删掉整段：--env 会把合法环境名缩到只剩 db.schemas 那侧（或一个都没有 → 36），
+# 这比多写一个仓里不存在的分支名好得多：诊断基线会拿这个字符串当“现场”交给用户复核。
+# 需要时才取消注释：
+# branches:
+#   prod: release/2.0
+#   uat:  staging-2
+#   dev:  dev
+
+# ────────────────────────────────────────────────────────────────
+# drivers（可选）：只登记真实存在的私有驱动，没接的槽位不写进文件。
+# 每个槽位的 healthCheck 就是它的连通性判据：必须真说协议（DB 用配置里的账号连一次；
+# HTTP 发一个请求，拿到任何状态码都算“服务在场”，401/403 则说明只缺凭据 = exit 4）。
+# 不要写 ping / 网卡名 / 裸 TCP connect 当判据：零信任隧道网关对 VPN 网段的**任意端口**
+# 都本地代答 accept，那些写法在 VPN 断了的情况下依旧报绿灯（实测见 docs/architecture.md §10.8）。
+# 非 database 槽位必须同时给 impl + healthCheck（没驱动 = 这个源不存在）；database 槽位
+# 可以缺席（只登记库信息、暂不接通道 → validate 警告“没有通道能连上它”，不阻断）。
+# 没有"跑其它 driver 前先统一预检一次"的槽位（原 vpnPreCheck，已删）：预检能测的东西
+# 都不是证据（见上），而真证据已经在各槽位 healthCheck 里。旧 project.yaml 里残留该段
+# 仍可解析，但 validate 会报废弃警告。
+# 调用通道缺省 script（bash + 退出码 0-5，唯一可做分流的通道）。需要时才取消注释：
+# drivers:
+#   database:
+#     impl: "<DRIVERS_ROOT>/<code>/db-query.py"
+#     healthCheck: "<DRIVERS_ROOT>/<code>/db-query.py --project <code> --health"
+#   logs:
+#     impl: "<DRIVERS_ROOT>/<code>/logs.py"
+#     healthCheck: "<DRIVERS_ROOT>/<code>/logs.py --project <code> --health"
+#     config:
+#       indexPattern: <app-logs-*>       # 自由格式：driver 自己的额外参数
+#     kind: mcp            # 只换取数通道；上面两行仍是本地脚本，连通判定不交给 MCP
+#     fallback: script     # server 不可用时回 script；回不回由注册期探测决定，不由模型判断
+#     mcp:
+#       server: supperh-drivers          # 必须与插件 .mcp.json 的 server id 一致
+#       sources: [app_logs]              # 闭合白名单：未列出的 source 被拒（exit 2）而不是被猜
+#       healthTool: log_health           # 可选，仅诊断用
+
+naming:
+  commandPrefix: "/supperH"
+  logPrefix: "[example-bug]"
+
+paths:
+  contextRoot: "{{PRIVATE_ROOT}}/context/{{PROJECT.identity.code}}"
+  tasksRoot:   "{{PRIVATE_ROOT}}/tasks/{{PROJECT.identity.code}}"
+
+# ────────────────────────────────────────────────────────────────
+# fastPath（可选）：/supperH-bug 快路径准入门禁的本项目覆盖。
+# 整段不写 = 用最安全的 L1 默认（预算 40 行 / 2 文件，锚点类型不限）。
+# 只允许收紧：maxDiffLines/maxFiles 写大了会被脚本夹回硬上限（80 / 4），不报错但不生效。
+# 想彻底禁用快路径（比如核心资金模块），把 enabled 设为 false 即可。
+# 需要时才取消注释，并按需保留子集：
+# fastPath:
+#   enabled: true          # false = 本项目任何 bug 都走完整流程
+#   maxDiffLines: 20       # 收紧到 20 行（<= 硬上限 80 才有效）
+#   maxFiles: 1            # 收紧到 1 个文件（<= 硬上限 4 才有效）
+#   allowAnchorKinds: [route]   # 只允许 route 锚点；fqn/fileLine 会被判 30 出局
+
+# ────────────────────────────────────────────────────────────────
+# git（可选）：一次修复跑完之后的「交付方式」与回滚快照留存天数。
+# 整段不写 = 最安全的缺省：deliveryMode none（**不建任何 commit**，改动全部留在工作区，
+# 由你在 IDE 里双击 diff 逐个核对后自己提交）+ 快照 ref 存 7 天。
+# 这是运行期读取的值，与 drivers.<slot>.kind 同纪律：不烤进 L1 产物，改完这段
+# 只需重跑一次任务，不必重跑 sync、不必重启 IDE。
+# 回滚锚点用 `git stash create` 产悬空 commit + `refs/supperh/snap/<task_id>` 隐藏 ref 钉住，
+# 不建分支、不动工作区、IDEA 的 Log 里看不到（原理与选型排除法见 docs/architecture.md §10.10）。
+# 需要时才取消注释：
+# git:
+#   deliveryMode: none     # none（缺省，最安全）| local-commit（本地建 commit，不 push）| push-pr（一期拒绝执行）
+#   snapshotTtlDays: 30    # 快照 ref 保留天数，0 = 不自动清扫（最长 365）

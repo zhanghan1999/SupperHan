@@ -1,0 +1,40 @@
+# tests/fixtures/priv-mcp/projects/fx-mcp.yaml
+# Fixture for the MCP channel probes: a project whose logs slot really routes through
+# the shell server. Kept minimal on purpose - the shell only reads identity.code and
+# drivers.<slot>.{kind,mcp}; full-schema validity is validate-project.mjs' job and is
+# covered by tests/validate-registry.test.mjs.
+identity:
+  code: fx-mcp
+  name: fixture project for mcp probes
+
+drivers:
+  database:
+    impl: "<expanded-by-resolver-only>"
+    healthCheck: "true"
+  logs:
+    kind: mcp
+    fallback: script
+    mcp:
+      server: supperh-drivers
+      sources: [app_logs]
+    impl: "log-example.py"
+    healthCheck: "log-example.py --health"
+  tickets:
+    # kind: mcp but mcp.server names a different (non-shell) server -> probe must reject
+    kind: mcp
+    mcp:
+      server: some-other-server
+      sources: [tickets]
+    impl: "ticket-example.py"
+    healthCheck: "ticket-example.py --health"
+  efficiency:
+    # declared mcp-ish but no whitelist -> probe must fail closed, not "no data"
+    kind: mcp
+    mcp:
+      server: supperh-drivers
+      sources: []
+    impl: "efficiency-example.py"
+    healthCheck: "efficiency-example.py --health"
+
+db:
+  forbidWriteSchemas: [public]

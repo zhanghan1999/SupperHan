@@ -1,0 +1,15 @@
+# supperH MCP shell 运行依赖
+#
+# 安装（在壳实际使用的那个解释器里）：
+#   pip install -r mcp-skeleton/requirements.txt
+#   或可编辑安装契约包，让 L2 的 script 通道 driver 也能 import 同一份守卫：
+#   pip install -e mcp-skeleton
+#
+# 缺依赖时壳显式失败（exit 1 / exit 3 + 指引），不退回弱解析：
+# 静默少一个白名单字段 = 放行一次不该放行的取数。
+
+# MCP 协议与 stdio 传输（shell.py 的 --serve 模式）
+mcp>=1.2.0
+
+# 读 <PRIVATE_ROOT>/projects/<code>.yaml
+PyYAML>=6.0

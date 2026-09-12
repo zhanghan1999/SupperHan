@@ -1,0 +1,29 @@
+#!/bin/sh
+# pre-commit hook: 检测 L1 资产变更后提示同步（降级式，不阻断提交）
+#
+# 启用: npm run setup:hooks   (等价 git config core.hooksPath .githooks)
+# 禁用: git config --unset core.hooksPath
+
+CHANGED=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "^(agents|commands|skills|schemas|drivers-skeleton)/" || true)
+
+if [ -z "$CHANGED" ]; then
+  exit 0
+fi
+
+echo ""
+echo "==================================================="
+echo "[supper-Han-java] detected L1 asset changes:"
+echo "$CHANGED" | sed 's/^/   /'
+echo ""
+
+# 残留占位符检测（不阻断，只提示）
+node scripts/sync-assets.mjs --check 2>/dev/null
+if [ $? -ne 0 ]; then
+  echo "[warn] sync --check failed. run: npm run sync"
+fi
+
+echo "==================================================="
+echo ""
+
+# 降级式：始终 exit 0，不阻断 commit
+exit 0

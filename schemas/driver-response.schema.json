@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.invalid/supper-han-java/driver-response.schema.json",
+  "title": "Driver Response Contract",
+  "description": "Unified JSON envelope every driver (private, lives under DRIVERS_ROOT) must emit. Script channel: this is the whole stdout payload; MCP channel: this is content[0].text. Exit code + this payload together form the contract, and both channels carry the same code inside error.code.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "meta"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "meta": {
+      "type": "object",
+      "description": "Known keys are declared below. Drivers MAY add source-specific keys (health/detail/adapterPresent/...): consumers must ignore unknown keys rather than reject them, otherwise every new driver forces a contract revision.",
+      "additionalProperties": true,
+      "required": ["source"],
+      "properties": {
+        "schemaVersion": { "type": "integer", "minimum": 1, "description": "Version of THIS contract file; absent means 1" },
+        "source":    { "type": "string", "description": "driver slot name or logical source: database | logs | tickets | efficiency | demo | menu | ..." },
+        "project":   { "type": "string", "description": "identity.code the driver resolved its config by. Omitted only when args are so broken no code was known (exit 1/2 before routing)." },
+        "count":     { "type": "integer", "minimum": 0, "description": "rows actually returned" },
+        "truncated": { "type": "boolean", "description": "true = hit --limit and cut; consumers must surface this in their final report" },
+        "syncTs":    { "type": "string", "description": "ISO 8601 UTC timestamp taken by the driver at emit time" },
+        "took_ms":   { "type": "integer", "minimum": 0 },
+        "driverVersion": { "type": "string" },
+        "query": {
+          "type": "string",
+          "description": "The statement ACTUALLY executed, placeholders kept as placeholders (bound values belong to `params`) - never a statement reconstructed after the fact. This is what lets a reviewer re-run the result instead of trusting it. Optional HERE on purpose: making it required would brick every driver registered before it existed, so enforcement lives one layer up - skills/data-fetch must surface an envelope that has neither `query` nor `queryOmitted` as `query_missing`."
+        },
+        "params": {
+          "type": ["object", "array"],
+          "description": "Values bound to the placeholders in `query`, in the same order (array) or under the same names (object). Legal only next to `query`: parameters for a statement nobody showed are a second unexplained source of truth, not extra evidence."
+        },
+        "queryOmitted": {
+          "type": "string",
+          "enum": ["adapter_opaque", "redacted", "not_applicable"],
+          "description": "Why there is no `query` to show: fetch happened inside an adapter the shell cannot see | statement withheld because it carries credentials/sensitive business values (say what was redacted) | no statement exists at all (health probe, directory listing, file metadata). Mutually exclusive with `query`. Omitting BOTH keys is not a third legal state - it is the defect state the enum exists to make distinguishable."
+        }
+      }
+    },
+    "data": {
+      "type": ["object", "null"],
+      "description": "Tabular shape is required when ok=true (see definitions/tabular); ok=false envelopes normally omit it."
+    },
+    "error": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/definitions/errorObj" }
+      ],
+      "description": "Absent or null when ok=true; an object when ok=false. error.code IS the process exit code, which is what makes the MCP channel (no exit code) diagnosable."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["ok"], "properties": { "ok": { "const": true } } },
+      "then": { "required": ["data"], "properties": { "data": { "$ref": "#/definitions/tabular" } } }
+    },
+    {
+      "if": { "required": ["ok"], "properties": { "ok": { "const": false } } },
+      "then": { "required": ["error"] }
+    }
+  ],
+  "definitions": {
+    "tabular": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["columns", "rows"],
+      "properties": {
+        "columns": { "type": "array", "items": { "type": "string" } },
+        "rows": { "type": "array", "items": { "type": "array" } }
+      }
+    },
+    "errorObj": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
+        "message": { "type": "string" },
+        "detail": { "type": "string" }
+      }
+    }
+  }
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# Exit code contract (mirrors plan section 5.7)
+#   0 = success
+#   1 = project not registered / project.yaml missing
+#   2 = argument missing or illegal (incl. source outside mcp.sources)
+#   3 = data source unreachable (network/file/VPN) - decided by the driver's own
+#       protocol handshake, never by a pre-flight ping or adapter check
+#   4 = authentication expired (must re-handshake)
+#   5 = schema violation (driver output does not match this file)
+# The same number appears in `error.code` on BOTH channels; on the MCP
+# channel it is additionally mapped to a JSON-RPC error code. Table of
+# record: mcp-skeleton/supperh_contract/codes.py, mechanically compared
+# with drivers-skeleton/base_driver.py and this file by
+# tests/mcp-manifest.test.mjs.
+# ─────────────────────────────────────────────────────────────────────

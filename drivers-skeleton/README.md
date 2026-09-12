@@ -98,28 +98,26 @@ class MyDbDriver(BaseDriver):
 - 未处理异常 → 基类会兜底转成 `emit_error(5, ...)`；不要吞
 - 凭据只从环境变量 / `.secrets/*.local.json` 读；不从 argv / project.yaml 读
 
-### 步骤 3：注册到 project.yaml
+### 步骤 3：登记（不要手改 YAML）
 
-编辑 `{{PRIVATE_ROOT}}/project.yaml`：
+驱动文件写好了，注册表里还没有它。**登记走 `/supperH-driver`**（它内部调 `node "{{TOOL_ROOT}}/scripts/driver-registry.mjs"`）。别手改 `{{PRIVATE_ROOT}}/projects/<code>.yaml`：那条命令会先备份、在内存里过 schema、跑探活（**探活不过就不落盘**），再按字段顺序写成合法 YAML。手改恰好能改出这三件它拦得住的事：schema 违规、两个槽位同时标 `role: database`（写保护拿不到确定出口）、以及 `healthCheck` 指向一个根本跑不通的命令。
+
+登记完成后那一槽长这样（**槽位名由你定**，几个都行；推荐用槽位名当文件名，方便一眼对上）：
 
 ```yaml
 drivers:
-  database:
-    impl: "{{PRIVATE_ROOT}}/drivers/my_db_driver.py"
-    healthCheck: "python {{PRIVATE_ROOT}}/drivers/my_db_driver.py --project <code> --health"
+  <你起的槽位名>:                              # 例：bizdb / auditlog / crm
+    desc: "这个源是干什么的，一句话说清"     # L1 判用途的唯一线索：新登记不给会退 2
+    impl: "{{DRIVERS_ROOT}}/<你起的槽位名>.py"
+    healthCheck: "python {{DRIVERS_ROOT}}/<你起的槽位名>.py --project <code> --health"
+    role: database                             # 只有数据库通道写这一行，全项目最多一个
     config:
       sources: [test, uat, prod]
 ```
 
-（`impl` / `healthCheck` 里的 `{{PRIVATE_ROOT}}` 会被 sync 展开成绝对路径；也可以直接写绝对路径。）
+（`impl` / `healthCheck` 里的 `{{DRIVERS_ROOT}}` 会被展开成绝对路径；也可以直接写绝对路径。不写 `role` 的槽位对 L1 就是“某个用户命名的只读源”，靠 `desc` 判用途。）
 
-然后跑：
-
-```bash
-node scripts/sync-assets.mjs
-```
-
-然后跑注册链路 `/supperH-init`（它内部调 `scripts/init-project.mjs --write`）。
+**登记后不需重跑 sync、也不需重启 IDE**：`projects/<code>.yaml` 属 L2，解析器每次运行现读；sync 只烤 L1 产物（`agents/` `commands/` `skills/`）。加一个外部源永远不改 L1（那条纪律本身钉在 `tests/l1-slot-neutrality.test.mjs`）。
 
 **探活不是 shape 检查**：`healthCheck` 必须**真说协议** —— DB 用配置里的账号真连一次（连上即关，不查业
 务数据），HTTP 类发一个请求拿到**任意状态行**即算服务在场（`401/403` → exit 4，只缺凭据；拒连/超时 →

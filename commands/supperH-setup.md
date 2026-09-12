@@ -115,7 +115,7 @@ dist 状态: <built @ <ts> | not-built>
    路径: ~/.qoder-cn/plugins/cache/local/supper-Han-java/
    下一步:
    1) 完全退出 Qoder（任务栏图标也要右键退出）→ 重开
-   2) 输入框敲 /sup 应看到 5 个命令：/supperH-setup /supperH-bootstrap /supperH-init /supperH-bug /supperH-learn
+   2) 输入框敲 /sup 应看到这些命令：/supperH-setup /supperH-bootstrap /supperH-init /supperH-driver /supperH-bug /supperH-learn
    3) 首次接入一个项目：在**那个项目的工作区**里跑 /supperH-init
    4) 冒烟测试: /supperH-learn --module <你的一个模块名>
 
@@ -123,7 +123,7 @@ dist 状态: <built @ <ts> | not-built>
    路径: <dest>
    下一步:
    1) 重开 opencode CLI 或 IDE 面板
-   2) 输入 / 应看到 supperH-* 5 个命令
+   2) 输入 / 应看到 supperH-* 那组命令（setup / bootstrap / init / driver / bug / learn）
    3) 若看不到：确认你的 opencode 版本加载目录，然后重跑
       /supperH-setup opencode --dest <正确路径>
 
@@ -134,7 +134,7 @@ dist 状态: <built @ <ts> | not-built>
 
 ## 边界
 
-- **禁止**生成或覆盖任何项目条目（`projects/*.yaml`）：条目只由 `/supperH-init` 扫描后写；模板 `schemas/project.example.yaml` 不得被直接拷进私有根（那会造出长得象真配置的假值）
+- **禁止**生成或覆盖任何项目条目（`projects/*.yaml`）：写条目只有两条合法路径 —— `/supperH-init`（项目本体，走 `init-project.mjs`）与 `/supperH-driver`（数据源，走 `driver-registry.mjs`）；模板 `schemas/project.example.yaml` 不得被直接拷进私有根（那会造出长得象真配置的假值）
 - **禁止**把条目内容打印到终端（值只回显字段名 + 校验结果）
 - **禁止在 sync exit 2/3 后继续到步骤 4-5**（阻断优先）
 - **禁止修改用户 IDE 里 supper-Han-java 之外的插件**（Qoder 只写 `installed_plugins_v2.json` 中 key = `supper-Han-java` 那一项）
@@ -147,6 +147,7 @@ dist 状态: <built @ <ts> | not-built>
 | `/supperH-setup`（本命令） | **装到哪** — 探测 IDE + 拷贝 dist |
 | `/supperH-bootstrap` | **私有根骨架** — 只建目录 + `prefs.md`，不写任何条目 |
 | `/supperH-init` | **配什么** — 扫当前工作区 + 问用户，落 `projects/<code>.yaml`（结不接外部源都算答案）|
+| `/supperH-driver` | **接哪个源** — 随时往已注册条目里加 / 改 / 删一个外部数据源（槽位名由用户定，走 `driver-registry.mjs` 落盘）|
 | `node "{{TOOL_ROOT}}/scripts/sync-assets.mjs"` | **产物新鲜度** — 只在 L1 资产变更后需要；改注册条目**不需要**重跑（dist 与具体项目无关）。本命令内部会自动调 |
 
 > 命令里一律写 `node ".../scripts/X.mjs"` 而不是 `npm run X`：`npm run` 得从当前目录往上找 `package.json`，而 agent 的当前目录是**用户的 Java 工程**不是本仓库；它还会在脚本输出前后夹进自己的回显，而本流程的判据就是退出码与 stderr。`package.json` 里保留同名脚本当人手敲的别名（两条皆可，文档只写直调那一条）。例外：`npm install`（装依赖）与 `npm run setup:hooks`（实际是 `git config core.hooksPath .githooks`）仍走 npm —— 前者无脚本等价物，后者不在 agent 的 git 白名单里（R2），只能人自己在终端跑。

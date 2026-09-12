@@ -36,8 +36,8 @@ permission:
 1. 目标库必须是 `{{PROJECT.db.schemas.test}}`；否则拒写 → 返回 `code: DB_GATE_DENY`
 2. T4 用例**必须**加类级 `@Transactional`（或 `@Rollback`），杜绝脏数据留存
 3. 严禁使用 `@Commit`；严禁生产数据的 SQL fixture
-4. 若 `{{PROJECT.drivers.database.healthCheck}}` 不通过 → 跳过 T4 生成，返回 `code: DB_UNREACHABLE`（不阻断 T1-T3）
-5. 若本项目未接入数据库（解析器输出里没有 `db` 段，或没有 `drivers.database` 槽位）→ 与上条同一处置：跳过 T4，返回 `code: DB_UNREACHABLE` 并在 message 里注明“未接入数据库”。**不猜一个测试库名、不拿其它项目的 schema 凑、不把 token 字面量当值写进用例**
+4. 若 `{{PROJECT.dbDriver.healthCheck}}` 不通过 → 跳过 T4 生成，返回 `code: DB_UNREACHABLE`（不阻断 T1-T3）
+5. 若本项目未接入数据库（解析器输出里没有 `db` 段，或 `dbDriver` 为 `null`——它是按 `role: database` 解出的库通道别名，与那个槽位叫什么无关）→ 与上条同一处置：跳过 T4，返回 `code: DB_UNREACHABLE` 并在 message 里注明“未接入数据库”。**不猜一个测试库名、不拿其它项目的 schema 凑、不把 token 字面量当值写进用例**
 
 ## 工作流
 
@@ -78,4 +78,4 @@ permission:
 - 禁止改 `src/main/` 下任何文件
 - 禁止跳过 DB 安全校验生成 T4
 - 禁止用无 `@Transactional` 的 T4
-- 禁止硬编码真实账号/密码；DB 凭据由 driver 自身装载（driver 路径取 `{{PROJECT.drivers.database.impl}}`，解析器输出里已是展开完成的绝对路径，**不得再前置 drivers 根目录**），测试代码不接触
+- 禁止硬编码真实账号/密码；DB 凭据由 driver 自身装载（driver 路径取 `{{PROJECT.dbDriver.impl}}`，解析器输出里已是展开完成的绝对路径，**不得再前置 drivers 根目录**），测试代码不接触

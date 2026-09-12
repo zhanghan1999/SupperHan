@@ -302,15 +302,18 @@ export function scanProject(cwd) {
     // 没探测到的分支只能问用户（和 db.* 一样归入“必须问”清单）；答不出就不写该键。
     // 它不是“必须存在”：branches 在 schema 里可选，缺席 = 未登记分支映射（F-8）。
     branchesNeedsUserInput: BRANCH_KEYS.filter(k => !detected[k]),
-    // ---- 外部数据源：可选，不是注册硬前置（F-7）----
+    // ---- 外部数据源：可选，不是注册硬前置（F-7），且**槽位名单不由 L1 决定**（F-11）----
     // 命令层拿这几组字段问**一次多选**：一个都不选 = 纯代码模式（落盘时 db/drivers 整段不写）。
     // 旧形态只有 needsUserInput，且它在 commands/supperH-init.md 里被读成了"必答清单"——
     // 语义本来是"禁止脚本猜"，但字段名分不清"必须问"与"必须有"，于是"不接"这个合法答案
     // 只能落成 db.example.internal / example_prod 这种看着像配置的假值。
-    connectSlots: DRIVER_SLOTS,             // 可接的槽位；无默认值，一个都不自动接
-    connectDefault: [],
-    dbFieldsIfConnected: DB_VALUE_KEYS,     // 选了 database 才需要问；未选则一律不问
-    driverFieldsIfConnected: ['impl', 'healthCheck'],   // 选了非 database 槽位至少要给这两项
+    // 这里曾经返回 connectSlots: [四个写死的名字]，命令层照着摆菜单 —— 那等于把"一个项目最多
+    // 接四种外部源"当成了通用契约，第五种源在 schema 阶段就被拒。init 现在只回答两件事：
+    // 名字怎么起算合法、库信息挂到哪个槽位。真要加源走 /supperH-driver（可多次添加）。
+    connectNaming: { pattern: SLOT_KEY_RE.source, maxLength: 40, dbSlotDefault: DB_SLOT_NAME },
+    connectDefault: [],                     // 无默认值，一个都不自动接
+    dbFieldsIfConnected: DB_VALUE_KEYS,     // 接了库才需要问；没接则一律不问
+    driverFieldsIfConnected: ['desc', 'impl', 'healthCheck'],   // 每个自定义槽位至少要这三项
     // 兼容旧字段名（命令层若还在读它，语义 = 接 database 时禁止脚本猜的字段）
     needsUserInput: DB_VALUE_KEYS.slice(),
     // menu-learning source: always ask on first registration (no default, not skippable)
@@ -444,49 +447,110 @@ export function syncForbidWriteSchemas(text) {
 // 结构合法、validate 退 0、连通门禁因"0 个已配置驱动"自动放行 —— 三份机制全都看不出它没被配好。
 const DB_VALUE_KEYS = ['db.host', 'db.port', 'db.schemas.prod', 'db.schemas.uat', 'db.schemas.test',
                        'db.readonlyUser', 'db.writableUser'];
+// ---- 槽位名归用户（F-11）----
+// 这里曾写着 `const DRIVER_SLOTS = ['database','logs','tickets','efficiency']`：那份名单把
+// "一个项目最多接四种外部源"变成了 L1 契约，自定义槽位在 schema 阶段就退 2（实测
+// `$.drivers.<自定义名>: additional property not allowed`），而 `tickets`/`efficiency` 本身
+// 还是某家公司的产品类别（红线 R3 的 L2 泄漏）。现在键名只是标识符，唯一的语义承载是
+// `role: database`（全项目最多一个）——它才是"这条通道发的 SQL 要过禁写清单"的判据。
+const SLOT_KEY_RE  = /^[A-Za-z][A-Za-z0-9_-]{1,39}$/;   // 与 schemas/project.schema.yaml 的 patternProperties 同一判据
+const DB_SLOT_NAME = 'database';   // 仅是"库信息没处挂靠时的默认名"，不携带特权：特权在 role
+const DB_ROLE      = 'database';
 const isGiven = (x) => x !== undefined && x !== null && String(x).trim() !== '';
 const splitList = (raw) => (Array.isArray(raw) ? raw : String(raw ?? '').split(/[,，]/))
   .map(s => String(s).trim()).filter(Boolean);
+// 以下导出只给登记类入口复用（driver-registry.mjs）：槽位名判据与“人话描述”字段必须
+// 只有一处定义，否则 init 与 /supperH-driver 会跑出不一致的门禁（同一个仓库已经栽过两次）。
+export const SLOT_NAME_RE  = SLOT_KEY_RE;
+export const DATABASE_ROLE = DB_ROLE;
+export const DB_INFO_KEYS  = DB_VALUE_KEYS;
 
 /**
  * 从收集到的 --values 算出"这次到底接了哪些外部源"，以及这个决定是否完整。
- * 给了任意 db.* 值 = 要接 database（隐式登记，不必再在 connect 里重复一遍）。
- * @returns {{connect:string[], dbConfigured:boolean, unknown:string[],
- *            dbMissing:string[], driverMissing:Object<string,string[]>, ok:boolean}}
+ * 槽位名由用户给：这里只判"名字合法吗 / 必填齐吗 / 数据库通道是谁"，不判"在名单里吗"。
+ * 给了任意 db.* 值 = 要接库（隐式登记，不必再在 connect 里重复一遍）。
+ * @returns {{connect:string[], dbConfigured:boolean, dbSlot:string|null, badNames:string[],
+ *            dbMissing:string[], driverMissing:Object<string,string[]>, roleProblems:string[], ok:boolean}}
  */
 export function planConnections(values) {
   const v = values || {};
   const declared = [...new Set(splitList(v.connect))];
-  if (DB_VALUE_KEYS.some(k => isGiven(v[k])) && !declared.includes('database')) declared.push('database');
-  const unknown = declared.filter(s => !DRIVER_SLOTS.includes(s));
-  const dbMissing = declared.includes('database') ? DB_VALUE_KEYS.filter(k => !isGiven(v[k])) : [];
+  const dbConfigured = DB_VALUE_KEYS.some(k => isGiven(v[k]));
+  const roleSlots = declared.filter(s => String(v[`drivers.${s}.role`] ?? '').trim() === DB_ROLE);
+  const roleProblems = [];
+  if (roleSlots.length > 1) {
+    roleProblems.push(`${roleSlots.length} 个槽位同时标了 role: database（${roleSlots.join(', ')}）：写保护只能绑一个通道，两个就会不确定谁发 SQL，请只留一个`);
+  }
+  // 数据库通道归属：显式 role 优先；其次沿用键名 database（默认名，落盘时会补上显式 role，
+  // 让生成的配置不依赖"靠名字猜语义"）。既不猜也不静默造源：
+  //   只给了 db.*、一个槽位都没声明 → 挂靠默认名（该槽位不落盘，纯登记库信息，沿用 F-7 语义）；
+  //   给了 db.* 且声明了若干槽位但没人标 role → 问回来，不挑一个看起来像的。
+  let dbSlot = roleSlots[0] ?? (declared.includes(DB_SLOT_NAME) ? DB_SLOT_NAME : null);
+  if (!dbSlot && dbConfigured) {
+    if (!declared.length) { dbSlot = DB_SLOT_NAME; declared.push(DB_SLOT_NAME); }
+    else roleProblems.push(`给了 db.* 但声明的槽位（${declared.join(', ')}）里没有标 role: database 的：哪个通道发 SQL 不能靠猜，请给其中一个补 drivers.<槽位>.role: database`);
+  }
+  if (dbSlot && !dbConfigured) {
+    roleProblems.push(`drivers.${dbSlot} 标了 role: database 却没有任何 db.* 值：禁写清单（db.forbidWriteSchemas）拿不到库名，而空清单 = 任何库都不拦（写保护默认失效）`);
+  }
+  const badNames = declared.filter(s => !SLOT_KEY_RE.test(s));
+  const dbMissing = dbConfigured ? DB_VALUE_KEYS.filter(k => !isGiven(v[k])) : [];
   const driverMissing = {};
   for (const slot of declared) {
+    if (badNames.includes(slot)) continue;              // 名字本身不合法，再问字段没有意义
     const pre = `drivers.${slot}.`;
     const impl = v[pre + 'impl'], hc = v[pre + 'healthCheck'];
-    if (!isGiven(impl) && !isGiven(hc)) {
-      // database 允许"只登记库信息、暂不接驱动"（驱动文件晚点再放）；其余槽位本身就是驱动，没驱动就没内容
-      if (slot !== 'database') driverMissing[slot] = ['impl', 'healthCheck'];
-      continue;
-    }
-    const need = ['impl', 'healthCheck'].filter(f => !isGiven(v[pre + f]));
-    if (isGiven(v[pre + 'kind']) && String(v[pre + 'kind']).trim() === 'mcp' && !isGiven(v[pre + 'mcp.sources'])) {
-      need.push('mcp.sources');           // 白名单为空 = 什么都取不到，比不给 kind 更糟
+    const regOnly = !isGiven(impl) && !isGiven(hc);
+    // 数据库通道允许"只登记库信息、暂不接驱动"（驱动文件晚点再放）：此时该槽位整段不落盘，一个字都不欠。
+    // 其余槽位本身就是驱动，没驱动就没内容。
+    if (regOnly && slot === dbSlot) continue;
+    const need = isGiven(v[pre + 'desc']) ? [] : ['desc'];   // 人话描述：F-11 后唯一的"这个源是干什么的"来源
+    if (regOnly) need.push('impl', 'healthCheck');
+    else {
+      if (!isGiven(impl)) need.push('impl');
+      if (!isGiven(hc)) need.push('healthCheck');
+      if (isGiven(v[pre + 'kind']) && String(v[pre + 'kind']).trim() === 'mcp' && !isGiven(v[pre + 'mcp.sources'])) {
+        need.push('mcp.sources');         // 白名单为空 = 什么都取不到，比不给 kind 更糟
+      }
     }
     if (need.length) driverMissing[slot] = need;
   }
   return {
     connect: declared,
-    dbConfigured: declared.includes('database'),
-    unknown, dbMissing, driverMissing,
-    ok: !unknown.length && !dbMissing.length && !Object.keys(driverMissing).length,
+    dbConfigured, dbSlot, badNames,
+    unknown: badNames,                    // 旧字段名：一次改版周期内留给外部读取方，值同 badNames
+    dbMissing, driverMissing, roleProblems,
+    ok: !badNames.length && !dbMissing.length && !roleProblems.length && !Object.keys(driverMissing).length,
   };
+}
+
+/**
+ * 菜单来源的完整性关（与 planConnections 同纪律）：光问“选了哪一支”不够，
+ * 选了 database 却不答表名/列名时，模板里那套 `sys_menu` / `menu_id` / `path` 会原样留在
+ * 落盘文件里 —— 结构合法、过 schema、没人读得出它从未被回答过（F-7 的同形缺陷）。
+ * 而菜单这一路没有兼容网：`validate-project.mjs` 不读 `menus/*.yaml`，模板残留扫描也只盖 projects 条目。
+ * 可选键（slot / order / rootParentId / extraFilter）不进必填清单：没答 = 删行 = 走缺省，不会留假值。
+ */
+export function planMenuChoices(values) {
+  const v = values || {};
+  const src = isGiven(v['menu.source']) ? String(v['menu.source']).trim() : null;
+  if (!src) return { needed: false, ok: true, missing: [] };
+  if (src !== 'database' && src !== 'code') {
+    return { needed: true, ok: false, badSource: src, missing: [] };
+  }
+  const need = src === 'database'
+    ? ['menu.database.table', 'menu.database.columns.id', 'menu.database.columns.parentId',
+       'menu.database.columns.name', 'menu.database.columns.path']
+    : ['menu.code.path', 'menu.code.format'];
+  const missing = need.filter((k) => !isGiven(v[k]));
+  return { needed: true, ok: !missing.length, source: src, missing };
 }
 
 // 未提供的值写空串而不是 'undefined'：空串被 schema 的 minLength:1 拦下（进而是 validate 退 2），
 // 而 `host: 'undefined'` 会伪装成一个能用的主机名——那正是这一段要消灭的东西。
 const yq = (s) => "'" + String(s).replace(/'/g, "''") + "'";
 const yqv = (x) => yq(isGiven(x) ? String(x).trim() : '');
+export { yq as yamlQuote, yqv as yamlQuoteOrEmpty };
 
 function buildDbBlock(v) {
   const lines = [
@@ -505,13 +569,18 @@ function buildDbBlock(v) {
   return syncForbidWriteSchemas(lines.join('\n'));
 }
 
-function buildDriversBlock(v, slots) {
+/** 把一个槽位的字段列表渲染成 `  <slot>:` 开头的文本行（init 与 /supperH-driver 共用同一渲染顺序）。 */
+export function buildDriversBlock(v, slots, dbSlot) {
   const out = ['drivers:'];
   for (const slot of slots || []) {
     const pre = `drivers.${slot}.`;
     const impl = v[pre + 'impl'], hc = v[pre + 'healthCheck'];
     if (!isGiven(impl) && !isGiven(hc)) continue;          // 只登记了 db 信息、没接驱动
     out.push(`  ${slot}:`);
+    if (isGiven(v[pre + 'desc'])) out.push(`    desc: ${yqv(v[pre + 'desc'])}`);
+    // role 由"谁是数据库通道"这个结论决定，而不是由键名长得像不像决定：落盘必带显式 role，
+    // 否则下一个读配置的人只能靠 `database` 这个名字猜语义（F-11 收掉的正是这个隐性约定）。
+    if (slot === dbSlot) out.push(`    role: ${DB_ROLE}`);
     if (isGiven(impl)) out.push(`    impl: ${yqv(impl)}`);
     if (isGiven(hc))   out.push(`    healthCheck: ${yqv(hc)}`);
     if (isGiven(v[pre + 'kind']))     out.push(`    kind: ${String(v[pre + 'kind']).trim()}`);
@@ -521,6 +590,19 @@ function buildDriversBlock(v, slots) {
       out.push('    mcp:');
       if (isGiven(server))  out.push(`      server: ${yqv(server)}`);
       if (isGiven(sources)) out.push('      sources: [' + splitList(sources).map(yqv).join(', ') + ']');
+    }
+    // 写能力声明：整段缺席 = 只读源（缺席即语义）。写了就把 action/gate 两行都显式落下去，
+    // 缺哪项就写空串 —— 由 schema 的 enum 在 validate 阶段点名，不在这里二次判断以免规则漂移。
+    const writes = Array.isArray(v[pre + 'writes']) ? v[pre + 'writes'] : [];
+    if (writes.length) {
+      out.push('    writes:');
+      for (const w of writes) {
+        const it = (w && typeof w === 'object') ? w : {};
+        out.push(`      - action: ${yqv(it.action)}`);
+        out.push(`        gate: ${yqv(it.gate)}`);
+        if (isGiven(it.note))       out.push(`        note: ${yqv(it.note)}`);
+        if (isGiven(it.userPhrase)) out.push(`        userPhrase: ${yqv(it.userPhrase)}`);
+      }
     }
     const cfg = v[pre + 'config'];
     if (cfg && typeof cfg === 'object' && !Array.isArray(cfg)) {
@@ -578,7 +660,7 @@ export function applyConnectionChoices(text, values, conn) {
   const c = conn || planConnections(values);
   const v = values || {};
   let out = c.dbConfigured ? replaceSection(text, 'db', buildDbBlock(v)) : dropSection(text, 'db');
-  const drivers = buildDriversBlock(v, c.connect);
+  const drivers = buildDriversBlock(v, c.connect, c.dbSlot);
   if (drivers) out = replaceSection(out, 'drivers', drivers);
   else out = dropSection(out, 'drivers');
   return out;
@@ -628,6 +710,33 @@ export function renderConfig(exampleText, plan, values) {
 // NOTE: uses EXACT-indent matching (unlike renderConfig's whitespace-tolerant
 // regex) because `path` / `source` recur at different indent levels and a
 // shallower indent anchored with `\s*` would swallow a deeper line.
+//
+// 两条“缺席即语义”规矩（与 §10.12 / §10.15 同纪律，都是 setLine “没答就不改写” 的推论）：
+//  1) 未被选中的分支**整段删除**。旧实现只改写选中的那些行，于是 `source: code` 的项目
+//     会把模板里完整的 database 段（sys_menu / menu_id / …）带回家；日后按 architecture.md
+//     「换菜单来源只改这个文件」翻成 database 时，拿到的是一个长得像填好了、其实从没被回答过的表名列名。
+//  2) 可选键没答就**删行**，不留模板示例值。最要紧的是 `menu.database.slot`：F-10 之后库槽位名
+//     归用户，烤一个 `slot: database` 进去会让 /supperH-learn 去查一个本项目不存在的槽位（不报错，只是查不到）。
+//     有明示缺省的键（`limit` = 5000、`database.source` = menu）不在删行之列 —— 那不是假值，是文档里的缺省。
+const MENU_DROP_IF_ABSENT = [
+  { key: 'slot', indent: '  ' },
+  { key: 'order', indent: '    ' },
+  { key: 'rootParentId', indent: '  ' },
+  { key: 'extraFilter', indent: '  ' },
+];
+
+/** 删除一个顶格密钥所属的**整段**（含段内缩进行与属于它的注释行）。 */
+function dropTopBlock(text, key) {
+  const eol = /\r\n/.test(text) ? '\r\n' : '\n';
+  const out = [];
+  let skipping = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^[^\s#]/.test(line)) skipping = line.startsWith(key + ':');
+    if (!skipping) out.push(line);
+  }
+  return out.join(eol);
+}
+
 function renderMenuConfig(exampleText, plan, values) {
   const v = values || {};
   const setLine = (text, key, val, indent) => {
@@ -635,6 +744,10 @@ function renderMenuConfig(exampleText, plan, values) {
     const ind = indent || '';
     const esc = String(val).replace(/"/g, '\\"');
     return text.replace(new RegExp(`^(${ind}${key}[ \\t]*:[ \\t]*).*?$`, 'm'), `$1"${esc}"`);
+  };
+  const dropLine = (text, key, indent) => {
+    const ind = indent || '';
+    return text.replace(new RegExp(`^${ind}${key}[ \\t]*:.*?\\r?\\n`, 'm'), '');
   };
   let out = exampleText;
   // identity + source
@@ -657,6 +770,20 @@ function renderMenuConfig(exampleText, plan, values) {
   // code branch
   out = setLine(out, 'path',   v['menu.code.path'],   '  ');
   out = setLine(out, 'format', v['menu.code.format'], '  ');
+  // ---- 缺席即语义：没答的可选键删行，未被选中的分支删段 ----
+  const optionalOf = {
+    slot:         'menu.database.slot',
+    order:        'menu.database.columns.order',
+    rootParentId: 'menu.database.rootParentId',
+    extraFilter:  'menu.database.extraFilter',
+  };
+  for (const { key, indent } of MENU_DROP_IF_ABSENT) {
+    const val = v[optionalOf[key]];
+    if (val === undefined || val === null || String(val).trim() === '') out = dropLine(out, key, indent);
+  }
+  const src = v['menu.source'];
+  if (src === 'database') out = dropTopBlock(out, 'code');
+  else if (src === 'code') out = dropTopBlock(out, 'database');
   return out;
 }
 
@@ -683,7 +810,6 @@ function buildMenuConfig(plan, values) {
 // No pre-flight slot here (vpnPreCheck used to be one): a separate "is the network up"
 // probe can only look at things that are not evidence - see docs/architecture.md §10.8.
 // Each slot's own healthCheck is the probe, because only it speaks the real protocol.
-const DRIVER_SLOTS = ['database', 'logs', 'tickets', 'efficiency'];
 const MCP_SHELL      = path.join(TOOL_ROOT, 'mcp-skeleton', 'shell.py');
 const MCP_SHELL_REL  = 'mcp-skeleton/shell.py';
 
@@ -798,7 +924,9 @@ export function probeDrivers(cfgText, code, privateRoot) {
   }
   const drivers = expandDrivers(parsed, { privateRoot, toolRoot: TOOL_ROOT, code }) || {};
   const results = [];
-  for (const slot of DRIVER_SLOTS) {
+  // 遍历配置里**实际存在的**槽位，而不是一个名单（F-11）。旧形态 for (const slot of DRIVER_SLOTS)
+  // 不报错也不警告：自定义槽位的驱动文件根本不进连通门禁，“配了但永不被探”与“配了且健康”同形。
+  for (const slot of Object.keys(drivers).sort()) {
     const slotCfg = drivers[slot];
     const impl = typeof slotCfg?.impl === 'string' ? slotCfg.impl.trim() : '';
     if (!impl) continue;
@@ -841,17 +969,20 @@ export function initWrite({ cwd, values, force = false } = {}) {
   const conn = planConnections(v);
   if (!conn.ok) {
     const problems = [
-      conn.unknown.length
-        ? `connect 含未知槽位：${conn.unknown.join(', ')}（可选项只有 ${DRIVER_SLOTS.join(' / ')}）` : '',
+      conn.badNames.length
+        ? `槽位名不合法：${conn.badNames.join(', ')}（须匹配 ${SLOT_KEY_RE.source}；名字由你定，但得能当 YAML 键用）` : '',
+      ...conn.roleProblems,
       conn.dbMissing.length
-        ? `声明接入 database，但这些值没给：${conn.dbMissing.join(', ')}` : '',
+        ? `接入数据库通道（drivers.${conn.dbSlot}），但这些值没给：${conn.dbMissing.join(', ')}` : '',
       ...Object.entries(conn.driverMissing).map(([s, need]) =>
         `声明接入 drivers.${s}，但缺：${need.map(f => `drivers.${s}.${f}`).join(', ')}`),
     ].filter(Boolean);
     return {
       ok: false, exitCode: 2, error: 'connection-choices-incomplete',
       code: plan.code, problems, scan: plan,
-      hint: '不接外部源就一个都别选（省略 connect 与 db.*）：落盘时 db/drivers 两段会被整段删掉，不会留下 example_* 模板假值。',
+      hint: '不接外部源就一个都别选（省略 connect 与 db.*）：落盘时 db/drivers 两段会被整段删掉，不会留下 example_* 模板假值。' +
+        '接了的每个槽位都要 desc（人话描述：这个源是什么、从哪里进去）：F-11 后槽位名归用户，' +
+        '名字不再携带语义，后来的 agent 只能靠 desc 判断该不该用它。',
     };
   }
   plan.connections = conn;
@@ -868,6 +999,20 @@ export function initWrite({ cwd, values, force = false } = {}) {
       ok: false, exitCode: 22, error: 'menu-source-required',
       code: plan.code, menuConfigFile: menuTarget, scan: plan,
       hint: 'first registration must specify menu.source (database|code) via --values; --force does not bypass this.',
+    };
+  }
+  // 选了哪一支 → 那支的必填项必须逐条有值（脚本不补默认值，因为模板里那些值看着完全合法）。
+  const menuPlan = planMenuChoices(v);
+  if (!menuPlan.ok) {
+    return {
+      ok: false, exitCode: 2, error: 'menu-choices-incomplete', code: plan.code,
+      menuConfigFile: menuTarget, scan: plan,
+      problems: menuPlan.badSource
+        ? [`menu.source 非法：${menuPlan.badSource}（只认 database | code）`]
+        : [`菜单来源选了 ${menuPlan.source}，但这些值没给：${menuPlan.missing.join(', ')}`],
+      hint: '不答就换一个选项（选 code 只需菜单定义文件路径与格式）：禁止沿用模板示例值。' +
+        '这些字段会决定 /supperH-learn 跑哪条 SELECT、查哪个列名，写错不是“学不到”而是“学到错的菜单索引”。' +
+        '（`menu.database.slot` 可省：不写 = 用数据库通道，那个槽位叫什么由你定。）',
     };
   }
 
@@ -907,8 +1052,11 @@ export function initWrite({ cwd, values, force = false } = {}) {
   cfgText = decided.text;
 
   // Informational (never affects the gate/exit code): which registered drivers are
-  // not usable right now. Absent logs/tickets drivers mean /supperH-bug fast-path
-  // step F1.4 (traceId / ticketNo anchor-lookup) will fall back to the full path.
+  // not usable right now. F-11: this script cannot say "the anchor-lookup driver is
+  // ready", because it no longer knows which slot plays that role - slot names belong
+  // to the user, and /supperH-bug step F1.4 picks the lookup slot by reading each
+  // slot's `desc` at runtime. So the honest signal is about *candidates*: zero healthy
+  // drivers means F1.4 can only fall back to the full path.
   const driversAbsent     = gated.filter(p => !p.present).map(p => p.impl);
   const driversUnreachable = configured.filter(p => !p.reachable).map(p => p.impl);
   // 一个驱动都没登记时不得报 'ready'：那会把“没有可查的源”读成“查得到且健康”。
@@ -917,8 +1065,9 @@ export function initWrite({ cwd, values, force = false } = {}) {
     absent: driversAbsent,
     unreachable: driversUnreachable,
     anchorLookup: noDrivers ? 'n/a (no external driver registered)'
-      : driversAbsent.length === 0 && driversUnreachable.length === 0 ? 'ready'
-      : 'degraded (fast-path F1.4 traceId/ticketNo lookup will fall back to full path for any driver below)'
+      : driversAbsent.length === 0 && driversUnreachable.length === 0
+        ? 'candidates ready (every registered slot passed its healthCheck; which one serves F1.4 is decided at runtime by `desc`)'
+      : 'degraded (any driver below is unavailable, so fast-path F1.4 anchor-lookup may fall back to full path)'
   };
 
   const result = {
@@ -926,7 +1075,7 @@ export function initWrite({ cwd, values, force = false } = {}) {
     menuConfigFile: menuTarget, menuWritten,
     // 接入决定入结果：命令层要能原样告诉用户“本次没接任何外部源”，而不是沉默退 0
     connections: {
-      declared: conn.connect, dbConfigured: conn.dbConfigured,
+      declared: conn.connect, dbConfigured: conn.dbConfigured, dbSlot: conn.dbSlot ?? null,
       mode: conn.connect.length ? 'connected' : 'code-only',
     },
     // 分支映射同样得说出来（F-8）：答不出的键不写 = 盘上缺席，这是合法运行态而不是错误，

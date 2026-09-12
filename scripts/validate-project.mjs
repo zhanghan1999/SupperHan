@@ -2,8 +2,9 @@
 // Load and structurally validate project config(s) against project.schema.yaml.
 // Minimal JSON-Schema-style validator covering: type, required, enum, const,
 // pattern, minItems, minLength/maxLength, uniqueItems, additionalProperties:false,
-// oneOf, $ref. It has NO if/then/allOf, so cross-field rules that need them live in
-// checkDriverChannels() below rather than being written into the schema as a lie.
+// patternProperties, oneOf, $ref. It has NO if/then/allOf, so cross-field rules that
+// need them live in checkDriverChannels() / checkWriteDeclarations() below rather than
+// being written into the schema as a lie.
 //
 // Registry-aware (multi-project layout):
 //   no args            validate EVERY <PRIVATE_ROOT>/projects/<code>.yaml
@@ -113,11 +114,16 @@ function validate(node, schema, root, pathStr, errors) {
     if (Array.isArray(schema.required)) {
       for (const k of schema.required) if (!(k in node)) errors.push(`${pathStr}.${k}: required field missing`);
     }
-    if (schema.properties) {
-      for (const k of Object.keys(node)) {
-        if (schema.properties[k]) validate(node[k], schema.properties[k], root, `${pathStr}.${k}`, errors);
-        else if (schema.additionalProperties === false) errors.push(`${pathStr}.${k}: additional property not allowed`);
-      }
+    // patternProperties: 键名由数据自己决定（外部数据源的槽位名归用户，F-10），schema 只约束
+    // 值的形状。必须先于 additionalProperties 判：否则一个合法的自由键名会被报成
+    // "additional property not allowed"——那堵墙正是本次要拆的东西。
+    const props = schema.properties || {};
+    const pats  = Object.entries(schema.patternProperties || {}).map(([re, sub]) => [new RegExp(re), sub]);
+    for (const [k, val] of Object.entries(node)) {
+      if (props[k]) { validate(val, props[k], root, `${pathStr}.${k}`, errors); continue; }
+      const hit = pats.find(([re]) => re.test(k));
+      if (hit) { validate(val, hit[1], root, `${pathStr}.${k}`, errors); continue; }
+      if (schema.additionalProperties === false) errors.push(`${pathStr}.${k}: additional property not allowed`);
     }
   }
   if (schema.oneOf) {
@@ -154,13 +160,30 @@ function registryFiles(info) {
 }
 
 // ---- cross-field rules the minimal validator cannot express (no if/then/allOf) ----
-// Slots the contract used to declare but no longer acts on. They stay parseable on
-// purpose: `drivers` is additionalProperties:false, so deleting a key outright would
-// make every already-registered project.yaml fail validation overnight. A warning
-// with the reason is the retirement path; the file keeps working until the owner removes it.
+// Retired slot names the contract no longer acts on. Since F-10 the whole key is
+// free-form, so these files never *fail* on such a key - the warning is what keeps the
+// retirement honest (the alternative, re-closing the list, is the defect we just removed).
 const DEPRECATED_DRIVER_SLOTS = {
   vpnPreCheck: 'drivers.vpnPreCheck 已废弃：执行前预检经实测无效（零信任网关对 VPN 网段任意端口都代答 accept，端口/网卡/ICMP 均不是可达性证据）。连通性只由各槽位自己的 healthCheck 退出码事后判定，请删除该槽位',
 };
+
+// 哪个槽位是关系库通道：唯一还依赖“名字”的地方。
+// 显式 `role: database` 为准；槽位恰好叫 database 时按同义处理（存量兼容），但报出来，
+// 因为“靠键名猜语义”正是 F-10 要收掉的那类隐性约定。
+export function dbRoleSlot(data) {
+  const drivers = data?.drivers;
+  if (!drivers || typeof drivers !== 'object') return null;
+  // 按键名排序再取首：多个槽位同时带 role 本身就是错（下面报错），但“哪个算库”在报错的
+  // 那份文件被修好之前也得有确定答案——Object.entries 的顺序就是 YAML 里的书写顺序，
+  // 不排序会让两个内容完全同形、只是键序不同的文件得到不同的库通道，而它们下游都会退 0。
+  const hits = Object.entries(drivers)
+    .filter(([, cfg]) => cfg && typeof cfg === 'object' && cfg.role === 'database')
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (hits.length) return { slot: hits[0][0], cfg: hits[0][1], explicit: true, all: hits.map(([k]) => k) };
+  const legacy = drivers.database;
+  if (legacy && typeof legacy === 'object') return { slot: 'database', cfg: legacy, explicit: false, all: ['database'] };
+  return null;
+}
 
 function checkDriverChannels(data) {
   const errors = [], warnings = [];
@@ -169,6 +192,11 @@ function checkDriverChannels(data) {
   for (const [slot, cfg] of Object.entries(drivers)) {
     if (!cfg || typeof cfg !== 'object') continue;
     if (DEPRECATED_DRIVER_SLOTS[slot]) warnings.push(DEPRECATED_DRIVER_SLOTS[slot]);
+    // 没描述 = 这个槽位对下一个读它的 agent 是个谜：F-11 后键名归用户，名字不再携带语义。
+    // 只告警不退 2（存量条目得继续加载），但写入门禁不带 desc 是不让登记的。
+    if (!(typeof cfg.desc === 'string' && cfg.desc.trim())) {
+      warnings.push(`drivers.${slot} 没有 desc（这个源是什么、从哪里进去）：新登记必须带（/supperH-driver 与 init 会拦），存量条目请补上`);
+    }
     const kind = cfg.kind ?? 'script';
     if (!['script', 'mcp'].includes(kind)) continue;   // enum already reported above
     if (kind === 'mcp') {
@@ -186,6 +214,49 @@ function checkDriverChannels(data) {
       }
     } else if (cfg.mcp) {
       errors.push(`drivers.${slot}.mcp 仅在 kind=mcp 时有意义（当前 kind=script）：要么删掉 mcp 段，要么改 kind`);
+    }
+  }
+  return { errors, warnings };
+}
+
+// 写能力声明的完整性（F-11）。为什么不能只靠 schema：一个动作该“问人 / 直接拒”是
+// 跨字段语义（action ↔ gate ↔ role ↔ db 段），而本仓库的极简校验器没有 if/then/allOf。
+// 这里每一条都是 fail-closed：宁可退 2 让人来补声明，也不允许“看着配好了其实写保护
+// 从未生效”——那是 F-7 / F-8 反复出现过的同一类形态。
+export function checkWriteDeclarations(data) {
+  const errors = [], warnings = [];
+  const drivers = data?.drivers;
+  if (!drivers || typeof drivers !== 'object') return { errors, warnings };
+  const role = dbRoleSlot(data);
+  if (role?.explicit && role.all.length > 1) {
+    errors.push(`${role.all.length} 个槽位同时声明了 role: database（${role.all.join(', ')}）：写保护只能绑一个通道，两个就会不确定谁发 SQL。请只留一个（其余删 role）`);
+  }
+  if (role && !role.explicit) {
+    warnings.push('槽位 drivers.database 靠键名充当数据库通道：请补 `role: database` 显式声明（F-10 后键名对用户自由，靠名字猜语义不再是可靠的约定）');
+  }
+  for (const [slot, cfg] of Object.entries(drivers)) {
+    if (!cfg || typeof cfg !== 'object') continue;
+    const isDb = role?.slot === slot;
+    const writes = Array.isArray(cfg.writes) ? cfg.writes : null;
+    if (!writes) continue;                                  // 整段不写 = 只读源（缺席即语义，合法）
+    const seen = new Set();
+    for (const [i, w] of writes.entries()) {
+      if (!w || typeof w !== 'object') continue;             // 类型错已由 schema 报
+      const at = `drivers.${slot}.writes[${i}]`;
+      if (w.action === 'sql_write' && !isDb) {
+        errors.push(`${at}.action=sql_write 但该槽位不是数据库通道（role: database）：禁写清单只对数据库通道比对，这样声明等于把写保护开给一个没人拦的通道。要么给它补 role: database（全项目最多一个），要么改动作类别`);
+      }
+      if (isDb && w.action && w.action !== 'sql_write' && w.action !== 'other') {
+        errors.push(`${at}.action=${w.action} 对数据库通道无意义（它只能发 SQL）：要么该动作属于另一个源，要么这个槽位不该带 role: database`);
+      }
+      if (w.action === 'other' && !(typeof w.userPhrase === 'string' && w.userPhrase.trim())) {
+        errors.push(`${at}: action=other 必须带 userPhrase（用户原话）。归类是问出来的，不记原话就下次还会靠模型现场猜一次，而猜中的那次看不出来`);
+      }
+      const key = String(w.action ?? '');
+      if (key && seen.has(key)) {
+        errors.push(`${at}: action=${key} 在同一槽位出现多次：一个动作只能有一个门槛，两份声明 = 未决，运行期该听哪条没有答案`);
+      }
+      seen.add(key);
     }
   }
   return { errors, warnings };
@@ -236,19 +307,57 @@ function checkTemplateResidue(data) {
   return errors;
 }
 
-// db 与 drivers.database 必须彼此成立。两个方向严重程度不同（与 schema 的 description 一致）：
-//   有驱动没 db 段 = 错误。ReadOnlyGuard 拿不到 forbidWriteSchemas 清单，而空清单是一条都不拦（
+// db 段与数据库角色槽位必须彼此成立（绑定靠 role，不再靠键名，F-10）。两个方向严重程度不同：
+//   有数据库通道没 db 段 = 错误。ReadOnlyGuard 拿不到 forbidWriteSchemas 清单，而空清单是一条都不拦（
 //   mcp-skeleton/supperh_contract/guards.py: select_only_guard），等于把写保护默认关掉；
-//   有 db 段没驱动 = 警告。库信息是事实（环境名、禁写清单都在），只是暂时没通道去读它。
+//   有 db 段没数据库通道 = 警告。库信息是事实（环境名、禁写清单都在），只是暂时没通道去读它。
 function checkDbDriverCoherence(data) {
   const errors = [], warnings = [];
   const hasDb = !!(data?.db && typeof data.db === 'object');
-  const hasDbDriver = !!(data?.drivers && typeof data.drivers === 'object' && data.drivers.database);
-  if (hasDbDriver && !hasDb) {
-    errors.push('drivers.database 已登记但项目没有 db 段：ReadOnlyGuard 与 bug-dev 的 DB 门禁拿不到 forbidWriteSchemas 清单，而空清单 = 任何库都不拦（写保护默认失效）。要么补 db，要么删掉该槽位');
+  const role = dbRoleSlot(data);
+  if (role && !hasDb) {
+    errors.push(`drivers.${role.slot}（role: database）已登记但项目没有 db 段：ReadOnlyGuard 与 bug-dev 的 DB 门禁拿不到 forbidWriteSchemas 清单，而空清单 = 任何库都不拦（写保护默认失效）。要么补 db，要么删掉该 role 声明`);
   }
-  if (hasDb && !hasDbDriver) {
-    warnings.push('项目登记了 db 但没有 drivers.database：没有任何通道能连上它，DB 取数与 DB 门禁在运行期不可用（不阻断；纯代码模式可以接受）');
+  if (hasDb && !role) {
+    warnings.push('项目登记了 db 但没有 role: database 的槽位：没有任何通道能连上它，DB 取数与 DB 门禁在运行期不可用（不阻断；纯代码模式可以接受）');
+  }
+  return { errors, warnings };
+}
+
+/**
+ * 对一份**内存里的**文档跑完所有规则：schema + 跨字段。
+ * 抽出来是为了给写入门禁复用（driver-registry.mjs add/update/remove）：登记路径必须先算出
+ * “改完之后的文档”再判一次，有错就不落盘。只靠“写完再跑 validate”等于先把非法配置写进
+ * 私有根，再告诉用户它非法——而私有根是运行期唯一读的地方。
+ * @param {object} schema loadSchema() 的结果
+ * @param {{expectCode?:string|null}} [meta] 文件名约定检查（不知道文件名时省略即可）
+ * @returns {{errors:string[], warnings:string[]}}
+ */
+export function checkDocument(data, schema, meta = {}) {
+  const errors = [], warnings = [];
+  if (!data || typeof data !== 'object') return { errors: ['文件为空或不是 mapping'], warnings };
+  errors.push(...validateAgainstSchema(data, schema));
+  const chan = checkDriverChannels(data);
+  errors.push(...chan.errors);
+  warnings.push(...chan.warnings);
+  errors.push(...checkWriteGuard(data));
+  errors.push(...checkTemplateResidue(data));
+  const writeDecl = checkWriteDeclarations(data);
+  errors.push(...writeDecl.errors);
+  warnings.push(...writeDecl.warnings);
+  const cohere = checkDbDriverCoherence(data);
+  errors.push(...cohere.errors);
+  warnings.push(...cohere.warnings);
+  const want = schema.properties?.schemaVersion?.const;
+  if (want !== undefined && data.schemaVersion !== want) {
+    errors.push(`schemaVersion: got ${JSON.stringify(data.schemaVersion)}, expected ${want}`);
+  }
+  const code = data?.identity?.code ?? null;
+  if (!code) {
+    errors.push('identity.code 缺失/为空 —— resolve-project 会静默跳过该文件（表现为已注册却报 exit 10 未注册）');
+  }
+  if (meta.expectCode && code && meta.expectCode !== code) {
+    warnings.push(`文件名 '${meta.expectCode}.yaml' ≠ identity.code '${code}'（不阻断；约定由 /supperH-init 与 migrate-registry.mjs 保证）`);
   }
   return { errors, warnings };
 }
@@ -257,28 +366,10 @@ function checkOne(entry, schema) {
   const res = { file: entry.file, code: null, errors: [], warnings: [] };
   const loaded = loadProjectFile(entry.file);
   if (!loaded.ok) { res.errors.push(loaded.error); return res; }
-  const data = loaded.data;
-  if (!data || typeof data !== 'object') { res.errors.push('文件为空或不是 mapping'); return res; }
-  res.code = data?.identity?.code ?? null;
-  res.errors.push(...validateAgainstSchema(data, schema));
-  const chan = checkDriverChannels(data);
-  res.errors.push(...chan.errors);
-  res.warnings.push(...chan.warnings);
-  res.errors.push(...checkWriteGuard(data));
-  res.errors.push(...checkTemplateResidue(data));
-  const cohere = checkDbDriverCoherence(data);
-  res.errors.push(...cohere.errors);
-  res.warnings.push(...cohere.warnings);
-  const want = schema.properties?.schemaVersion?.const;
-  if (want !== undefined && data.schemaVersion !== want) {
-    res.errors.push(`schemaVersion: got ${JSON.stringify(data.schemaVersion)}, expected ${want}`);
-  }
-  if (!res.code) {
-    res.errors.push('identity.code 缺失/为空 —— resolve-project 会静默跳过该文件（表现为已注册却报 exit 10 未注册）');
-  }
-  if (entry.expectCode && res.code && entry.expectCode !== res.code) {
-    res.warnings.push(`文件名 '${entry.expectCode}.yaml' ≠ identity.code '${res.code}'（不阻断；约定由 /supperH-init 与 migrate-registry.mjs 保证）`);
-  }
+  res.code = loaded.data?.identity?.code ?? null;
+  const doc = checkDocument(loaded.data, schema, { expectCode: entry.expectCode });
+  res.errors.push(...doc.errors);
+  res.warnings.push(...doc.warnings);
   return res;
 }
 

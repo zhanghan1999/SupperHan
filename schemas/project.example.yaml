@@ -73,25 +73,35 @@ build:
 
 # ────────────────────────────────────────────────────────────────
 # drivers（可选）：只登记真实存在的私有驱动，没接的槽位不写进文件。
+# 槽位名与个数全由用户定（下面两个名字只是这一份示例自己起的，不是一份“可用的源”名单：
+# L1 不持有任何这样的名单，加第 N 个源不需改本文件，走 /supperH-driver 登记即可）。
+# 每个槽位的 desc 必填（新登记不给会退 2）：运行期 L1 只能靠那句话判断“这个源是干什么的”。
 # 每个槽位的 healthCheck 就是它的连通性判据：必须真说协议（DB 用配置里的账号连一次；
 # HTTP 发一个请求，拿到任何状态码都算“服务在场”，401/403 则说明只缺凭据 = exit 4）。
 # 不要写 ping / 网卡名 / 裸 TCP connect 当判据：零信任隧道网关对 VPN 网段的**任意端口**
 # 都本地代答 accept，那些写法在 VPN 断了的情况下依旧报绿灯（实测见 docs/architecture.md §10.8）。
-# 非 database 槽位必须同时给 impl + healthCheck（没驱动 = 这个源不存在）；database 槽位
+# 没标 role 的槽位必须同时给 desc + impl + healthCheck（没驱动 = 这个源不存在）；数据库通道
 # 可以缺席（只登记库信息、暂不接通道 → validate 警告“没有通道能连上它”，不阻断）。
 # 没有"跑其它 driver 前先统一预检一次"的槽位（原 vpnPreCheck，已删）：预检能测的东西
 # 都不是证据（见上），而真证据已经在各槽位 healthCheck 里。旧 project.yaml 里残留该段
 # 仍可解析，但 validate 会报废弃警告。
 # 调用通道缺省 script（bash + 退出码 0-5，唯一可做分流的通道）。需要时才取消注释：
 # drivers:
-#   database:
+#   bizdb:
+#     desc: "业务主库：DB 取证与写保护都走它"
+#     role: database           # 声明“SQL 从这里出口”，全项目最多一个（多个 → validate 退 2）
 #     impl: "<DRIVERS_ROOT>/<code>/db-query.py"
 #     healthCheck: "<DRIVERS_ROOT>/<code>/db-query.py --project <code> --health"
-#   logs:
+#   trace:
+#     desc: "日志检索：按 trace_id 找回一次请求的全部日志"
 #     impl: "<DRIVERS_ROOT>/<code>/logs.py"
 #     healthCheck: "<DRIVERS_ROOT>/<code>/logs.py --project <code> --health"
 #     config:
 #       indexPattern: <app-logs-*>       # 自由格式：driver 自己的额外参数
+#     writes:                            # 不写这一段 = 只读源，对它提任何修改动作一律拒
+#       - action: message_send           # 封闭词表：sql_write / message_send / status_change /
+#         gate: confirm                  #   file_upload / config_change / other（other 必须带 userPhrase）
+#         note: "把排查结论作为评论发到工单上"   # 给用户看确认文案时用的具体描述
 #     kind: mcp            # 只换取数通道；上面两行仍是本地脚本，连通判定不交给 MCP
 #     fallback: script     # server 不可用时回 script；回不回由注册期探测决定，不由模型判断
 #     mcp:

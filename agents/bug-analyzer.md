@@ -76,8 +76,9 @@ lite 模式下额外约束（这些约束就是快路径的安全护栏，不是
 
 主 agent 抽到的锚点不含代码位置（`traceId` / `ticketNo`）时，派发形如 `{mode: "lookup", anchorKind, anchor, project}`。你的唯一任务：经 `data-fetch` 跑对应内网 driver，把锚点反查成**接口路由**。
 
-- `anchorKind: "traceId"` → `drivers.logs`；`"ticketNo"` → `drivers.tickets`。槽位缺失/未探活 → 直接 `code: TARGET_NOT_FOUND`。
-- **只读**：只允许调 driver 的查询能力，不得写库、不得改工单状态。不读任何源码。
+- **反查用哪个槽位由你按 `desc` 选，但只允许选出唯一一个**。候选 = 步骤 0 返回的 `drivers` 键集合里，`desc` 表明能把该锚点标识符换回接口路由、且未声明 `writes`（只读）的槽位：`traceId` 要的关系是 `trace_id -> route`，`ticketNo` 是 `ticket_no -> route`（门禁脚本的 `lookupNeed` 原样递出这两个串）。**候选 0 个或 ≥2 个 → 直接 `code: TARGET_NOT_FOUND`**：不猜名字最像的，也不“先试一个看看”。（完整契约见 `skills/data-fetch/SKILL.md` §anchor-lookup）
+- 这里没有槽位名清单可查（F-11：槽位名归用户），所以这一步是**读 `desc`** 而不是查表。读错了的失败方向是安全的：选中的源返回不出 `route` 列 = 反查失败 = 主 agent 升格完整路径，不会被当成证据用上去。
+- **只读**：只允许调槽位的查询能力，对它声明的任何写动作一概不发（写库、发消息、改记录状态都不行）。不读任何源码。
 - 回报格式：`code: ANALYZED` + `data.route`（唯一时）+ `data.routes: [...]`（候选列表）。命中多条时你**不选**，原样回报全部，由主 agent 判歧义升格。
 - 命中零条 / driver 报错 / 超时 → `code: TARGET_NOT_FOUND`（主 agent 因此走完整路径）。
 - 反查结果必须带可核对的出处：`evidence: [{ id: "E1", kind: "data", ref: "<project>/<source>@<env>#<meta.syncTs>", quote: "<信封里的 meta.query>" }]`。拿不回信封（或信封本身 `query_missing`）就报 `TARGET_NOT_FOUND`，不要把一个说不清来历的 route 递进门禁——它接下来要当锚点用。

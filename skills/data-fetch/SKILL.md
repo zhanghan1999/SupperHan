@@ -1,6 +1,6 @@
 ---
 name: data-fetch
-description: supperH 统一数据获取协议 skill。定义"从注册数据源取结构化数据 → 过滤 → 归一化输出"的四段流水线，被所有需要读 DB / 日志 / 工单 / 效能数据的 agent 与命令共同引用。
+description: supperH 统一数据获取协议 skill。定义"从注册数据源取结构化数据 → 过滤 → 归一化输出"的四段流水线，被所有需要从注册源取数的 agent 与命令共同引用（数据库只是其中一种源）。
 ---
 
 # skill: data-fetch
@@ -11,20 +11,20 @@ description: supperH 统一数据获取协议 skill。定义"从注册数据源�
 
 ## 目标
 
-给所有需要"从外部世界拿数据"的场景（SQL 查询、日志检索、工单拉取、研发指标）提供**同一份调用协议**，让 agent 侧不用关心具体内网实现。
+给所有需要"从外部世界拿数据"的场景提供**同一份调用协议**——不管是发 SQL、按 traceId 检索日志、拉外部平台的记录，还是用户自己登记的其它检索类源（叫什么、有几个都不固定）。一句话能成立是因为这四个动作的形状完全一样：定住一个源 → 查一道语句 → 拿回行集。agent 侧因此不用关心具体内网实现。
 
 ## 数据源注册表
 
-数据源**不由本仓库定义**；由 `{{PRIVATE_ROOT}}/projects/<code>.yaml` 的 `drivers` 段声明。本 skill 只规定**槽位名称**与**每槽位的调用契约**。
+数据源**不由本仓库定义**：有几个、叫什么、干什么用，全部由 `{{PRIVATE_ROOT}}/projects/<code>.yaml` 的 `drivers` 段决定（槽位名归用户，经 `/supperH-driver` 登记）。本 skill 只规定**槽位的形状**与**每槽位的调用契约**，不列也不假设槽位名清单。
 
-| 槽位 | 注册条目路径 | 用途 | 一期是否强制 |
-|------|------------------|------|-------------|
-| database | `{{PROJECT.drivers.database}}` | SQL 类只读/可写查询 | **是**（DB 门禁依赖） |
-| logs | `{{PROJECT.drivers.logs}}` | 日志检索（例：某段时间某 trace_id 的全部日志） | 否 |
-| tickets | `{{PROJECT.drivers.tickets}}` | 工单/需求/缺陷平台拉取 | 否 |
-| efficiency | `{{PROJECT.drivers.efficiency}}` | 研发效能指标（构建耗时、覆盖率、流水线状态） | 否 |
+L1 里唯一被赋予机器语义的是 `role: database`（全项目最多一个）：它是写保护绑定的那个通道。其余槽位对 L1 就是“某个用户命名的源”——判它是什么要读它的 `desc`，不是猜名字。
 
-每个槽位的值是 `{impl, healthCheck, config?, kind?, fallback?, mcp?}`；`impl` 指向可执行脚本（Python/Shell/Node 皆可），`healthCheck` 是**协议级**探活命令（真连一次后端，不是 ping/端口探测），`kind` 决定取数走哪条通道（缺省 `script`）。通道的完整形状与 exit code ↔ JSON-RPC error code 对照见 `skills/driver-contract/SKILL.md` §调用通道。
+| 要找什么 | 怎么定位（不看名字） | 是否强制 |
+|---|---|---|
+| 数据库通道（能发 SQL 的那个） | 解析器输出里的 `dbDriver` 别名（按 `role: database` 解出来；未接入时为 `null`） | 否（纯代码模式可以一个源都没有）；但**有 `db` 段却没这个通道 = 写保护没有可绑的出口**，一律拒写 |
+| 其它任意源 | `drivers.<槽位名>`，槽位名从解析器返回的 `drivers` 键集合里取，用途看各槽位的 `desc` | 否 |
+
+每个槽位的值是 `{desc, impl, healthCheck, config?, role?, writes?, kind?, fallback?, mcp?}`；`impl` 指向可执行脚本（Python/Shell/Node 皆可），`healthCheck` 是**协议级**探活命令（真连一次后端，不是 ping/端口探测），`kind` 决定取数走哪条通道（缺省 `script`）。通道的完整形状与 exit code ↔ JSON-RPC error code 对照见 `skills/driver-contract/SKILL.md` §调用通道。
 
 ## 四段流水线
 
@@ -35,16 +35,22 @@ description: supperH 统一数据获取协议 skill。定义"从注册数据源�
 
 ### 1. resolve（定位 impl 与通道）
 
-- 输入：`source` = 槽位名（`database` / `logs` / ...） + 可选 `source.name`（同一槽位下多数据源，如 database.test / database.prod）
+- 输入：`source` = 槽位名（从注册表 `drivers` 的**实际键集合**里来，不是从本 skill 的清单里来） + 可选 `source.name`（同一槽位下多数据源，如 `<库槽位>.test / <库槽位>.prod`）
 - 输出：绝对路径的 impl 脚本 + **`channel`**（`script` | `mcp`）。channel 直接取解析器返回体里 `drivers.<槽位名>.kind` 的值（缺省 `script`）—— **不在产物里写死、不拼占位符**（通道是注册期探测结论，属 L2 运行期数据）
-- `channel` 是注册期已定的结论：**不得在本段重新探测、不得因为"看起来 MCP 工具不在列表里"自己改判**（kind 由 `/supperH-init --write` 的机械探测写死，见 `driver-contract` §调用通道）
+- `channel` 是登记期已定的结论：**不得在本段重新探测、不得因为"看起来 MCP 工具不在列表里"自己改判**（kind 由登记期的机械探测写死——`/supperH-init --write` 或 `/supperH-driver` 的 add/update，两者共用同一个 `decideChannels`，见 `driver-contract` §调用通道）
 - 未注册 → 抛 `SOURCE_NOT_REGISTERED`；**禁止降级到"随便找个能跑的先顶着"**
 
 ### 2. guard（守卫，硬性）
 
-- **DB 门禁**：`source` 落在 `database` 且 SQL 里的目标 schema 命中 `{{PROJECT.db.forbidWriteSchemas[]}}` 且 SQL 是写语句（INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/CREATE/GRANT/REVOKE） → 抛 `DB_GATE_DENY`；不弹确认、不改写 SQL、不换 schema。
-- **清单缺失 = 拒绝，不是放行**：拿不到禁写清单（项目未接入数据库，L2 无 `db` 段或清单为空）时，写语句一律不得发出，报 `DB_GATE_NO_SCHEMA_LIST`；只读语句也没地方可发（无 `drivers.database` 通道），该源记为不可用。把“列表为空”当成“无限制”是本契约里最贵的一种错（`supperh_contract/guards.py` 的 `select_only_guard` 对空清单就是一条都不拦，所以客户端必须自己兜住）。
+- **DB 门禁**：本次取数落在**数据库通道**（`dbDriver` 指向的槽位）且 SQL 里的目标 schema 命中 `{{PROJECT.db.forbidWriteSchemas[]}}` 且 SQL 是写语句（INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/CREATE/GRANT/REVOKE） → 抛 `DB_GATE_DENY`；不弹确认、不改写 SQL、不换 schema。
+- **清单缺失 = 拒绝，不是放行**：拿不到禁写清单（项目未接入数据库，L2 无 `db` 段或清单为空）时，写语句一律不得发出，报 `DB_GATE_NO_SCHEMA_LIST`；只读语句也没地方可发（`dbDriver` 为 `null`，没有 SQL 通道），该源记为不可用。把“列表为空”当成“无限制”是本契约里最贵的一种错（`supperh_contract/guards.py` 的 `select_only_guard` 对空清单就是一条都不拦，所以客户端必须自己兜住）。
 - **SELECT-only 判定**：SQL 里出现写关键字（不区分大小写、忽略注释和字符串常量）→ 视为写；其它视为读。
+- **非库槽位的写动作门禁（与 DB 门禁叠加，不互替）**：上面两条只管数据库通道。其它源（发消息、改记录状态、上传文件、改远端配置）受各槽位自己的 `writes` 段约束，判据全部来自 L2 声明而不是模型对“这个动作危不危险”的印象：
+  - 该槽位未声明 `writes` 段 → **只读源**，任何写动作直接拒（exit 2 + `error` 写 `WRITE_NOT_DECLARED:` 前缀，形态同 `DB_GATE_DENY`，不是新退出码）。“没列出来”等于“没授权”，不等于“没限制”（与空 `forbidWriteSchemas` 同纪律）。
+  - 动作在其 `writes[].action` 里且 `gate: deny` → 直接拒，**不提供“要不要试试”的选项**；用户口头坚持（“我就要发”）不是绕道，要改的是声明而不是绕过它。
+  - `gate: confirm` → 把**要发出去的完整载荷**（哪个源、哪条记录、什么内容）先给用户看，拿到明确同意才执行。“用户没反对”永远不等于“用户同意”。
+  - 要做的动作不在词表里也不是用户登记过的 `other` → 停下问用户归类（归类结果由 `/supperH-driver` 写回 L2），**不得自己挑一个最接近的类别执行**。
+- **本 skill 的四段流水线默认只读**：`invoke` 段的正常产物是行集，不是变更。写动作只能出现在显式登记过 `writes` 的槽位上，且总走 `bug-dev` / 命令层的写门禁，不在取数链路里顺手发起。
 - **无执行前预检**：不在“跑 driver 之前”做任何网络/VPN 状态判断，也不得再引入预检槽位（原 `vpnPreCheck` 已删）。原因：零信任网关对 VPN 网段的**任意端口**都本地代答 accept，而内网主机常滤掉 ICMP —— 所以 ping / 网卡名 / 裸 TCP connect 三类“预检”都会在全断的情况下报绿灯（实测数：假端口 connect 均 0.02s 内“OPEN”，对它们发 HTTP 则 `RemoteDisconnected`；真端口 `401` 用 0.28s）。证据只来自本次调用自返的退出码。
 - **连不上怎么办（exit 3 / 4）**：停止该源取数，把**目标端点 + 错误原文**交给用户，要求提供可连接环境（“请在能访问 `<host>:<port>` 的网络里重试” / “请重新登录刷新凭据”）。你**不猜 VPN 是否已连、不自动重试、不换网络再跑**，更不得把“拿不到数据”写成“没有数据”。
 
@@ -62,18 +68,17 @@ description: supperH 统一数据获取协议 skill。定义"从注册数据源�
 
 子 agent（已绑 `supperh-drivers`）直接调 MCP 工具，不再拼命令行：
 
-| 槽位 | 工具 | 参数 |
+| 用途 | 工具 | 参数 |
 |---|---|---|
-| database | `db_query` | `project` / `source` / `params` / `limit` |
-| logs | `log_search` | 同上 |
-| tickets | `ticket_list` | 同上 |
-| efficiency | `efficiency_list` | 同上 |
-| 任意已白名单源 | `query` | 同上（通用兜底）|
+| 数据库通道（`role: database`） | `db_query` | `project` / `source` / `params` / `limit` |
+| 任意已白名单源 | `query` | 同上（通用兜底，也是**只有这一个**能服务非库源的工具）|
+
+壳按 **role** 而不是槽位名判定谁能走 `db_query`：取一个不是数据库通道的源去调它会被直接拒（exit 2 语义），因为那等于把 SQL 写保护开给一个没人拦的通道。除 `db_query` 外不再有其他具名工具——“有几个源、各自叫什么”是用户的事，L1 不替它建工具。
 
 - `source` **必须**在该槽位 L2 配置的 `mcp.sources` 白名单里（解析器返回体里的 `drivers.<槽位名>.mcp.sources`）；不在则壳直接拒（exit 2 语义），**不要改个名字重试**
 - 工具返回的 `content[0].text` 就是 envelope 本体，照常走第 4 段；失败时 envelope 与 JSON-RPC error code 同时存在
 - 工具调用**没有退出码**：因此本分支的结果只能用于取数，**不得拿去做任何分流判断**（红线 R3.5）
-- 通道不可用（server 没起 / adapter 缺失）时壳会显式报错；按 `fallback` 处理：`script` → 告知用户回 `/supperH-init` 重跑探测（kind 会被回写成 script）；`none` → 直接停下报告，**绝不默默换成另一种数据源**
+- 通道不可用（server 没起 / adapter 缺失）时壳会显式报错；按 `fallback` 处理：`script` → 告知用户重跑登记期探测（`/supperH-driver` 的 update 或 `/supperH-init --write`，kind 会被回写成 script）；`none` → 直接停下报告，**绝不默默换成另一种数据源**
 
 两分支共用的参数语义（CLI 写 `--x`，MCP 用同名入参）：
 
@@ -168,19 +173,29 @@ Exit code 语义（**协议契约，不可改**；mcp 分支用同一套语义�
 
 ## anchor-lookup（快路径 F1.4：traceId / ticketNo → route）
 
-`/supperH-bug` 抽到的锚点不含代码位置时，由 `bug-analyzer(mode=lookup)` 经本协议反查接口路由。这是一个**只读、单结果**的特化调用：
+`/supperH-bug` 抽到的锚点不含代码位置时，由 `bug-analyzer(mode=lookup)` 经本协议反查接口路由。这是一个**只读、单结果**的特化调用。
 
-| 锚点类型 | 槽位 | 调用形式 |
-|---|---|---|
-| `traceId` | `drivers.logs` | `<impl.logs> --project <code> --source trace-logs --filter trace_id=<id> --limit 1` |
-| `ticketNo` | `drivers.tickets` | `<impl.tickets> --project <code> --source tickets --filter ticket_no=<no> --limit 1` |
+**用哪个槽位反查，本 skill 不指名**（F-11：槽位名归用户，L1 没有也不该有「日志源」这个名字）。判据：
+
+1. 候选集 = 步骤 0 返回的 `drivers` 键集合里，`desc` 表明能按该锚点标识符换回接口路由的槽位。需要的关系由门禁脚本的 `lookupNeed` 字段递出（`trace_id -> route` / `ticket_no -> route`）——脚本只说“要成什么关系”，不说“走哪个槽位”。
+2. **候选数 ≠ 1 → 不猜，直接报反查失败**（调用方因此走完整路径）。零个 = 没接能反查的源；多个 = 拿不准用户指的是哪个，选错的成本比慢一次高。
+3. 判据是“这条关系成不成”，不是“这个源正统不正统”：只要被选中的源能用这个 id 换回 `route` 列，它来自日志平台还是其它产品都一样有效。所以按 `desc` 选源的残余风险是**单向失败的**：选错了返回不出 `route` 列 → 按下面第一条约定 = 反查失败 = 升格完整路径，不可能把一个错的 route 递进门禁。
+4. 该槽位必须**只读**（未声明 `writes` 段）。带了任何写动作的槽位不得用于反查——反查是取证据，不是发起变更；若 driver 在执行反查时发生了写（信封 `meta` 可看出），调用方视为协议违约并升格。
+
+调用形式（`<slot>` = 上面选出的那一个；`<source>` 与 `<idField>` 取该槽位自己在 `desc` / `config` 里声明的值）：
+
+```
+<impl.slot> --project <code> --source <source> --filter <idField>=<锚点原值> --limit 1
+```
+
+**不得凭空造 `--source` 值**：不在该槽位 `mcp.sources` 白名单里的 source 会被壳直接拒（exit 2 语义），而“换个名字再试一次”属于红线禁止的横向降级。
 
 约定：
 
 - driver **必须**在返回的 `data.columns` 里提供一列 `route`（值形如 `POST /api/x/y`）；缺失该列 → 视为反查失败（`code: TARGET_NOT_FOUND`），**不得**用其它列凑。
 - 反查以“能锁到唯一接口路由”为目的：命中 0 行或多行且 route 不唯一 → 调用方按歧义处理（升格完整路径），**绝不在多条里任选其一**。
-- **只读**：logs/tickets 本质是检索类数据源，不得发起任何写操作；若 driver 回报 `meta` 显示发生了写 → 调用方视为协议违约并升格。
-- 本反查不替代也不绕过 DB 门禁；它与步骤 1.5 的快路径准入相互独立——反查出的 route 仍要过 G0–G4 + 否决表。
+- 反查出的 route 只是「进门禁的钥匙」，仍要过步骤 1.5 的 G0–G4b + 否决词表 + I0；带反查锚点跑门禁时**必须**附 `--anchor-source lookup`，否则 I0 会把它当成编造的引用判 40。
+- 本反查不替代也不绕过 DB 门禁，二者相互独立。
 
 ## 多源聚合（可选）
 
@@ -197,7 +212,7 @@ Exit code 语义（**协议契约，不可改**；mcp 分支用同一套语义�
 - 禁止把 `--filter` 值拼到 shell 命令里再传给 driver（必须走 argv 数组，防注入）
 - 禁止在 agent 侧硬编码任何真实内网域名 / 账号 / 库名；一律走 `PROJECT.<字段>` 类占位符与 driver 内部配置
 - 禁止"driver 失败 → 换另一个 driver 重试"式横向降级；一个 source 只能对应一个 impl
-- 禁止把 driver 的 stdout 内容原样 dump 到 git 追踪的文件里（防止真实业务数据被误提交；如需落地走 `{{PRIVATE_ROOT}}/context/` 或 `{{PRIVATE_ROOT}}/logs/`）
+- 禁止把 driver 的 stdout 内容原样 dump 到 git 追踪的文件里（防止真实业务数据被误提交；如需落地只允许进 `{{PRIVATE_ROOT}}/context/`——可用子目录以 `scripts/resolve-private-root.mjs` 的 `PRIVATE_SUBS` 为准，指未登记的目录等于让用户照提示撞不存在的路径）
 - 禁止"只报答案不报语句"：`query_missing` 可以出现在汇报里，不可以被省略；也禁止把没有语句的取数结果当作已验证事实写进结论
 
 ## 参考实现

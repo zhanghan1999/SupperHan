@@ -33,7 +33,7 @@
 3. **CURRENT 原子切换**协议、copy-on-write 语义
 4. **派发协议**：主 agent 派 subagent 的输入格式、输出格式、失败降级策略
 5. **完成判定**：修复完成的必要条件清单
-6. 跨项目通用的红线：禁止跳过 DB 门禁、禁止改生产配置、禁止 prelearn-writer 之外使用 external_directory
+6. 跨项目通用的红线：禁止跳过 DB 门禁、禁止改生产配置、禁止 prelearn-writer / driver-author 之外使用 external_directory
 
 ## 灰色地带裁决规则
 

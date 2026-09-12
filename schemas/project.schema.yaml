@@ -148,20 +148,19 @@ properties:
   drivers:
     type: object
     additionalProperties: false
-    description: "Slot registration for private driver implementations. Values point under DRIVERS_ROOT. Optional and every slot is optional: registering a project must not invent drivers. A registered project with no drivers section is pure-code mode - the connectivity gate then reports 0 configured drivers explicitly instead of pretending a probe passed. Note the asymmetry validate-project.mjs enforces: drivers.database WITHOUT a db section is an error (the ReadOnlyGuard then has no forbidWriteSchemas list to deny anything with - an empty list never blocks a write), while a db section without that driver is only a warning (no channel can reach it)."
-    properties:
-      database:     { $ref: "#/definitions/driverSlot" }
-      logs:         { $ref: "#/definitions/driverSlot" }
-      tickets:      { $ref: "#/definitions/driverSlot" }
-      efficiency:   { $ref: "#/definitions/driverSlot" }
-      # A pre-flight slot ("vpnPreCheck") was removed. Measured against the company
-      # tunnel: a bare TCP connect succeeds on EVERY port of any host in the VPN range
-      # (the zero-trust gateway answers the handshake locally), and ICMP is filtered —
-      # so no standalone "is the network up" signal exists that isn't already answered
-      # better, and faster, by each slot's own healthCheck. The key stays declared so
-      # already-registered files keep parsing; validate-project.mjs warns on it.
-      # Evidence: docs/architecture.md §10.8.
-      vpnPreCheck:  { $ref: "#/definitions/driverSlot" }
+    # ── 为什么这里不再列槽位名单（F-10）────────────────────────────────
+    # 旧形态把四个键名写进 properties + additionalProperties: false，于是“一个项目有
+    # 几个外部源”变成了 L1 的决定：第 5 个源根本注册不进来（实测：自定义键 →
+    # `$.drivers.sms: additional property not allowed` 退 2）。而 logs / tickets /
+    # efficiency 三个名字本身就是某一家公司的内网产品类别，违反 R3「禁止把 L2 值
+    # 塞进 L1」。现在 L1 只规定**槽位的形状**（driverSlot）与**动作类别词表**
+    # （writeAction），槽位叫什么、有几个，由用户在 /supperH-driver 里自己点名。
+    # 键名唯一的约束是可当标识符用：它会出现在路径、MCP source 白名单与
+    # `drivers.<slot>` 形式的字段引用里。大小写都收（旧条目里的 vpnPreCheck 这类
+    # 驼峰键必须仍能解析成废弃警告，而不是升级成退 2）。
+    patternProperties:
+      "^[A-Za-z][A-Za-z0-9_-]{1,39}$": { $ref: "#/definitions/driverSlot" }
+    description: "Slot registration for private driver implementations. Values point under DRIVERS_ROOT. Slot NAMES are chosen by the user (any slug, any count) - this repo deliberately holds no list of them; adding a source never edits L1. Optional and every slot is optional: registering a project must not invent drivers. A registered project with no drivers section is pure-code mode - the connectivity gate then reports 0 configured drivers explicitly instead of pretending a probe passed. Note the asymmetry validate-project.mjs enforces: the slot carrying `role: database` WITHOUT a db section is an error (the ReadOnlyGuard then has no forbidWriteSchemas list to deny anything with - an empty list never blocks a write), while a db section without such a slot is only a warning (no channel can reach it). The retired vpnPreCheck key still parses so old files keep loading; validate warns on it (evidence: docs/architecture.md §10.8)."
 
   naming:
     type: object
@@ -242,8 +241,15 @@ definitions:
   driverSlot:
     type: object
     additionalProperties: false
+    # desc 故意不进 required：写入门禁（/supperH-driver 与 init）强制新登记带描述，
+    # 但 schema 层若把缺描述往死里拦，会让已经登记好的项目一夜全灭（同一仓库对
+    # vpnPreCheck / role 已定下“新增字段不得追认存量违法”的纪律）。validate 负责逐槽位告警。
     required: [impl, healthCheck]
     properties:
+      desc:
+        type: string
+        minLength: 2
+        description: "What this source is, in the user's own words (e.g. 'the internal ticket platform, read defects and their comments'). Free-form and REQUIRED AT REGISTRATION: since L1 no longer knows any slot names, this line is the only thing that lets a later agent tell WHY the slot exists and what may be fetched from it. It is also the input /supperH-driver hands to the exploring agent when the driver script does not exist yet. Never a name from a fixed list, never a restatement of `impl`. Entries written before this field existed stay loadable; validate-project.mjs warns on each of them."
       impl:
         type: string
         description: "Absolute path or '{{DRIVERS_ROOT}}/...' template pointing to the driver script. The resolver expands it, so L1 artifacts must never prepend a second DRIVERS_ROOT prefix."
@@ -264,6 +270,42 @@ definitions:
         description: "What to do when the mcp channel is unavailable (server failed to start, tool silently missing from the list). script keeps working but must be decided by the registration-time probe, never by the model. Absent means script."
       mcp:
         $ref: "#/definitions/mcpBinding"
+      # ---- role: the ONE machine-semantic marker a slot may carry ----
+      role:
+        type: string
+        enum: [database]
+        description: "Declares this slot to be the relational-database channel, i.e. the one whose SQL must be checked against `db.forbidWriteSchemas` (the write guard) and whose statements are SELECT-only by contract. It is a technical CATEGORY, not a product name, which is why exactly one value exists - naming every other slot is the user's business. At most one slot per project may carry it (validate-project.mjs enforces). A slot named `database` is treated as `role: database` for backwards compatibility, and validate reports the implicit form. Absent means: no SQL channel, so the write guard never applies to it - its own `writes` gates are what bind it."
+      # ---- write capability: absent section = read-only source ----
+      writes:
+        type: array
+        minItems: 1
+        description: "The actions this source may be asked to perform that CHANGE something outside the code repository. ABSENT means read-only: every write action against it is refused, not merely unlisted (an empty list must never read as 'no restrictions' - same discipline as an empty forbidWriteSchemas). When present, each entry pairs an action category with the gate that lets it run: `confirm` = show the user the exact payload and get an explicit yes first; `deny` = refuse unconditionally, without asking. Deciding this is never the model's call, and 'the user did not answer' is never 'the user agreed'."
+        items:
+          type: object
+          additionalProperties: false
+          required: [action, gate]
+          properties:
+            action:
+              $ref: "#/definitions/writeAction"
+            gate:
+              type: string
+              enum: [confirm, deny]
+              description: "confirm = ask the user with the exact outgoing payload before executing; deny = refuse outright and never offer to ask (an explicit force request is not an escape hatch - see the DB_GATE_DENY rule). Absent is not allowed on purpose: a half-declared gate defaults to whichever the model guesses."
+            note:
+              type: string
+              minLength: 1
+              description: "What this action concretely is in this source ('post a comment on a defect', 'flush a batch of stale rows in the test schema'). Free text for the human reading the confirmation prompt."
+            userPhrase:
+              type: string
+              minLength: 1
+              description: "The user's own wording that produced this entry, kept verbatim. Written by /supperH-driver when an `other` action got classified by asking: the next time the same phrase shows up the classification is reused instead of re-asking, and the reuse must be reported. Only meaningful with action: other, and validate-project.mjs requires it to be present whenever a slot declares any `other` entry."
+  # ── 动作类别词表：L1 只定义“做什么类型的动作”，不定义“对哪个系统做”──
+  # 词表新增一项的门槛：同类动作在 >= 2 个项目里出现过（见 docs/architecture.md
+  # §10.16）。把某个产品名或某个项目的叫法塞进这里 = 把 L2 事实写进 L1 协议。
+  writeAction:
+    type: string
+    enum: [sql_write, message_send, status_change, file_upload, config_change, other]
+    description: "Closed vocabulary of write-action CATEGORIES (SQL statement that changes data / send a message or reply / change a record's state / upload or overwrite a file / change remote configuration / none of the above). `other` is the pressure valve: it must carry userPhrase and the command must ask the user which category it really belongs to, then rewrite the entry - leaving it at other forever is a hole in the audit trail, not a valid answer."
   mcpBinding:
     type: object
     additionalProperties: false

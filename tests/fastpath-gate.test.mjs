@@ -111,6 +111,16 @@ test('classifyAnchor：三类一期可用锚点 + 两类明确不支持', () => 
   assert.equal(classifyAnchor('工单号 task-1024').supported, false);
   assert.equal(classifyAnchor('abc123def456').needsLookup, undefined, '无标签随机串不得乱认成 traceId');
   assert.equal(classifyAnchor('').supported, false);
+
+  // F-11：递出的是“要成什么关系”，不是“走哪个槽位”。脚本一旦输出 `drivers.logs`，
+  // 就等于替所有项目规定“日志源得叫 logs”——那正是删掉四个写死槽位要治的病。
+  assert.equal(classifyAnchor('trace_id=abcdef1234567890').lookupNeed, 'trace_id -> route');
+  assert.equal(classifyAnchor('工单号 task-1024').lookupNeed, 'ticket_no -> route');
+  assert.equal('lookupVia' in classifyAnchor('trace_id=abcdef1234567890'), false, '不得再留指向槽位名的旧字段');
+  for (const a of ['trace_id=abcdef1234567890', '工单号 task-1024', 'POST /api/x', 'X#c']) {
+    const j = JSON.stringify(classifyAnchor(a));
+    assert.ok(!/["']\s*drivers[.@]/.test(j), `classifyAnchor 输出不得内嵌槽位名：${j}`);
+  }
 });
 
 test('parseIndexMarkdown：frontmatter + 首张 route 表 + 等级缺省保守降为 L1', () => {
@@ -193,6 +203,7 @@ test('G1–G4 + 否决表：退出码逐项命中', () => {
   const lookup = gate(ok, 'trace_id=abcdef1234567890', '创建人字段为空');
   assert.equal(lookup.status, EXIT.NO_ROUTE, 'traceId 未经反查直接进门禁 → 30');
   assert.equal(lookup.needsLookup, true, '应递出 needsLookup 信号供 F1.4 取用');
+  assert.equal(lookup.lookupNeed, 'trace_id -> route', '出局时要同时递出反查所需的能力，且不指名槽位');
   assert.equal(gate(ok, 'GET /api/v1/order/legacy', '字段没返回').status, EXIT.SHALLOW, 'L1 不足 34');
   assert.equal(gate(ok, 'GET /api/v1/order/note', '字段没返回').status, EXIT.SHALLOW, 'L2 不足 34');
   assert.equal(gate(ok, 'POST /api/v1/order/create', '订单创建接口偶发超时').status, EXIT.VETO, '否决词 33');

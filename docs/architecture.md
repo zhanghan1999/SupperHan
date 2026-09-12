@@ -77,7 +77,7 @@ node scripts/validate-project.mjs   # 独立命令；sync 不调它（旧版本�
       │  │   （清单非空但一条都不命中 = 写保护不存在；driver ReadOnlyGuard / bug-dev DB 门禁全靠这个列表）
       │  ├─ 另查模板假值残留（只看 db / drivers 两棵子树的所有字符串）：残留 example_* → exit 2
       │  │   （这两段会被当真凭据/真库名/真驱动路径拿去用；codeRoot/packageRoot 里的 EXAMPLE 只会“匹配不上”，不属同类伤害）
-      │  ├─ 另查 db 与 drivers.database 必须彼此成立：有驱动没 db 段 = 错（guards.py 的 select_only_guard 对空清单
+      │  ├─ 另查 db 与数据库通道（role: database 的槽位）必须彼此成立：有驱动没 db 段 = 错（guards.py 的 select_only_guard 对空清单
       │  │   一条都不拦 = 写保护默认失效）；有 db 段没驱动 = 警告（库信息是事实，只是暂时无通道）
       │  └─ exit 0 有效 / 2 违规或无可校验 / 3 用法错误
       │
@@ -137,14 +137,19 @@ node scripts/sync-assets.mjs
 | `read` | allow | — |
 | `edit` | deny | bug-dev / bug-refactor / bug-code-optimizer / bug-code-generator / bug-mybatis-optimizer / prelearn-writer / supperH-bootstrap |
 | `bash` | deny | bug-tester / bug-analyzer / prelearn-* / bootstrap / setup / supperH-bug 主入口（**仅** `resolve-project.mjs` 这一个脚本，可按不同参数多次调用） |
-| `external_directory` | **deny** | **仅** prelearn-writer（写 `{{CONTEXT_ROOT}}`）+ supperH-bootstrap（建私有根）+ supperH-setup（写 IDE 加载目录）|
+| `external_directory` | **deny** | **仅** prelearn-writer（写 `{{CONTEXT_ROOT}}`）+ driver-author（写 `{{DRIVERS_ROOT}}`）+ supperH-bootstrap（建私有根）+ supperH-init（写 `projects/` 与 `menus/` 条目）+ supperH-setup（写 IDE 加载目录）|
 | `mcpServers`（取数工具） | **不绑** | **仅** 4 个只读/测试类子 agent：bug-analyzer / bug-tester / bug-test-writer / prelearn-analyzer（均只绑壳 `supperh-drivers`）|
 
-`external_directory: allow` 是**跨越 workspace 边界**的能力，全仓库只放开 **1 个 subagent + 2 个 command**。这三个的 prompt 里都写死了路径前缀自检：
+`external_directory: allow` 是**跨越 workspace 边界**的能力，全仓库只放开 **2 个 subagent + 4 个 command**。这六个的 prompt 里都写死了路径前缀自检（名单同时钉在 `tests/agent-permissions.test.mjs` —— 只改本文不改进代码里的名单，测试会先红）：
 
 - `prelearn-writer`：`filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头 + 匹配 `<known-module>/gen-<ts>/(batch-NN.md | index.md | CURRENT)`；违反报 `WRITE_BOUNDARY_VIOLATION`
+- `driver-author`：`filePath` 必须以 `{{DRIVERS_ROOT}}/` 开头（凭据只额外允许 `.secrets/*.local.json`）；不得碰注册表 YAML、L1 仓库、代码工作区；违反同样报 `WRITE_BOUNDARY_VIOLATION`。不绑壳 server（它是造驱动的，不是用数据的）
 - `supperH-bootstrap`：只允许在 `<TOOL_ROOT>/../supper-Han-private/` 下 mkdir / 写文件；不允许在本仓库内创建私有根
+- `supperH-init`：只允许写私有根下的注册文件（`projects/<code>.yaml` + `menus/<code>.yaml`）与 `context/<code>` `tasks/<code>` 目录骨架；实际写盘动作全部在 `scripts/init-project.mjs --write` 里完成，命令本身不手改 YAML
+- `supperH-driver`：写盘全部经 `scripts/driver-registry.mjs`（先备份 + 先在内存过 schema + 探活不过不落盘）；临时 values JSON 也不得落到私有根之外
 - `supperH-setup`：只允许写 `~/.qoder-cn/plugins/cache/local/supper-Han-java/` + `~/.config/opencode/{agent,command,skill}/` + `<PRIVATE_ROOT>/dist-portable/`；禁止修改用户 IDE 里 supper-Han-java 以外的插件目录
+
+**为什么是两个而不是一个**（曾评估“把写驱动并入 prelearn-writer 以保住数字”并否决）：`external_directory` 是布尔开关而不是目录白名单 —— 拿到 allow 的那一刻它覆盖整个私有根，“只能写 context/”从来只是提示词里的自检。所以并职责**不缩小硬面**，只会把边界判据从“路径必须以某前缀开头”（无分支）退化成“先本次是哪种模式、再查对应前缀”（含分支）—— 那等于把边界交还给模型判断，与本仓库“确定性门禁优于模型判断”相反。真正缩小硬面的做法是默认不携带该 agent（用完再装），代价是命令层多一条“探测 agent 装了没”的脆弱路径；本仓库本来就有 4 个 command 带 allow，“这套工具就是要往私有根写东西”是既定事实，故取“名单显式登记 + 机械测试卡住新增”而非“默认不装”。派 `driver-author` 前必须先征得用户当次同意（写进 `commands/supperH-driver.md` 步骤 2）。
 
 MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在被约束的下游**。R3.5 的窄 bash 白名单已经规定「其它任何编译/DB/网络命令（包括跑 driver）仍必须派子 agent」；若把壳 server 绑到主 agent 或命令入口，等于开一条绕过该约束的外连直道。因此 `supperh-drivers` 只出现在 4 个只读/测试类子 agent 的 frontmatter 里，主入口只消费结构化结果。（门禁、编译、GC、写文件、扫码登录类动作**永不 MCP 化**，理由见 §10.2。）
 
@@ -152,7 +157,7 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 
 | 冲突 | 表现 | 本仓库解法 |
 |------|------|-----------|
-| C1 权限 `external_directory: deny` × 私有根在 workspace 外 | 学习数据写不到私有根；IDE 装目录也在 workspace 外 | 只放开 `prelearn-writer` + `supperH-bootstrap` + `supperH-setup` 三个；其它保持 deny；三者 prompt 内置路径前缀自检 + `WRITE_BOUNDARY_VIOLATION` 兜底 |
+| C1 权限 `external_directory: deny` × 私有根在 workspace 外 | 学习数据写不到私有根；驱动脚本也写不到；IDE 装目录也在 workspace 外 | 只放开 `prelearn-writer` + `driver-author` 两个 subagent 与 `supperH-bootstrap` + `supperH-init` + `supperH-driver` + `supperH-setup` 四个 command；其它保持 deny；六者 prompt 内置路径前缀自检 + `WRITE_BOUNDARY_VIOLATION` 兜底；名单机械锁在 `tests/agent-permissions.test.mjs` |
 | C2 git worktree × context 位置 | worktree 切分支时 context 该跟着哪个 root？ | context 落 `{{PRIVATE_ROOT}}/context/`，**与 worktree 解耦**；worktree 只影响 `effectiveRoot`（读源码路径），不影响学习数据落地 |
 | C3 权限树无参数级校验 | `bash: allow` 允许任何 shell 命令，防不住 `rm` | sync 阶段的**占位符残留阻断**（进程级），不依赖 prompt；agent preamble 里做二级兜底 |
 | C4 Qoder plugin 禁 `..` 路径 | 私有根 = `<TOOL_ROOT>/../supper-Han-private`，含 `..` | sync 时把 `{{PRIVATE_ROOT}}` 等替换成绝对路径后写入 dist；plugin 里只出现绝对路径，自包含 |
@@ -307,7 +312,7 @@ G0 anchorKind → G2 dataReady → G4a fresh(仓库级) → G1 unique → G4b fr
 ### 10.6 否决词表与记账
 
 - 词表是 `VETO` 常量数组，13 组 id：`methodSignature` / `buildFile` / `configFile` / `mapperXml` / `publicApi` / `migration` / `txConcurrency` / `perf` / `nondeterministic` / `security` / `cacheQueue` / `dataFix` / `dbWrite`。prompt 侧不再抄一份规则，只写“以脚本返回的 `veto[].id` 为准”，避免两处漂移。
-- 扫描前做 Unicode **NFKC** 归一（全角字母会被折叠回半角，否则 `ｄｅｌｅｔｅ` 漏杀）；写库词用**子串匹配**而非 `\bdelete\b` —— 驼峰标识符内 `\b` 不成立，而 `deleteById` / `insertSelective` 恰是 Java 工单里最高频的写库说法。宁因此多误杀，不可漏杀。
+- 扫描前做 Unicode **NFKC** 归一（全角字母会被折叠回半角，否则 `ｄｅｌｅｔｅ` 漏杀）；写库词用**子串匹配**而非 `\bdelete\b` —— 驼峰标识符内 `\b` 不成立，而 `deleteById` / `insertSelective` 恰是用户描述里最高频的写库说法。宁因此多误杀，不可漏杀。
 - 每次带锚点调用向 `<PRIVATE_ROOT>/logs/fastpath-<yyyymm>.jsonl` 追加一行：`at / project / module / anchorKind / anchor(≤120) / textGiven / status / eligible / gates / veto[] / route / level / batch / g4b / wall_time_ms`（stage=`anchor_gate`；`needsLookup`、`budget` 也入注；`g4b = {ran, outcome, sources_count, changed_count, intersect_count}` 是 batch 级复核收益的唯一数据源；I0 入注 `intentGiven`（本次有没有申请复述）与 `intent = {ran, ok, slots_missing[], quotes_total, quotes_verified, problems[]}`（结论），外加 `anchorSource`（`lookup` = 锚点来自 F1.4 反查而非用户原话，因而豁免"逐字出现在 `--text` 里"那条判据））。G5 回灌单独记一行（stage=`impact_gate`，带 `impactCode` 与 `problems`）——未求值的 G5 同样记账，否则账本分母缺一块。写在 node 进程内：不占 agent 权限、不进 git、不消耗 token。硬停分支（10/11/12）**不记账**——它们不是门禁结论。
 
 ### 10.7 已知坑（代码里都留了注释）
@@ -459,9 +464,10 @@ G0–G5 全在回答"这个 bug 落在哪段代码"，没有一处在回答"用�
 
 - **存在时全字段 required**：`db.*` 七项缺任意一项，`initWrite` 在写盘前退 2 并逐项点名缺什么。半截 db 段比不写更糟——没答上来的字段会长得象真凭据（旧实现里连 `undefined` 都会被引号包成一个可用的主机名）。
 - **残留扫描只盖 db / drivers 两棵子树**：这两段的值会被当真东西拿去用。`codeRoot` / `packageRoot` 里的 EXAMPLE 只会"匹配不上"，不属同类伤害；把一切形似占位符的字符串都当错误，只会让人把真库名改个写法绕过检查。
-- **不接与“接了但没落地”必须分得开**：`gateNote` + `result.connections.mode`（`code-only` / `connected`）区分这两件事，零驱动时 `anchorLookup` 也不再报 `ready`。同形歧义就是上一代机制放过 F-7 的原因。
+- **不接与“接了但没落地”必须分得开**：`gateNote` + `result.connections.mode`（`code-only` / `connected`）区分这两件事，零驱动时 `anchorLookup` 也不再报就绪。同形歧义就是上一代机制放过 F-7 的原因。
+- **`anchorLookup` 只能说“候选就绪”，不能说“反查可用”**（F-11 之后顺带成立）：该字段报的是“已登记槽位的探活结果”，而“哪个槽位能拿 traceId 换回 route”要到运行期读各槽位的 `desc` 才知道。旧文案写死 `'ready'` 时，它其实替所有项目默认了“有个叫 logs 的源”，那是同一个缺陷的另一种形态。
 
-边界：纯代码模式下菜单来源仍必填（硬门禁 22），但 `menu.source: database` 需要 `drivers.database` 通道才能取到菜单数据——这一跨文件一致性目前无人机械拦（`validate-project.mjs` 不读 `menus/*.yaml`），靠 `commands/supperH-init.md` 步骤 2 的告知文案兼顶。
+边界：纯代码模式下菜单来源仍必填（硬门禁 22），但 `menu.source: database` 需要数据库通道（`role: database` 那个槽位）才能取到菜单数据——这一**跳文件**一致性目前无人机械拦（`validate-project.mjs` 不读 `menus/*.yaml`），靠 `commands/supperH-init.md` 步骤 2 的告知文案兜底。同一位置的另一件事已经改成机械拦：选了哪一支、那支的必填项没答齐 → 退 2 `menu-choices-incomplete`（为什么菜单比 db 段更需要这一道，见 §10.16 末尾）。
 
 ### 10.13 安装通道：OpenCode 侧不做“拷贝件”的两样东西
 
@@ -519,6 +525,33 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 - **没把握的默认值不配被烤进配置**：猜中也该让人看见（进步骤 2 问），而不是长得象事实。`--values` 回灌路径同时把 `branchesDetected[k]` 转 true —— 用户确认过的就不是猜的。
 - **环境键清单单点**：`BRANCH_KEYS = ['prod','uat','dev']` 被扫描 / 覆盖 / 落盘与汇报三处共用，否则会长出“扫得到却永不落盘”的第四种键（schema 是 `additionalProperties: false`，那种键还会反过来把已注册项目打成 exit 2）。
 
+### 10.16 槽位名归用户：L1 不得持有“外部源名单”（F-10 / F-11）
+
+缺陷形态：L1 把四个键名（历史上是 database / logs / tickets / efficiency）当成“可用的外部源”，在四处同时生效 —— schema 的 `properties` + `additionalProperties: false`、`init-project.mjs` 的 `DRIVER_SLOTS` 常量与探测循环、扫描 JSON 的 `connectSlots`（命令层照着摆多选题）、以及产物里的 `{{PROJECT.drivers.<名字>.*}}` token。第 5 个源根本注册不进来（实测：`$.drivers.sms: additional property not allowed` 退 2），而 `tickets` / `efficiency` 本身就是某家公司的产品类别（R3 的 L2 泄漏）。改 L1 去加源看起来像正常演进，实际是在**替所有项目规定源的名字与个数**。
+
+改后六处必须一致（只改其中一处会留下“其他五处还在假设四个源”的裂口）：
+
+| 环节 | 实现 | 判据形态 |
+|---|---|---|
+| schema | `drivers` 改用 `patternProperties: "^[A-Za-z][A-Za-z0-9_-]{1,39}$"` → `driverSlot`，不列名字 | 形状与动作词表归 L1，名字与个数归 L2 |
+| 语义标记 | `role` 枚举只有一个值 `database` | 唯一有机器语义的槽位属性（写保护绑它），全项目最多一个（validate 拦） |
+| 人话描述 | `desc`：schema **不** required（存量文件不得一夜全灭），登记入口必填 + validate 逐槽位告警 | L1 判“这个源是干什么的”的唯一线索 |
+| 登记入口 | `commands/supperH-driver.md` + `scripts/driver-registry.mjs`（add/update/remove/list：先备份 → 内存过 schema → 探活不过不落盘）；驱动不存在时派 `driver-author` 先写实现 | 与 `/supperH-init` 解耦：init 只问“要不要先接一个”，源可多次添加 |
+| 解析器 | 输出派生字段 `dbDriver`（`{slot, kind, impl, healthCheck}` 或 `null`；按 role 解，判定规则单点复用 `validate-project.mjs:dbRoleSlot`）；`preflight.driverSlots` 遍历实际键 | “没库”是值为 `null` 的可机械区分事实，不是一个解不开的 token |
+| 取数面 | MCP 壳工具收缩为 `db_query`（role: database）+ `query`（通用），`ROLE_OF_TOOL` 按 role 判 | 外连工具面与 role 语义一致，不再假设源的种类与数量 |
+
+三条推定的理由：
+
+- **`dbDriver` 是派生别名，不是第二个真相源**：它由 `drivers` + `role` 现场解出，不落盘、不可手写进 YAML、schema 里没这个属性。另一条路（在 L1 里列“允许的名字”）之所以不通，是因为那恰好是本次要治的病。重复 role 时按**键名排序**取首个（`Object.entries` 跟随 YAML 书写顺序，不排序就会让“同内容不同键序”的两份文件解出不同库通道且都退 0）。
+- **按 `desc` 选源只允许发生在“失败方向安全”的位置**：anchor-lookup 用哪个槽位靠读 `desc`（候选 ≠ 1 即出局），因为选错最多导致反查失败 → 升格完整路径，不可能把错的 route 递进门禁；而边界判据（谁能往私有根写）必须**无分支**，所以那边用的是路径前缀锚点而不是描述文本（同一句“确定性门禁优于模型判断”，两处的正确读法不同，见 §5 “为什么是两个而不是一个”）。
+- **动作词表新增一项的门槛**：同类动作在 ≥ 2 个项目里出现过才进 `writeAction` 枚举。`other` 是泄压阀（必须带 `userPhrase` 且命令要问归类），“永远停在 other”是审计链上的洞而不是合法答案；把某个产品名塞进词表 = 把 L2 事实写进 L1 协议。
+
+机械锁：`tests/l1-slot-neutrality.test.mjs`（prompt 侧出现旧名或名单枚举即红，**无例外分支**）、`tests/driver-registry.test.mjs`（登记与探活）、`tests/resolve-project-cli.test.mjs`（`dbDriver` 形态与排序确定性）、`tests/agent-permissions.test.mjs`（放开面名单）。
+
+第七处落点在菜单配置里，而且它是唯一一处理论上可以静默坏掉的：`menus/<code>.yaml` 由 `renderMenuConfig` 从 `schemas/menu.example.yaml` 行级改写而来，而 `setLine` 的语义是“没答就不改写”——于是模板里的**活值** `slot: database` 会原样落进每一个没被问过 slot 的项目。F-10 之前它凑巧能用（库槽位就叫 `database`）；F-10 之后库槽位名归用户，它变成“菜单学习去查一个本项目不存在的槽位”——不报错，只是查不到。同一个机制还把整段未被选中的分支留在盘上（选 `code` 的项目带着一套完整的 `sys_menu` / `menu_id` 假列名），而日后按本文“换菜单来源只改这个文件”翻过来时，那段假值看起来像已经答过。
+
+所以菜单这一路改成三条（与 §10.12 / §10.15 同纪律，不是新发明）：没答的可选键**删行**（`slot` / `order` / `rootParentId` / `extraFilter`；`limit` 5000 与逻辑源名 `menu` 是文书里写明的缺省，不删）、未被选中的分支**整段不写**、选中的那一支必填项缺任一项则**写盘前退 2**（`planMenuChoices` → `menu-choices-incomplete`，逐项点名）。菜单比 `db` 段更需要这道机械拦：`validate-project.mjs` 不读 `menus/*.yaml`，模板残留扫描也只盖 projects 条目——菜单写坏没有任何一层会在后面兜住。
+
 ## 11. 一期范围与二期规划
 
 **一期做**：
@@ -528,8 +561,8 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 - 可跑 JSON 示例驱动（`drivers-skeleton/`）
 - sync + validate + bootstrap 脚本
 - `.qoder/rules/` 四份零配置红线
-- 5 个命令：一期主流程 `/supperH-bug`、`/supperH-learn`、`/supperH-bootstrap`，注册链路 `/supperH-init`（落 `projects/<code>.yaml` + 探活门禁 + `kind` 探测）与安装链路 `/supperH-setup`
-- 10 个 subagent（8 个 bug-* + 2 个 prelearn-*）
+- 6 个命令：一期主流程 `/supperH-bug`、`/supperH-learn`、`/supperH-bootstrap`，注册链路 `/supperH-init`（落 `projects/<code>.yaml` + 探活门禁 + `kind` 探测）、数据源登记链路 `/supperH-driver`（槽位名归用户，走 `driver-registry.mjs`）与安装链路 `/supperH-setup`
+- 11 个 subagent（8 个 bug-* + 2 个 prelearn-* + 1 个 driver-author 驱动写作）
 - 5 个 skill（prelearn / data-fetch / auto-fix 协议骨架 / driver-contract / incident-triage 现象分诊）
 - **快路径门禁 P0**：`scripts/fastpath-gate.mjs`（G0–G4 + 否决表 + 退出码 30–36，第 37 码由下述 P1 补）、`resolve-project.mjs` 带 `--module/--anchor/--text` 扩展、jsonl 记账、`.qoder/rules/` 与 `commands/supperH-bug.md` 同步、`tests/` 34 条用例
 - **快路径门禁 P1**：`fastPath` L2 覆盖接线（schema 声明 `enabled/maxDiffLines/maxFiles/allowAnchorKinds` + `resolve-project` 传值）；G5 脚本化（`verifyImpactReport` + 退出码 **37** + `--impact-json`/`--impact-report`）；A1 锚点（`traceId`/`ticketNo`）**识别**与保守出局（`needsLookup`）+ F1.4 反查链路（`bug-analyzer mode=lookup` + `data-fetch` anchor-lookup 契约）
@@ -550,7 +583,7 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 - Claude Code / DSH 兼容层（二期）
 - marketplace 发布通道（二期）
 - auto-fix 的 CLI 化实现（一期只出协议骨架）
-- **快路径 P1 未完部分**：A1 锚点反查的**实际内网 driver 实现**（`drivers/logs-*.py`、`drivers/tickets-*.py`，由用户写）——代码/契约/退出码已全部就位，缺的只是驱动本体；驱动未就绪时 F1.4 自动退回完整路径
+- **快路径 P1 未完部分**：A1 锚点反查的**实际内网 driver 实现**（由用户经 `/supperH-driver` 逐个登记；L1 不规定它叫什么名字、也不假设有几个）——代码/契约/退出码已全部就位，缺的只是驱动本体；驱动未就绪时 F1.4 自动退回完整路径
 - **快路径 P2**：按 §10.6 的 jsonl 真实样本校准 `DEFAULTS`/`HARD_CAPS`；评估 A2（异常栈）在完整度 ≥ 某水位后放行；评估 analyzer 多维度并行 fan-out
 
 ## 12. 版本演进策略

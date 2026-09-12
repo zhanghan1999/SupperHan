@@ -20,10 +20,11 @@ npm install
 node scripts/setup.mjs
 #    注册项目是另一件事：到**目标 Java 项目的工作区**跑 /supperH-init（它扫结构 + 问你接哪些外部源）
 
-# 4. 重启 IDE → 输入下面 5 个命令之一：
+# 4. 重启 IDE → 输入下面 6 个命令之一：
 #    /supperH-setup      重新适配 IDE（换机器 / 装了新 IDE 时）
 #    /supperH-bootstrap  补建私有根骨架（只建目录，不写条目）
 #    /supperH-init       把当前工作区注册进来
+#    /supperH-driver     给已注册项目新增 / 改 / 删 / 看一个外部数据源
 #    /supperH-learn      学一个模块
 #    /supperH-bug        修 bug
 ```
@@ -49,7 +50,7 @@ node scripts/setup.mjs --check           # 只体检不写入
 **驱动契约层**（L1/L2 中间）：
 - 本仓库上传 `schemas/driver-response.schema.json` + `drivers-skeleton/base_driver.py` + 可跑的 `example_json_driver.py`
 - MCP 通道上传 `mcp-skeleton/`：一个壳 server（`supperh-drivers`，插件相对注册、零凭据）+ 共享契约包 `supperh_contract/`（envelope / exit code / SELECT-only 守卫 / 私有根定位）
-- 真实内网驱动实现（DB / 日志 / 工单 / 效能）放 `../supper-Han-private/drivers/`，每人自开发；`kind: mcp` 的额外写一份 `drivers/<code>/adapter.py`（import 契约包，不复制守卫）
+- 真实内网驱动实现（用户自己登记的那些源：业务库、日志检索、外部平台……）放 `../supper-Han-private/drivers/`，每人自开发，登记走 `/supperH-driver`；`kind: mcp` 的额外写一份 `drivers/<code>/adapter.py`（import 契约包，不复制守卫）
 - 取数通道只有两条：`script`（bash + 退出码）/ `mcp`（工具化）。MCP 只换取数通道，**不作任何分流依据**，且取数工具只绑 4 个只读/测试类子 agent（主 agent 与命令入口不绑）—— 见 `skills/driver-contract/SKILL.md` §调用通道
 - **没有“执行前预检”（VPN/网络通不通）这种模块**：连通性唯一合法判据是各槽位 `healthCheck` 的**协议级握手**退出码（ping / 网卡名 / 裸 TCP connect 均已被实测证伪）；连不上就停下，把端点 + 错误原文交给用户要求可连接环境 —— 见 `docs/architecture.md` §10.8
 
@@ -79,6 +80,7 @@ git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
 | `/supperH-init` | `commands/supperH-init.md` | 工作区级注册：扫描仓库预填结构字段 → 外部源**由用户多选**（全不选 = 纯代码模式，`db`/`drivers` 两段整段不写）→ 落 `projects/<code>.yaml` + `menus/<code>.yaml`；连通门禁 + driver 通道（`kind`）探测在此机械写定 |
 | `/supperH-bug` | `commands/supperH-bug.md` | Bug 全流程主入口：解析→DB 门禁→学习模块检查→派 subagent 修复→验证→终判 |
 | `/supperH-learn` | `commands/supperH-learn.md` | 学习入口：代码学习 / 菜单学习 / 流程学习 |
+| `/supperH-driver` | `commands/supperH-driver.md` | 数据源登记的唯一入口：槽位名由用户定（L1 不写死固定四种源）→ 描述充分性门禁 → 分流（驱动已有就直接登记 / 否则派 `driver-author` 先写）→ 写能力归类（`writes` + `confirm`/`deny` 由用户定）→ `driver-registry.mjs` 落盘 |
 
 **二期再补**：`/supperH-flow`、`/supperH-package`、`/supperH-test`
 
@@ -98,6 +100,7 @@ git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
 | `node scripts/resolve-project.mjs --cwd <路径>` | **运行期唯一门禁**：项目身份解析 + 快路径准入 + I0 意图复述 + G5 回灌 + `--preflight` 本地事实（退出码即分流，见 `docs/architecture.md` §10） | —（agent 直调，不带别名） |
 | `node scripts/bootstrap.mjs` | CLI 版引导（等价于 `/supperH-bootstrap`，不依赖 IDE）：只建骨架；`--check` 报就绪状态，`--migrate` 才处置 legacy 单文件 | `npm run bootstrap` |
 | `node scripts/init-project.mjs` | 工作区级注册：预填结构字段落 `projects/<code>.yaml`（`/supperH-init` 的引擎）。接不接外部源由 `connect` / `db.*` 决定：接了整段生成、没接整段不写 | `npm run init-project` |
+| `node scripts/driver-registry.mjs` | 登记条目的唯一写入路径：`list` / `add` / `update` / `remove` / `health`。文本手术不 round-trip（注释是字段读法载体）、写前差分过 schema、探活不过不落盘（`--force` 才降级）、删条目要 `--yes` | —（`/supperH-driver` 直调） |
 | `node scripts/migrate-registry.mjs` | legacy 单文件 `project.yaml` → 注册表模型迁移 | `npm run migrate-registry` |
 | `node scripts/detect-ide.mjs` | 探测本机 IDE（输出 JSON） | `npm run detect-ide` |
 | `node --test "tests/**/*.test.mjs"` | 全量用例（必须用这个 glob 形态：`node --test tests/` 会把目录本身当成一个测试文件跑，结果永远是一条失败） | `npm test` |
@@ -109,15 +112,16 @@ git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
 
 ```
 supper-Han-java/
-├── agents/                10 个 subagent（唯一放开 external_directory: prelearn-writer）
-├── commands/              5 个 primary command（setup/bootstrap/init/bug/learn）
+├── agents/                11 个 subagent（放开 external_directory 的只有 2 个，各锁一个私有根子目录：
+│                          prelearn-writer→context/ · driver-author→drivers/；名单锁在 tests/agent-permissions.test.mjs）
+├── commands/              6 个 primary command（setup/bootstrap/init/driver/bug/learn）
 ├── skills/                5 个 skill（prelearn/data-fetch/auto-fix/driver-contract/incident-triage）
 ├── schemas/               L2 project.schema.yaml + 示例 + driver-response.schema.json
 ├── drivers-skeleton/      驱动契约骨架 + 可跑的 JSON 示例（script 通道）
 ├── mcp-skeleton/          MCP 壳 server + 共享契约包 supperh_contract（mcp 通道；零凭据）
 ├── scripts/               resolve-project / fastpath-gate / git-preflight / sync-assets /
 │                          validate-project / resolve-private-root / setup / detect-ide /
-│                          bootstrap / init-project / migrate-registry
+│                          bootstrap / init-project / driver-registry / migrate-registry
 ├── .qoder/rules/          项目无关红线（零占位符，clone 即生效）
 ├── .githooks/             降级式 pre-commit
 ├── docs/                  架构文档 + 占位符清单

@@ -109,14 +109,45 @@ class Binding:
     health_tool: str | None = None
     slot_config: dict = field(default_factory=dict)
     forbid_write_schemas: list = field(default_factory=list)
+    role: str | None = None
 
     def as_meta(self) -> dict:
-        return {"source": self.source, "project": self.project, "slot": self.slot, "server": self.server}
+        out = {"source": self.source, "project": self.project, "slot": self.slot, "server": self.server}
+        # 只在有值时递出：缺席 = “这个源不是数据库通道”，与 L2 里 role 的缺省语义同构。
+        if self.role:
+            out["role"] = self.role
+        return out
 
 
 def drivers_of(cfg: dict) -> dict:
     d = cfg.get("drivers")
     return d if isinstance(d, dict) else {}
+
+
+# 唯一被 L1 赋予机器语义的 role：关系库通道（写保护只绑它）。“有几个数据源、各自叫什么”
+# 归用户（F-11），所以 L1 不得靠槽位名判语义——旧版 SLOT_OF_TOOL 就是把“logs”“tickets”
+# 当成了契约，用户不登记这两个名字时它直接失效。
+DB_ROLE = "database"
+
+
+def slot_role(slot: str, sc) -> str | None:
+    """Machine-semantic role of one slot, legacy name synonym included.
+
+    存量兼容：槽位恰好叫 `database` 时按同义处理（F-10 前的写法），但 validate 会报出来——
+    “靠键名猜语义”正是 F-11 要收掉的那类隐性约定。
+    """
+    if not isinstance(sc, dict):
+        return None
+    r = sc.get("role")
+    if isinstance(r, str) and r.strip():
+        return r.strip()
+    return DB_ROLE if slot == DB_ROLE else None
+
+
+def db_slot(cfg: dict) -> tuple[str, dict] | None:
+    """The (slot, cfg) pair carrying `role: database`, or None when the project has no SQL channel."""
+    hits = [(s, c) for s, c in sorted(drivers_of(cfg).items()) if slot_role(s, c) == DB_ROLE]
+    return hits[0] if hits else None
 
 
 def whitelisted_sources(cfg: dict, server: str = DEFAULT_SERVER) -> dict[str, list[str]]:
@@ -174,6 +205,7 @@ def source_binding(cfg: dict, code: str, source: str, server: str = DEFAULT_SERV
         health_tool=(str(mcp["healthTool"]) if mcp.get("healthTool") else None),
         slot_config=(sc.get("config") if isinstance(sc.get("config"), dict) else {}),
         forbid_write_schemas=[str(x) for x in (forbid or [])],
+        role=slot_role(slot, sc),
     )
 
 

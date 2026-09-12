@@ -1,6 +1,6 @@
 ---
 name: driver-contract
-description: supperH 驱动契约 skill。定义内网数据源驱动（database/logs/tickets/efficiency）的标准接口：CLI 参数、JSON envelope、exit code、SELECT-only 守卫、凭据装载规范、协议级探活判据，以及两种调用通道（script / mcp）的同构关系与探测降级纪律。用户自开发内网实现时以本 skill 为唯一符合性判据。
+description: supperH 驱动契约 skill。定义内网数据源驱动的标准接口：CLI 参数、JSON envelope、exit code、SELECT-only 守卫、凭据装载规范、协议级探活判据，以及两种调用通道（script / mcp）的同构关系与探测降级纪律。槽位名与个数归用户（L1 不列清单）。用户自开发内网实现时以本 skill 为唯一符合性判据。
 ---
 
 # skill: driver-contract
@@ -29,16 +29,16 @@ description: supperH 驱动契约 skill。定义内网数据源驱动（database
 
 ```
 {{DRIVERS_ROOT}}/                       # = {{PRIVATE_ROOT}}/drivers/
-  ├── <your-db-driver>.py               # 用户在注册条目里登记为 drivers.database.impl
-  ├── <your-log-driver>.py              # 注册为 drivers.logs.impl
-  ├── <your-ticket-driver>.py           # 注册为 drivers.tickets.impl
-  ├── <your-efficiency-driver>.py       # 注册为 drivers.efficiency.impl
+  ├── <slot>.py                         # 一个源一个文件；**槽位名由用户定**，个数不限
+  ├── <另一个-slot>.py                   # 哪个是数据库通道由注册条目里的 `role: database` 标出，不靠文件名
   ├── .secrets/                         # 私有配置（不进 git，不进任何 dist）
   │   ├── db.local.json
   │   └── token.local.env
   ├── <code>/adapter.py                 # 可选：MCP 通道的项目 adapter（kind=mcp 时由壳 importlib 装载）
   └── <driver-name>.d/                  # 可选：driver 依赖的本地资源（例：schema dump 缓存）
 ```
+
+登记入口是 `/supperH-driver`（写盘经 `scripts/driver-registry.mjs`）：它把实现文件写进上表第一个位置，并在 `projects/<code>.yaml` 的 `drivers.<槽位名>` 下记一条 `{desc, impl, healthCheck, role?, writes?, kind?, config?}`。本仓库不持有哪些槽位名可以存在——名字是 L2 事实。
 
 **参考实现（骨架，非内网可用）**：
 
@@ -77,14 +77,14 @@ description: supperH 驱动契约 skill。定义内网数据源驱动（database
 
 - 参数**必须**走 argv 数组，不允许 shell 字符串拼接
 - `--project` = `{{PROJECT.identity.code}}`；driver 侧用它索引到自己的 config
-- `--source` 语义由 driver 自解释，但对同一槽位的多 source（例：database 槽下的 test/uat/prod）**必须**在注册条目的 `drivers.<slot>.config.sources` 里显式声明
+- `--source` 语义由 driver 自解释，但对同一槽位的多 source（例：数据库通道槽位下的 test/uat/prod）**必须**在注册条目的 `drivers.<slot>.config.sources` 里显式声明
 - `--filter` 可重复；`--limit` / `--timeout` 单值
 - `--params` 指向 JSON 文件；文件路径必须在 `{{PRIVATE_ROOT}}` 或用户 home 之下，driver 侧校验（防被指到 `/etc/passwd`）
 - `--dry-run` 可选支持；不支持时忽略而非报错
 
 ### 菜单查询保留源 `menu`
 
-菜单学习（`/supperH-learn --menu`）复用 `database` 槽位，但固定以**保留源名 `menu`** 调用（即 `--source menu`）。调用方通过 `--filter` 传入表名与列名，driver 负责**安全拼装 SELECT**：
+菜单学习（`/supperH-learn --menu`）复用**数据库通道**（`role: database` 那个槽位；名字归用户，不写死），但固定以**保留源名 `menu`** 调用（即 `--source menu`）。调用方通过 `--filter` 传入表名与列名，driver 负责**安全拼装 SELECT**：
 
 ```
 <db-impl> --project <code> --source menu \
@@ -97,7 +97,7 @@ description: supperH 驱动契约 skill。定义内网数据源驱动（database
 - driver **必须**对 `table` / 列名做标识符引用（防注入），**只**拼 `SELECT`；`--filter where` 若提供，须经 `SELECT_only_guard` 复核（禁写关键字）
 - `--limit` 必须生效，`meta.truncated` 如实回填
 - 返回**标准 envelope**（`data.columns` 至少含 `id/parentId/name/path`，可选 `order`；`data.rows` 与之对齐）
-- `menu` 源**必须**在注册条目的 `drivers.database.config.sources` 里显式声明（同其它 source）
+- `menu` 源**必须**在数据库通道（`role: database` 那个槽位）的 `config.sources` 里显式声明（同其它 source）
 - 凭据仍**只**走 env / `{{DRIVERS_ROOT}}/.secrets/`（见下"环境变量"节）
 
 ### 环境变量（凭据装载）
@@ -196,7 +196,7 @@ driver **只**允许从以下途径拿凭据：
 
 | | script（缺省）| mcp |
 |---|---|---|
-| 调用形状 | `<impl> --project <code> --source <name> ...` | 子 agent 调 MCP 工具：`db_query` / `log_search` / `ticket_list` / `efficiency_list` / `query` |
+| 调用形状 | `<impl> --project <code> --source <name> ...` | 子 agent 调 MCP 工具：`db_query`（只能取 `role: database` 的槽位）/ `query`（任意已白名单源）|
 | 结果载体 | stdout JSON + **进程退出码 0–5** | `content[0].text` 里同一份 envelope；失败另带 JSON-RPC error code |
 | 谁起进程 | 子 agent 的 bash | IDE 按注册表起（插件相对路径，永不含凭据）|
 | 能否做分流依据 | ✅ 唯一可以 | ❌ 禁止（server 起不来时工具静默消失，无码无 stderr）|
@@ -206,14 +206,14 @@ driver **只**允许从以下途径拿凭据：
 
 ```yaml
 drivers:
-  logs:
+  <你起的槽位名>:          # 槽位名由用户在登记时自定，本文不举例名字
     kind: mcp            # 缺省 script；只换取数通道
     fallback: script     # 缺省 script；none = 明确不许降级（探测会 blocked，不悄悄翻写）
     mcp:
       server: supperh-drivers    # 必须与插件 .mcp.json 的 server id 一致
       sources: [app_logs]        # 闭合白名单：未列出的 source 被拒（exit 2 语义）而不是被猜
-    impl: "{{DRIVERS_ROOT}}/log-driver.py"   # 即使 kind=mcp 也必填：门禁与 fallback 都靠它
-    healthCheck: "{{DRIVERS_ROOT}}/log-driver.py --project {{PROJECT.identity.code}} --health"
+    impl: "{{DRIVERS_ROOT}}/<你起的槽位名>.py"   # 即使 kind=mcp 也必填：门禁与 fallback 都靠它
+    healthCheck: "{{DRIVERS_ROOT}}/<你起的槽位名>.py --project {{PROJECT.identity.code}} --health"
 ```
 
 exit code ↔ JSON-RPC error code 对照（表本体在 `mcp-skeleton/supperh_contract/codes.py`，与 `base_driver.py` 同一张表，`tests/mcp-manifest.test.mjs` 机械比对锁死）：
@@ -229,7 +229,7 @@ exit code ↔ JSON-RPC error code 对照（表本体在 `mcp-skeleton/supperh_co
 
 **探测与降级纪律**（机械判定，不给模型判断）：
 
-1. 注册期 `/supperH-init --write` 对每个 `kind: mcp` 槽位跑一次 `python "{{TOOL_ROOT}}/mcp-skeleton/shell.py" --health --project <code> --slot <slot>`，退出码即结论。
+1. 登记期（`/supperH-init --write` 或 `/supperH-driver` 的 add/update，两者共用同一个 `decideChannels`）对每个 `kind: mcp` 槽位跑一次 `python "{{TOOL_ROOT}}/mcp-skeleton/shell.py" --health --project <code> --slot <slot>`，退出码即结论。
 2. 该探测只查**管路**（私有根 / 注册文件 / 白名单 / adapter 可装载），**不碰后端**：管路完好 ≠ 数据连得上，连通性门禁仍只认脚本 `healthCheck` 的退出码。
 3. 探测不过 + `fallback` 非 `none` → **回写 `kind: script`** 再落盘；后续会话只读已定的 `kind`，不在会话内重探（重探 = 每会话多一个 30s 超时面）。
 4. 探测不过 + `fallback: none` → 不翻写，只报 `blocked`（那是运维的显式决定，探测无权覆盖）。
@@ -274,7 +274,8 @@ exit code ↔ JSON-RPC error code 对照（表本体在 `mcp-skeleton/supperh_co
 - 命中写关键字 **且** `target_schema` 命中 `{{PROJECT.db.forbidWriteSchemas[]}}` → 抛 `DB_GATE_DENY`，exit 2
 - 命中写关键字 **且** 目标 schema 允许写 → 放行；driver 需要自行使用 `writableUser` 连接
 - 只有读关键字 → 一律放行；使用 `readonlyUser` 连接
-- **`forbid_writes` 为空时的真实行为**：一条都不拦（实现事实，不是设计意图）。所以清单必须来自已接入的 `db` 段 —— 未接入数据库时根本不该存在 `database` 通道；“清单缺失 = 拒绝”由 agent 侧客户端守卫兜住（见 `skills/data-fetch/SKILL.md` guard 段），不得拿本守卫的空清单当“无限制”用。
+- **`forbid_writes` 为空时的真实行为**：一条都不拦（实现事实，不是设计意图）。所以清单必须来自已接入的 `db` 段 —— 未接入数据库时根本不该存在带 `role: database` 的槽位；“清单缺失 = 拒绝”由 agent 侧客户端守卫兜住（见 `skills/data-fetch/SKILL.md` guard 段），不得拿本守卫的空清单当“无限制”用。
+- **非库动作的写门禁也在 driver 侧跑一次**：槽位登记的 `writes[]`（`action` + `gate: confirm|deny`）是唯一授权来源。收到未声明的动作、或声明为 `deny` 的动作 → 退 2 并在 `error` 里点名原因（`WRITE_NOT_DECLARED:` / `WRITE_GATE_DENY:` 前缀，与 `DB_GATE_DENY:` 同一形态的消息标记，不是新退出码）。为何不信调用方已拦：driver 的入参可以不经过 agent 客户端（人手敲、别的工具调、测试跑），只装在客户端的门禁不是一道边界。**一期契约只标准化读路径**：写动作的**请求形态**由 driver 自定（怎么触发要写进 `desc` / `config`，让调用方看得到），但**门禁形态**是统一的（未声明 → 拒、`deny` → 拒、`confirm` → 先把完整载荷给用户看）。
 
 **双重防御**：这一守卫在 agent 客户端也跑一次，不完全信任 driver。即使 driver 忘了实现守卫，agent 侧也会拦下。
 

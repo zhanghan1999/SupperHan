@@ -15,7 +15,7 @@
       "required": ["source"],
       "properties": {
         "schemaVersion": { "type": "integer", "minimum": 1, "description": "Version of THIS contract file; absent means 1" },
-        "source":    { "type": "string", "description": "driver slot name or logical source: database | logs | tickets | efficiency | demo | menu | ..." },
+        "source":    { "type": "string", "description": "Logical source within the slot (e.g. a table/env/endpoint selector), or the slot name itself when the driver has no sub-sources. Slot names belong to the user's project file - this contract never enumerates them." },
         "project":   { "type": "string", "description": "identity.code the driver resolved its config by. Omitted only when args are so broken no code was known (exit 1/2 before routing)." },
         "count":     { "type": "integer", "minimum": 0, "description": "rows actually returned" },
         "truncated": { "type": "boolean", "description": "true = hit --limit and cut; consumers must surface this in their final report" },

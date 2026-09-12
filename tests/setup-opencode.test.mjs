@@ -241,12 +241,13 @@ test('探测：只有 .jsonc 里注册了 server 也算已注册（修前的假�
   fs.rmSync(path.dirname(t), { recursive: true, force: true });
 });
 
-// 安装器不依赖真 dist，但“到底有 5 个命令”这件事得有人钉住：setup.mjs 的 next steps 文案
-// 与两份适配说明都写着 5 个，漏一个就是文案在说谎。读源目录（sync 只读不写 commands/，无竞争）。
-test('命令总数 = 5：文案里承诺的 /supperH-* 真的都存在', () => {
+// 安装器不依赖真 dist，但“到底有几个命令”这件事得有人钉住：setup.mjs 的 next steps 文案
+// 与两份适配说明都写着同一个数，漏一个就是文案在说谎。读源目录（sync 只读不写 commands/，无竞争）。
+test('命令清单与文案一致：写进 next steps 的 /supperH-* 真的都存在', () => {
   const names = fs.readdirSync(path.join(ROOT, 'commands')).filter(n => n.endsWith('.md')).sort();
   assert.deepEqual(names, [
-    'supperH-bootstrap.md', 'supperH-bug.md', 'supperH-init.md', 'supperH-learn.md', 'supperH-setup.md',
+    'supperH-bootstrap.md', 'supperH-bug.md', 'supperH-driver.md', 'supperH-init.md',
+    'supperH-learn.md', 'supperH-setup.md',
   ]);
 });
 

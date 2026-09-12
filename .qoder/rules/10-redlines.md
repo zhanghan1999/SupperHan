@@ -8,7 +8,7 @@
 ## R1 数据与代码安全
 
 - **禁止绕过 DB 门禁**：任何写操作前必须比对当前注册条目（`projects/<code>.yaml`）的 `forbidWriteSchemas` 清单。若目标 schema 命中 → 立即终止 + 报告，不允许"用户明确同意"作为例外。
-- **清单不存在 / 为空 / 未被填充 = 本项目未接入数据库**，而不是"无限制"：写库操作一律禁止（无法证明安全就不能动手），DB 取证步骤记为缺口，告知可用 `/supperH-init` 补接。同理 `drivers.database` 缺席时不得另开通道去连库。
+- **清单不存在 / 为空 / 未被填充 = 本项目未接入数据库**，而不是"无限制"：写库操作一律禁止（无法证明安全就不能动手），DB 取证步骤记为缺口，告知可用 `/supperH-init` 补接。同理数据库通道（解析器输出的 `dbDriver`，按 `role: database` 解出）缺席时不得另开通道去连库。
 - **禁止跳过新鲜度体检就 git add**：跑本仓库的 `node scripts/sync-assets.mjs --check`（在仓库根目录执行；人工别名 `npm run sync:check`），残留占位符进入 dist 会导致运行时行为不可预测。
 - **禁止把私有根目录**（同级 `supper-Han-private/`）**加入任何 git 仓库**，包括通过符号链接/junction 变相加入。
 - **禁止把生产凭据/账号名/内网域名写入本仓库任何文件**：真实值只能出现在私有根的注册条目（`projects/<code>.yaml`）或 `drivers/` 里。MCP 形态同理：注册表（`.mcp.json` / IDE 的 mcp 块）只允许出现 server id、启动命令与 `env_vars` **名单**，凭据只进 server 进程环境，禁写字面量 —— 注册表本身是 agent 可读文件。
@@ -16,7 +16,8 @@
 
 ## R2 权限边界
 
-- **禁止 prelearn-writer 之外的任何 agent 使用 `external_directory: allow`**。这是最小放开面原则。
+- **禁止 `prelearn-writer` / `driver-author` 之外的任何 agent 使用 `external_directory: allow`**。这是最小放开面原则。每多一个例外必须同时做到三件事：① 在本条里指名道姓；② 写死它只能碰私有根的**哪一个子目录**（`prelearn-writer` → 学习数据目录、`driver-author` → 驱动目录）；③ 在 `tests/agent-permissions.test.mjs` 的名单里登记（该测试扫 frontmatter，名单外出现 allow 即红）。只改文案不改名单过不去。
+- **禁止把边界判据写成含分支的条件式**：一个放开面 agent 只能有**一个**路径前缀（路径必须以该前缀开头 + 匹配固定形状），不得“模式 A 用前缀甲、模式 B 用前缀乙”——那等于把边界交给模型先判分支再判边界，判错分支就写错地方。往已有 agent 上拼第二职责而理由是“少要一个权限”，**一律拒**：`external_directory` 是布尔开关而不是目录白名单，拿到 allow 的那一刻它覆盖整个私有根，“只能写某子目录”从来只是提示词里的自检；拼职责不会缩小硬面，只会把不含分支的判据讲糊。
 - **禁止 agent 通过 `bash` 里的 `echo`、`tee`、`cat >`、`sed -i` 绕过工具层权限拦截**去做被 `edit: deny` 禁掉的写操作。
 - **禁止主 agent 直接读源码定位问题**：代码定位由学习模块（prelearn）+ 学习记录（`CONTEXT_ROOT/<module>/`）提供。若学习记录不完整 → 派 prelearn-analyzer 定向补学，不允许越级。
 - **`git` 命令只限白名单**（适用于所有 agent；主入口根本不碰 git，只调解析器）：只读类 `status` / `diff` / `log` / `blame` / `rev-parse` / `show`；快照类 `stash create`、`update-ref refs/supperh/snap/*`、`checkout <sha> -- <path>`（只跟具体改过的文件）；仅当运行期 `git.deliveryMode: local-commit` 时的 `add` + `commit`。**永不允许**：`push`、`reset`、`clean`、`checkout .`（及整树切换）、`stash push` / `stash drop`（及任何其它 `stash` 子命令）、`rebase`、`gc`、`commit --amend`、`--no-verify`，以及对 `refs/supperh/snap/` 之外任何 ref 的 `update-ref`。理由：`stash create` 是这里唯一**不动工作区、不写 `refs/stash`、不进分支历史**的快照形态；`stash push` 会静默改用户的工作区与 stash 栈，`reset`/`clean`/整树 `checkout` 会拿掉用户手改的内容 —— 那些都不需要 agent 的修复动作就能造成不可逆损失。
@@ -40,7 +41,7 @@ L1 产物**项目无关**：sync 只烤 `TOOL_ROOT / PRIVATE_ROOT / DRIVERS_ROOT
 - **禁止跳过步骤 0 门禁**：`/supperH-bug`、`/supperH-learn` 进入步骤 1 之前**必须**先成功运行解析器（退出 0）。非 0 一律立即停止并原样输出打回语。
 - **窄 bash 白名单**：`/supperH-bug`、`/supperH-learn` 虽 `bash: allow`，其**唯一**允许的 bash 脚本就是那一条 `node "<TOOL_ROOT>/scripts/resolve-project.mjs" ...`，可按不同参数多次调用：步骤 0 不带参、新鲜度取数带 `--module`、I0 + 门禁判定带 `--anchor` + `--text` + `--intent-json`/`--intent-report`（反查来的锚点再加 `--anchor-source lookup`）、诊断基线带 `--env`、G5 验收再带 `--impact-json`/`--impact-report`（可叠 `--scope`）、改动动手前带 `--preflight`。**白名单只圈到“这一个脚本文件”**，不圈子命令：除上述已文档化的旗标外不得自造参数。其它任何编译/DB/网络命令（**包括跑 driver**）仍必须派子 agent——快路径 F1.4 的 traceId/ticketNo 反查因此走 `bug-analyzer(mode=lookup)` 而非主 agent 直接跑脚本；`--preflight` 也只集**本地事实**（脏文件/快照 ref/槽位名单），绝不在执行前做网络预检（§10.8）。
 - **MCP 取数工具只绑子 agent**：壳 server `supperh-drivers` 只允许出现在子 agent frontmatter 的 `mcpServers` 里（现绑 `bug-analyzer` / `bug-tester` / `bug-test-writer` / `prelearn-analyzer`），**主 agent 与命令入口一律不绑**。这与上一条是同一条精神的两个面：取数动作必须发生在被约束的下游，主入口只消费结构化结果。
-- **跨私有根的只读取数下沉到脚本**：子 agent 与主入口均不得为了读 `CONTEXT_ROOT/` 下的 `index.md` 而要求放开 `external_directory`；需要这份数据时走解析器返回的 `freshness` / `fastPath` 字段，或派 `prelearn-analyzer`。目的是把最小放开面钉在 1 个 subagent 上。
+- **跨私有根的只读取数下沉到脚本**：子 agent 与主入口均不得为了读 `CONTEXT_ROOT/` 下的 `index.md` 而要求放开 `external_directory`；需要这份数据时走解析器返回的 `freshness` / `fastPath` 字段，或派 `prelearn-analyzer`。目的是把最小放开面钉在**结构上最少**而不是钉在某个数字上。已有两个例外的共同特征：“写入落在私有根”，且都不能下沉为脚本（学习落地与写驱动都是探索型判断，不是确定性计算）——拿不到这个特征就不得新增例外。
 - **禁止不传 `--project <code>` 就调用 driver/子 agent**：拿到解析结果后，所有下游调用必须显式携带该 code 与解析返回的 `contextRoot`，杜绝多项目下串包。
 
 ## R4 学习数据完整性

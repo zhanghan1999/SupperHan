@@ -102,7 +102,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 }
 ```
 
-- `menu.source == "database"` → analyzer 用配置的 `database` 驱动槽位跑 **SELECT-only** 查询（`--source <menu.database.source>`，`--filter` 传 `table/id/parentId/name/path`，可选 `where`；详见 driver-contract）。
+- `menu.source == "database"` → analyzer 用**数据库通道**跑 **SELECT-only** 查询（默认取 `dbDriver` 指向的槽位；`menu.database.slot` 显式写了名字时以它为准。`--source <menu.database.source>`，`--filter` 传 `table/id/parentId/name/path`，可选 `where`；详见 driver-contract）。库里没接出数据库通道时不得“猜一个驱动先跑着”。
 - `menu.source == "code"` → analyzer 读 `menu.code.path`（相对 `effectiveRoot`），按 `menu.code.format` 解析。
 - analyzer 失败 → 原样上报其错误/退出码，**不换源重试**。
 

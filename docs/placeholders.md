@@ -70,27 +70,29 @@
 
 **按下标访问**（如需）：`{{PROJECT.modules[0].name}}` — 一期不启用（下标语义太脆弱）；如需请按 module 名显式列出。
 
-### 3.3 驱动槽位
+### 3.3 驱动槽位与 `dbDriver` 别名
 
-驱动槽位对象作为整体出现时（少见，多用于示例），展开为 JSON 字符串；常用的是 `.impl` / `.healthCheck` 子字段：
+**L1 里没有“槽位名清单”这回事**（F-11）：`drivers` 的键名与个数由用户在 `projects/<code>.yaml` 里定，经 `/supperH-driver` 登记。本节以前列四个名字（database / logs / tickets / efficiency）当“可用的槽位”，那是把“外部源只有四个”钉成契约——用户接第五个源时不需要改 L1，改 L1 反而是错的。
 
-| 占位符 | 对应注册条目路径 |
-|--------|----------------------|
-| `{{PROJECT.drivers.database.impl}}` | `drivers.database.impl` |
-| `{{PROJECT.drivers.database.healthCheck}}` | `drivers.database.healthCheck` |
-| `{{PROJECT.drivers.logs.impl}}` | `drivers.logs.impl` |
-| `{{PROJECT.drivers.tickets.impl}}` | `drivers.tickets.impl` |
-| `{{PROJECT.drivers.efficiency.impl}}` | `drivers.efficiency.impl` |
+唯一有机器语义的是 `role: database`：它标出“哪个槽位是数据库通道”（写保护只绑它，全项目最多一个）。为了让 L1 不必知道它叫什么，解析器输出一个**派生字段** `dbDriver`（不是 YAML 路径，运行期从步骤 0 的返回体里取）：
 
-其它槽位同理。`db` 与 `drivers` 两段（含 `drivers.database`）**都是可选的**：接不接外部数据源由用户决定，所以 L1 里引用 `{{PROJECT.drivers.logs.impl}}` 而某个项目没接 logs 时，**sync 不会报错**（它只把 `{{PROJECT.<dot.path>}}` 语法性地改写成 `${SUPPERH.PROJECT.<dot.path>}`，不看字段存在与否），事情在运行期才暴露：步骤 0 拿不到对应值 → 该处无内容可填，就得按“本项目未接入该源”报告而不是编一个值。**写 L1 时的纪律**：引用可选字段先想想纯代码模式该怎么办，并在同一段里写清“无此字段 = 未接入”的读法（参考 `commands/supperH-bug.md` 步骤 2）。
+| 占位符 | 来源 | 说明 |
+|--------|------|------|
+| `{{PROJECT.dbDriver.impl}}` | 解析器输出 `dbDriver.impl`（= 数据库槽位的 `impl`，已展开成绝对路径） | 库通道脚本；未接入数据库时整个 `dbDriver` 为 `null` |
+| `{{PROJECT.dbDriver.healthCheck}}` | 同上 | 没声明探活命令则值为 `null`（不伪造一个） |
+| `{{PROJECT.dbDriver.slot}}` | 那个槽位的**名字** | 需在文字里指认“哪个槽位”时报这个，不写死名字 |
+
+其余源（日志、工单、或用户自己起的任何名字）在 L1 里**只能以“从解析器返回的 `drivers` 键集合里挑一个、用 `desc` 判用途”的形式出现**，不得写成 `{{PROJECT.drivers.<某个名字>.*}}` —— 那种写法在用户没取这个名字的项目上**不报错，只是填不上值**，属于静默失效的一类缺陷。prompt 侧（`agents/` `commands/` `skills/` `.qoder/rules/`）这条由 `tests/l1-slot-neutrality.test.mjs` 卡住：出现四个旧名中任何一个、或“database / logs / …”这类名单枚举即红，**无例外分支**（`scripts/` 里的 legacy 兼容分支与本文这种历史说明句不在受限面内——它们是在讲述这条纪律，不是在违反它）。
+
+`db` 与 `drivers` 两段**都是可选的**：接不接外部数据源由用户决定，所以 L1 里引用了一个项目没有的字段时，**sync 不会报错**（它只把 `{{PROJECT.<dot.path>}}` 语法性地改写成 `${SUPPERH.PROJECT.<dot.path>}`，不看字段存在与否），事情在运行期才暴露：步骤 0 拿不到对应值 → 该处无内容可填，就得按“本项目未接入该源”报告而不是编一个值。`dbDriver` 把这件事向前推了一步：**“没库”是一个能机械区分的事实（值为 `null`），而不是一个解不开的 token**。**写 L1 时的纪律**：引用可选字段先想想纯代码模式该怎么办，并在同一段里写清“无此字段 = 未接入”的读法（参考 `commands/supperH-bug.md` 步骤 2）。
 
 真正会被 sync 拦下（exit 3）的是**没被登记的任何 `{{...}}` 字面量**：写错大小写、带了空格（`{{ PROJECT.db.host }}`）、或用了不存在的裸 token。它们不会被第 2 步的 runtimeify 命中，于是作为残留被阻断。
 
-**没有预检槽位**：`drivers` 下可用的槽位就是上表那四个（+ schema 为向后兼容而保留、但 L1 不得引用的废弃键 `vpnPreCheck`）。连通性只由各槽位自己的 `healthCheck` 退出码事后判定，所以 L1 也不存在「先探一次网络再决定跑不跑」的占位符需求（见 `docs/architecture.md` §10.8）。
+**没有预检槽位**：连通性只由各槽位自己的 `healthCheck` 退出码事后判定，所以 L1 也不存在「先探一次网络再决定跑不跑」的占位符需求（废弃键 `vpnPreCheck` 仍能被存量文件解析、但 L1 不得引用；见 `docs/architecture.md` §10.8）。
 
-**已展开的impl 就是绝对路径**：用户在 L2 里写 `impl: "{{DRIVERS_ROOT}}/x.py"`，解析器/ sync 会先把 `{{DRIVERS_ROOT}}` 深度展开（含 `healthCheck` / `config`）后才交给产物 —— 所以 L1 侧只能写 `{{PROJECT.drivers.<slot>.impl}}` 整体，**绝不能再拼一层 `drivers/` 前缀**（历史上拼过 → `.../supper-Han-private/drivers/{{DRIVERS_ROOT}}/x.py` 双前缀 + 未替换 token，只因 `drivers/` 为空目录而没炸）。
+**已展开的 impl 就是绝对路径**：用户在 L2 里写 `impl: "{{DRIVERS_ROOT}}/x.py"`，解析器/ sync 会先把 `{{DRIVERS_ROOT}}` 深度展开（含 `healthCheck` / `config`）后才交给产物 —— 所以 L1 侧只能写 `{{PROJECT.dbDriver.impl}}` 整体，**绝不能再拼一层 `drivers/` 前缀**（历史上拼过 → `.../supper-Han-private/drivers/{{DRIVERS_ROOT}}/x.py` 双前缀 + 未替换 token，只因 `drivers/` 为空目录而没炸）。
 
-**不进入 L1 占位符的字段**：`kind` / `fallback` / `mcp.server` / `mcp.sources` 是运行期通道判定输入，由 `data-fetch` 的 resolve 段直接读解析器输出选定，**不烤进 prompt**（烤进去 = 把注册期的探测结论冻结在产物里，重探一次也改不动）。L1 里写 `{{PROJECT.drivers.<slot>.kind}}` 会被残留扫描拦下（本表未登记）。
+**不进入 L1 占位符的字段**：`kind` / `fallback` / `mcp.server` / `mcp.sources` 是运行期通道判定输入，由 `data-fetch` 的 resolve 段直接读解析器输出选定，**不烤进 prompt**（烤进去 = 把注册期的探测结论冻结在产物里，重探一次也改不动）。注意这里没有机械拦：`{{PROJECT.drivers.<slot>.kind}}` 在语法上完全合法，会被正常 runtimeify 成 token——上一版本节说它“会被残留扫描拦下”是错的，本文件现在改回实话：**这条只能靠写 L1 的人自觉**（因为 sync 无法知道哪个 dot.path 是“注册期结论”、哪个是“注册值”）。
 
 **诊断基线也不是占位符**：`--env` 的返回体 `diagnoseBaseline = {declared, env, branch, schema, codeSide}` 每次调用现取 —— 环境来自用户当次的描述，不来自注册表（同一个项目今天查 uat、明天查 prod）。所以 L1 里**不存在也不得新增** `{{PROJECT.env}}` 这类占位符；`branches.*` / `db.schemas.*` 本身仍可按 §3.1 登记使用（它们是注册值）。两个基线的分界见 `docs/architecture.md` §10.9。
 
@@ -119,7 +121,7 @@ L1 一般写 `{{CONTEXT_ROOT}}` / `{{TASKS_ROOT}}`（走 override 逻辑），�
 | 现象 | 原因 | 修法 |
 |------|------|------|
 | `sync: exit 3` + 残留 `{{PROJECT.db.host}}` 这类字面量 | 写法不合 runtimeify 规则：带了空格、大小写错、或 token 本身不存在 | 改成无空格、全大写的 `{{PROJECT.db.host}}`。**已正确写出的 `{{PROJECT.<path>}}` 不会造成残留**：它会被改写成 `${SUPPERH.PROJECT.<path>}`，字段存不存在是运行期的事 |
-| 运行期 `${SUPPERH.PROJECT.drivers.logs.impl}` 无值可填 | 该项目未接入这个外部源（纯代码模式） | 不是错误：按“未登记”报告该步骤，不编造替代值（要接就走 `/supperH-init`） |
+| 运行期 `${SUPPERH.PROJECT.drivers.<某个槽位名>.impl}` 无值可填 | 该项目没接这个外部源（纯代码模式），**或者 L1 写死了一个用户根本不用的槽位名** | 不是错误：按“未登记”报告该步骤，不编造替代值（要接就走 `/supperH-driver`）。若是后一种原因，那是 L1 缺陷：改成按 `desc` 选槽位，或用 `dbDriver` 别名 |
 | 残留 `{{ CONTEXT_ROOT }}`（带空格） | 语法错误 | 改成 `{{CONTEXT_ROOT}}`（无空格） |
 | 残留 `{{project.db.host}}` | 大小写错 | 改成 `{{PROJECT.db.host}}` |
 | L1 里出现 `{{TOOL_ROOT}}/../supper-Han-private` | 用了相对路径 | 用 `{{PRIVATE_ROOT}}` 单一变量，别用 `..` |
@@ -156,7 +158,7 @@ grep -REo "\{\{[^{}]+\}\}" agents commands skills schemas drivers-skeleton mcp-s
 
 结果按类别汇总：
 
-- **根路径类**（`TOOL_ROOT` / `PRIVATE_ROOT` / `DRIVERS_ROOT` / `CONTEXT_ROOT` / `TASKS_ROOT` / `SYNC_TIMESTAMP`）：出现在所有 `agents/*`（前置自检里的 `node "{{TOOL_ROOT}}/scripts/sync-assets.mjs"` 引导行）、5 个 `commands/*`、`skills/*/SKILL.md`、`drivers-skeleton/*`；`mcp-skeleton/*` 应该 **0 命中**（见 §6 的 `.py` 地雷）
+- **根路径类**（`TOOL_ROOT` / `PRIVATE_ROOT` / `DRIVERS_ROOT` / `CONTEXT_ROOT` / `TASKS_ROOT` / `SYNC_TIMESTAMP`）：出现在所有 `agents/*`（前置自检里的 `node "{{TOOL_ROOT}}/scripts/sync-assets.mjs"` 引导行）、6 个 `commands/*`、`skills/*/SKILL.md`、`drivers-skeleton/*`；`mcp-skeleton/*` 应该 **0 命中**（见 §6 的 `.py` 地雷）
 - **项目字段类**（`PROJECT.<dot.path>`）：出现在所有 agents / commands / skills；具体路径见 §3；`grep -REo "\{\{PROJECT\.[^{}]+\}\}" agents commands skills` 可直接列出
 
 ## 9. 纯度扫描（与占位符无关，但同在 sync 里拦）

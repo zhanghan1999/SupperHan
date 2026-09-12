@@ -38,10 +38,10 @@ properties:
     properties:
       slot:
         type: string
-        description: "Reused driver slot (default 'database')."
+        description: "Reused driver slot name. Absent means the role: database slot (resolved per-project, NOT a slot literally named 'database')."
       source:
         type: string
-        description: "Driver logical source name; must be declared in drivers.database.config.sources."
+        description: "Driver logical source name; must be declared in the config.sources of the role: database slot."
       table:
         type: string
         minLength: 1

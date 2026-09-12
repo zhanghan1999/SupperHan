@@ -1,6 +1,6 @@
 # Qoder 适配说明 · 在自己的项目里用 /supperH
 
-> 本文件**只解决一件事**：当你用 Qoder 打开**自己的 Java 项目**（不是 supper-Han-java 工具仓库本身）时，怎么让那 5 个 `/supperH` 命令出现在输入框的斜杠菜单里、能在当前项目上下文中调用。
+> 本文件**只解决一件事**：当你用 Qoder 打开**自己的 Java 项目**（不是 supper-Han-java 工具仓库本身）时，怎么让那组 `/supperH` 命令出现在输入框的斜杠菜单里、能在当前项目上下文中调用。
 >
 > 这与配置向导（建私有根骨架、按工作区注册项目、连通检测）**是两件事**，互不依赖。那份见 `commands/supperH-setup.md`、`commands/supperH-bootstrap.md` 与 `commands/supperH-init.md`；本文件只讲**命令在 Qoder 里的加载路径与作用域**。
 
@@ -66,6 +66,7 @@ node scripts/sync-assets.mjs   # 产出 dist 并自动安装 Qoder 插件到全�
 | `/supperH-init` | 当前工作区注册：落 `projects/<code>.yaml` + `menus/<code>.yaml`（exit 10 未注册时跑它）|
 | `/supperH-bug` | Bug 全流程主入口 |
 | `/supperH-learn` | 代码/菜单/流程学习入口 |
+| `/supperH-driver` | 数据源登记：往已注册条目里加 / 改 / 删 / 看一个外部数据源（槽位名由用户定）|
 
 ---
 

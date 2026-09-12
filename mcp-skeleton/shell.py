@@ -80,23 +80,29 @@ from supperh_contract.envelope import (  # noqa: E402
 from supperh_contract.guards import ContractViolation, ReadOnlyGuard  # noqa: E402
 from supperh_contract.private_root import resolve_private_root  # noqa: E402
 from supperh_contract.registry import (  # noqa: E402
+    DB_ROLE,
     DEFAULT_SERVER,
     ContractError,
     drivers_of,
     load_project,
+    slot_role,
     source_binding,
     whitelisted_sources,
 )
 
 SERVER_NAME = DEFAULT_SERVER
-# slot -> the tool that may serve it. Keeping this table closed means a `logs`
+# tool -> the slot ROLE it may serve. Keeping this table closed means a non-SQL
 # source can never be fetched through `db_query` (and thus never with the wrong
 # guard applied).
-SLOT_OF_TOOL = {
-    "db_query": "database",
-    "log_search": "logs",
-    "ticket_list": "tickets",
-    "efficiency_list": "efficiency",
+#
+# F-11: the keys are roles, not slot NAMES. Slot names belong to the user and are
+# unlimited in count, so a table like {"log_search": "logs"} silently made "there
+# exists a source called logs" part of the L1 contract - the tool just never matched
+# anything on projects that named their log channel differently. Only `database` has
+# machine semantics (it is the channel the write guard binds), so the named-tool
+# surface collapses to that one plus the generic `query`.
+ROLE_OF_TOOL = {
+    "db_query": DB_ROLE,
     "query": None,          # generic: any whitelisted slot
 }
 
@@ -167,12 +173,15 @@ def dispatch(project: str, source: str, params: dict | None = None,
     cfg, cfg_file = load_project(root, project)
     binding = source_binding(cfg, project, source, SERVER_NAME)
 
-    want_slot = SLOT_OF_TOOL.get(tool) if tool else None
-    if want_slot and want_slot != binding.slot:
+    want_role = ROLE_OF_TOOL.get(tool) if tool else None
+    if want_role and binding.role != want_role:
         raise ContractError(
             EXIT_BAD_ARGS,
-            f"工具 {tool} 只能取 drivers.{want_slot} 槽位的源，'{source}' 属于 drivers.{binding.slot}",
-            detail="用 query(project, source, params) 走通用兜底，或换对应工具；分派规则是配置，不是模型判断",
+            f"工具 {tool} 只能取 role: {want_role} 的槽位，'{source}' 属于 drivers.{binding.slot}"
+            f"（role='{binding.role or '(未声明)'}'）",
+            detail="该源不是数据库通道，走 db_query 会绕过写保护的归属判定：改用通用工具 "
+                   "query(project, source, params)，或给真正的数据库槽位补 role: database（全项目最多一个）；"
+                   "分派规则是配置，不是模型判断",
         )
 
     guard = ReadOnlyGuard(binding.forbid_write_schemas)
@@ -261,8 +270,8 @@ def build_server():
         runner.__name__ = tool
         return runner
 
-    for name, slot in SLOT_OF_TOOL.items():
-        doc = (f"supperH driver tool (slot: {slot})" if slot
+    for name, role in ROLE_OF_TOOL.items():
+        doc = (f"supperH driver tool (slot role: {role})" if role
                else "generic supperH driver tool: any source in drivers.<slot>.mcp.sources")
         fn = _wrap(name)
         fn.__doc__ = doc
@@ -374,14 +383,15 @@ def slot_health(project: str, slot: str) -> dict:
             detail="一个 source 只能属于一个槽位，否则凭据归属不确定",
         )
     handle = load_adapter(root, project)
-    tool = next((t for t, s in SLOT_OF_TOOL.items() if s == slot), None)
+    role = slot_role(slot, slot_cfg)
+    tool = next((t for t, r in ROLE_OF_TOOL.items() if r and r == role), None)
     rows = [
         ["privateRoot", f"{root} (via {how})"],
         ["config", str(cfg_file)],
         ["kind", str(slot_cfg.get("kind"))],
         ["server", binding.server],
         ["sources", ", ".join(sources)],
-        ["tool", tool or "(无专用工具，只能走 query)"],
+        ["tool", tool or "（无专用工具，只能走通用 query）"],
         ["adapter", str(adapter_path(root, project))],
         ["handle", "callable" if callable(handle) else "NOT callable"],
     ]
@@ -404,7 +414,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", help="whitelisted source name")
     parser.add_argument("--params", help="JSON object or path to a JSON file")
     parser.add_argument("--limit", type=int)
-    parser.add_argument("--tool", choices=sorted(SLOT_OF_TOOL), default="query")
+    parser.add_argument("--tool", choices=sorted(ROLE_OF_TOOL), default="query")
     parser.add_argument("--json", action="store_true", help="pretty-print the envelope (default: compact single line)")
     args = parser.parse_args(argv)
     if args.health:

@@ -10,8 +10,8 @@ project: example-proj        # 必须等于项目 identity.code
 source: database             # database | code（必填）
 
 database:
-  slot: database             # 复用的驱动槽位名（默认 database）
-  source: menu               # driver 逻辑源名，须在 drivers.database.config.sources 声明
+  slot: database             # 可选：没答这一项时 /supperH-init 会**删掉这一行**（不沿用本行示例值）；不写此键 = 用数据库通道（`role: database` 那个槽位，名字归用户）。要显式写就得跟 `projects/<code>.yaml` 里实际登记的那个槽位名一致，不能照抄这里的 `database`
+  source: menu               # driver 逻辑源名，须在数据库槽位（role: database）的 config.sources 声明
   table: sys_menu
   columns:                   # 列名映射（指向路径列 path 必填）
     id: menu_id

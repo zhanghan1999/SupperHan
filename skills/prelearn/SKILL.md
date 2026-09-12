@@ -178,5 +178,5 @@ coveredControllers: N
 
 ## 与其它 skill 的关系
 
-- 本 skill 只讲**学习与落地**协议；数据**获取**（跑 SQL / 拉日志 / 查工单）见 `driver-contract` skill 与 `data-fetch` skill
+- 本 skill 只讲**学习与落地**协议；数据**获取**（从已登记的源取结构化数据）见 `driver-contract` skill 与 `data-fetch` skill
 - `supperH-bug` 主入口的步骤 3（新鲜度检查）与步骤 7a（补学）都遵循本 skill 定义的 CURRENT 语义

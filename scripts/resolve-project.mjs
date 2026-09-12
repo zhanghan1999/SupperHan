@@ -115,8 +115,11 @@ import { pathToFileURL } from 'node:url';
 import { resolvePrivateRoot } from './resolve-private-root.mjs';
 import { evaluateFastPath, verifyImpactReport, readFreshness, EXIT } from './fastpath-gate.mjs';
 import { collectGitFacts, SNAPSHOT_REF_PREFIX } from './git-preflight.mjs';
+import { dbRoleSlot } from './validate-project.mjs';
 
 const IS_WIN = process.platform === 'win32';
+// 唯一有机器语义的 role 值（不是槽位名）：它决定写保护绑哪个通道。槽位名清单归用户，本仓库不持有。
+const DB_ROLE_NAME = 'database';
 
 // --preflight 脏文件清单的递出上限。只影响 JSON 载荷大小，不影响 dirtyCount；
 // 超限时必须同时置 dirtyTruncated 并写明归属判定不可靠（见下方 dirtyNote）。
@@ -297,10 +300,33 @@ export function expandDrivers(doc, { privateRoot, toolRoot, code } = {}) {
   return expandDriverSlots(drivers, tokenCtx(root, toolRoot, code));
 }
 
+/**
+ * 把“哪个槽位是数据库通道”解成一个固定名字（F-11）。
+ *
+ * 判定规则单点复用 validate-project.mjs 的 `dbRoleSlot`（显式 `role: database` 为准，
+ * 存量同名槽位当同义）——不在这里再写一份“叫什么算库”，否则两处会对同一个配置给出不同结论，
+ * 而这两份结论一个决定写保护绑不绑、一个决定门禁放不放行。
+ * 只递出 L1 模板真正引用的四个字段（不复制整块）：多一份 config/writes 就多一份与
+ * `drivers.<slot>` 不一致的可能，而主 agent 要把这份 JSON 全读进上下文。
+ */
+function pickDbDriver(data, driversExpanded) {
+  const hit = dbRoleSlot(data);
+  if (!hit) return null;
+  const cfg = driversExpanded && driversExpanded[hit.slot];
+  if (!cfg || typeof cfg !== 'object') return null;
+  return {
+    slot: hit.slot,
+    kind: String(cfg.kind ?? 'script'),
+    impl: typeof cfg.impl === 'string' ? cfg.impl : null,
+    healthCheck: typeof cfg.healthCheck === 'string' ? cfg.healthCheck : null,
+  };
+}
+
 function buildBinding(entry, ctx) {
   const { code, data, file } = entry;
   const localCtx = tokenCtx(ctx.privateRoot, ctx.toolRoot, code);
   // Native-path normalisation so downstream consumers get clean OS separators.
+  const driversExpanded = expandDriverSlots(data?.drivers, localCtx);
   const toNative = (p) => (p ? path.normalize(p) : p);
   const defaultCtx = path.join(localCtx.privateRoot, 'context', code);
   const defaultTask = path.join(localCtx.privateRoot, 'tasks', code);
@@ -329,7 +355,13 @@ function buildBinding(entry, ctx) {
     // Driver values leave the resolver fully expanded (impl/healthCheck are
     // absolute paths by then), so artifact templates must NOT prepend a second
     // DRIVERS_ROOT prefix. `config` is free-form and expanded too.
-    drivers: expandDriverSlots(data?.drivers, localCtx),
+    drivers: driversExpanded,
+    // `dbDriver`：按 role 解出的数据库通道别名（F-11）。
+    // 为什么需要它：L1 产物以前写 `drivers.database.impl`，等于把“那个库源一定叫 database”
+    // 钉成契约；而槽位名归用户、个数不限，不叫这个名字的项目会拿到一个填不上的 token（不报错、只是没值）。
+    // 它是派生字段而非 YAML 路径：模板里写 {{PROJECT.dbDriver.impl}}，运行期从本返回体取值。
+    // 未接入数据库时为 null（不是缺键）：这样“没库”是一个能机械区分的事实，而不是一个解不开的 token。
+    dbDriver: pickDbDriver(data, driversExpanded),
     project: data
   };
 }
@@ -370,7 +402,7 @@ export function resolveDiagnoseBaseline(project, envRaw) {
   if (!db) {
     return { ok: false, message: `本项目未接入数据库（L2 缺 db 段 = 纯代码模式）：--env '${env}' 无源可采。` +
       `环境标签只对取回的数据成立，代码侧永远相对 effectiveRoot 的 HEAD。` +
-      `要环境证据就先用 /supperH-init 接入 database 槽位；只要代码结论就别给 --env（不给 = 不注入 diagnoseBaseline 字段，不是失败）` };
+      `要环境证据就先把数据库通道接上（库信息走 /supperH-init，带 role: database 的槽位走 /supperH-driver）；只要代码结论就别给 --env（不给 = 不注入 diagnoseBaseline 字段，不是失败）` };
   }
   if (!names.includes(env)) {
     return { ok: false, message: `--env '${env}' 不在本项目声明的环境里（合法：${names.join(' / ') || '无'}）。环境得写对且区分大小写：拿不准就去问用户，不要换个看着像的名字重试` };
@@ -704,23 +736,35 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       const dirtyAll = Array.isArray(facts.dirtyFiles) ? facts.dirtyFiles : [];
       const dirtyTruncated = dirtyAll.length > PREFLIGHT_DIRTY_CAP;
       // 哪些取数源真的注册了：也是事实，不是判定。报它的理由很直接——下游的
-      // “必须把 SQL 原文递给用户校验”这类硬要求，只有在 database 槽位存在时才做得动；
+      // “必须把 SQL 原文递给用户校验”这类硬要求，只有在数据库通道存在时才做得动；
       // 与其到取数那一步才发现做不到，不如开工前就看到“这个源没声明”。
+      // 槽位名归用户（F-11）：这里遍历注册表的**实际键**，不再拿一份固定名单去问
+      // “database 在不在”——那份名单本身就是“只有这四个源”的假设，用户加第五个源时
+      // 它不会报错，只会看不见。“未声明”现在由缺键表示，不再逐个名字写 false。
       const drv = b.drivers && typeof b.drivers === 'object' ? b.drivers : {};
       const driverSlots = {};
-      for (const slot of ['database', 'logs', 'tickets', 'efficiency']) {
-        const cfg = drv[slot] && typeof drv[slot] === 'object' ? drv[slot] : null;
+      for (const [slot, cfg] of Object.entries(drv)) {
+        if (!cfg || typeof cfg !== 'object') continue;
         driverSlots[slot] = {
-          declared: !!cfg,
-          kind: cfg ? String(cfg.kind ?? 'script') : null,
-          hasHealthCheck: !!(cfg && typeof cfg.healthCheck === 'string' && cfg.healthCheck.trim() !== '')
+          kind: String(cfg.kind ?? 'script'),
+          role: (typeof cfg.role === 'string' && cfg.role.trim()) ? cfg.role.trim() : null,
+          hasHealthCheck: typeof cfg.healthCheck === 'string' && cfg.healthCheck.trim() !== '',
+          hasDesc: typeof cfg.desc === 'string' && cfg.desc.trim() !== '',
         };
       }
+      // 把存量写法（没写 role 但槽位正叫 database）也标成 role，使这一行与 `dbDriver`
+      // 的结论一致：两处对“谁是库通道”给不同答案时，写保护绑的与门禁认的就不是同一个槽位。
+      const dbSlotName = b.dbDriver ? b.dbDriver.slot : null;
+      if (dbSlotName && driverSlots[dbSlotName]) driverSlots[dbSlotName].role = DB_ROLE_NAME;
+      const driverSlotCount = Object.keys(driverSlots).length;
       payload.preflight = {
         blocking: false,
         delivery,
         ...facts,
         driverSlots,
+        driverSlotCount,
+        // 纯代码模式（一个源都没接）要能报成“0 个”，而不是“探测过了但没结果”。
+        dbDriverSlot: dbSlotName,
         dirtyFiles: dirtyTruncated ? dirtyAll.slice(0, PREFLIGHT_DIRTY_CAP) : dirtyAll,
         dirtyTruncated,
         dirtyNote: dirtyTruncated
@@ -746,8 +790,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
         dirtyKnown: facts.dirtyKnown === true,
         dirtyCount: facts.dirtyCount,
         snapshotPossible: facts.snapshotPossible === true,
-        dbDriverDeclared: driverSlots.database.declared,
-        driverSlotsDeclared: Object.values(driverSlots).filter((s) => s.declared).length,
+        dbDriverDeclared: !!b.dbDriver,
+        driverSlotsDeclared: driverSlotCount,
         dirtyListed: payload.preflight.dirtyFiles.length,
         sweepRan: facts.snapshotSweep?.ran === true,
         sweepRemoved: (facts.snapshotSweep?.removed || []).length,

@@ -32,10 +32,11 @@ const INDEX_TEXT = [
 
 let root, privateRoot, workspace;
 // 金样：plain 调用的字段顺序。故意改动本行时请连同步文档/消费方一起改。
+// `dbDriver` 排在 `drivers` 之后：它是从 drivers 派生的别名（按 role 解），不是注册表里的 YAML 路径。
 const GOLD_KEYS = [
   'ok', 'code', 'displayName', 'configFile', 'registryLegacy', 'toolRoot', 'privateRoot',
   'driversRoot', 'contextRoot', 'tasksRoot', 'menuConfigFile', 'menu', 'codeRoot',
-  'effectiveRoot', 'packageRoot', 'db', 'drivers', 'project'
+  'effectiveRoot', 'packageRoot', 'db', 'drivers', 'dbDriver', 'project'
 ].join('|');
 
 function runCli(args) {
@@ -249,6 +250,79 @@ test('阶段0：binding.drivers.* 输出已展开的绝对路径，不含 {{ 也
   assert.ok(r.json.drivers.database.healthCheck.includes('drv'), 'healthCheck 里的 identity.code 也要展开');
   assert.equal(r.json.drivers.logs.config.indexPattern, 'app-logs-*', 'config 自由格式字段不得被破坏');
   assert.equal(r.json.driversRoot, path.join(privateRoot, 'drivers'), 'driversRoot 与展开值同源');
+});
+
+// ---------- dbDriver：按 role 解出的库通道别名（F-11）----------
+// 锁住的事：L1 产物不得再写死“库源叫 database”。槽位名归用户且个数不限，那个假设在
+// 用户把库源命名为其它名字时不报错、只是拿不到值（token 填不上），是静默失效的一类缺陷。
+function roleYaml(code, ws, driversBlock) {
+  const w = ws.replace(/\\/g, '/');
+  return [
+    'schemaVersion: 1',
+    'identity:', `  code: ${code}`, `  displayName: ${code} role`, `  workspaces:\n    - "${w}"`,
+    `codeRoot: "${w}"`, 'packageRoot: com.role', 'modules:\n  - name: order\n    entryPattern: \'**/*.java\'',
+    'build:\n  tool: maven\n  jdk: \'1.8\'\n  compileCmd: mvn compile\n  testCmd: mvn test',
+    'db: { host: localhost, port: 5432, schemas: { prod: p, uat: u, test: t }, readonlyUser: ro, writableUser: rw, forbidWriteSchemas: [p, u] }',
+    'branches: { prod: prod, uat: uat, dev: dev }',
+    ...(driversBlock ? ['drivers:', ...driversBlock] : []),
+    'naming:\n  commandPrefix: /supperH', ''
+  ].join('\n');
+}
+function roleProject(code, driversBlock) {
+  const ws = path.join(root, 'ws-' + code);
+  fs.mkdirSync(ws, { recursive: true });
+  fs.writeFileSync(path.join(privateRoot, 'projects', `${code}.yaml`), roleYaml(code, ws, driversBlock), 'utf8');
+  const r = runCli(['--cwd', ws]);
+  return { status: r.status, json: r.json, ws };
+}
+
+test('dbDriver：用户自选槽位名 + role: database 照样解得出库通道，impl 已展开', () => {
+  const r = roleProject('rolecustom', [
+    '  maindb:',
+    '    desc: 业务主库',
+    '    role: database',
+    '    impl: "{{DRIVERS_ROOT}}/maindb.py"',
+    '    healthCheck: "{{DRIVERS_ROOT}}/maindb.py --health"',
+    '  gitlab:',
+    '    desc: 代码仓与流水线',
+    '    impl: "{{DRIVERS_ROOT}}/gitlab.py"',
+  ]);
+  assert.equal(r.status, 0, JSON.stringify(r.json));
+  assert.equal(r.json.dbDriver.slot, 'maindb', '别名必须跟着 role 走，不是跟着名字走');
+  assert.equal(r.json.dbDriver.impl, path.join(privateRoot, 'drivers', 'maindb.py'),
+    '别名里的 impl 与 drivers.<slot>.impl 同源且同样展开完成');
+  assert.equal(r.json.dbDriver.kind, 'script');
+  assert.equal(r.json.drivers.maindb.impl, r.json.dbDriver.impl, '两份值不一致 = 下游会拿到两个不同的库通道地址');
+  assert.ok(!('database' in r.json.drivers), '不得为用户不存在的槽位名造一个空条目');
+});
+
+test('dbDriver：存量写法（槽位正叫 database、没写 role）按同义处理', () => {
+  const r = roleProject('rolelegacy', [
+    '  database:',
+    '    desc: 存量写法',
+    '    impl: "{{DRIVERS_ROOT}}/legacy.py"',
+  ]);
+  assert.equal(r.status, 0, JSON.stringify(r.json));
+  assert.equal(r.json.dbDriver.slot, 'database', 'F-10 前的注册文件不得因为没写 role 就变成“无库通道”');
+  assert.equal(r.json.dbDriver.healthCheck, null, '没声明探活命令就是 null，不得伪造一个');
+});
+
+test('dbDriver：纯代码模式报成 null（缺键会让“没库”与“token 解不开”分不开）', () => {
+  const r = roleProject('rolepure', null);
+  assert.equal(r.status, 0, JSON.stringify(r.json));
+  assert.ok('dbDriver' in r.json, '必须带这个键：只有值能表达“没有”');
+  assert.equal(r.json.dbDriver, null);
+});
+
+test('dbDriver：多个槽位同时声明 role 时取排序后的第一个，与 validate 的报错同源', () => {
+  // 这种配置 validate 会退 2（写保护只能绑一个通道），但解析器不拒加载存量文件：
+  // 它必须与 dbRoleSlot 拿同一个结论，否则门禁验的库与取数走的库会是两个。
+  const r = roleProject('roledup', [
+    '  zdb:', '    desc: z', '    role: database', '    impl: "{{DRIVERS_ROOT}}/z.py"',
+    '  adb:', '    desc: a', '    role: database', '    impl: "{{DRIVERS_ROOT}}/a.py"',
+  ]);
+  assert.equal(r.status, 0, JSON.stringify(r.json));
+  assert.equal(r.json.dbDriver.slot, 'adb', '结论必须确定（排序取首），不能依赖 YAML 键的出现顺序');
 });
 
 // ---------- I0 意图复述：CLI 级 e2e（真文本 → 真退出码 → jsonl 埋字段）----------
@@ -672,9 +746,13 @@ test('d2 真 git 仓（干净）：分支 / HEAD / 零脏全部如实报出', (t
   assert.equal(p.snapshotBlocker, null);
   assert.equal(p.snapshotSweep.ran, true, 'git 仓内应真的跑过一次清扫');
   assert.equal(p.snapshotSweep.scanned, 0);
-  // 取数源声明情况也是预检的一部分：“把 SQL 原文递给人校验”能否做到，开工前就该看见
-  assert.deepEqual(p.driverSlots.database, { declared: true, kind: 'script', hasHealthCheck: true });
-  assert.equal(p.driverSlots.logs.declared, false, '未声明的槽位得标 false，而不是被当作“有一个未知的源”');
+  // 取数源声明情况也是预检的一部分：“把 SQL 原文递给人校验”能否做到，开工前就该看见。
+  // 键 = 注册表里的**实际槽位名**（F-11 后 L1 不持有名单）：未声明的名字表现为缺键，
+  // 不再逐个写 false —— 那份固定名单本身就是“只有这四个源”的假设，加第五个源时它不报错、只是看不见。
+  assert.deepEqual(p.driverSlots,
+    { database: { kind: 'script', role: 'database', hasHealthCheck: true, hasDesc: false } });
+  assert.equal(p.driverSlotCount, 1, '纯代码模式必须能报成 0 个，而不是“探过了但没结果”');
+  assert.equal(p.dbDriverSlot, 'database', '库通道槽位名如实报出（存量同名写法也算）');
 });
 
 test('d2 脏文件：已追踪改动 + 未追踪 + 中文路径全部列全且不被转义', (t) => {

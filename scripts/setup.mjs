@@ -443,13 +443,13 @@ async function main() {
   log('next steps:');
   if (target === 'qoder') {
     log('  1) fully quit Qoder (system tray too) then reopen it');
-    log('  2) type /supperH in the input box → 5 commands should appear:');
-    log('     /supperH-setup  /supperH-bootstrap  /supperH-init  /supperH-bug  /supperH-learn');
+    log('  2) type /supperH in the input box → these commands should appear:');
+    log('     /supperH-setup  /supperH-bootstrap  /supperH-init  /supperH-driver  /supperH-bug  /supperH-learn');
     log('  3) 首次接入一个项目：在**那个项目的工作区**里跑 /supperH-init（条目写进私有根，跟 IDE 无关）');
     log('  4) smoke test: /supperH-learn --module <one-of-your-modules>');
   } else if (target === 'opencode') {
     log('  1) reopen OpenCode (or run `opencode` in a fresh terminal)');
-    log('  2) type / → 5 supperH-* commands should appear (setup / bootstrap / init / bug / learn)');
+    log('  2) type / → supperH-* commands should appear (setup / bootstrap / init / driver / bug / learn)');
     log('  3) if not visible, check OpenCode config dir; re-run with --dest <that-dir>');
     log('     `node scripts/setup.mjs --target opencode --dest <path>`');
     log('  4) 首次接入一个项目：在**那个项目的工作区**里跑 /supperH-init');

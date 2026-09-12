@@ -62,9 +62,9 @@ permission:
 
 输入 = `menu_source`（`/supperH-learn` 步骤 0 的 `menu` 配置对象）+ `module: "menu"`。**主 agent 不亲自连库/读文件**，由你执行：
 
-- `menu_source.source == "database"` → 跑配置的 `database` 驱动，**仅 SELECT**：
+- `menu_source.source == "database"` → 跑数据库通道（`dbDriver`，即 `role: database` 那个槽位）的驱动，**仅 SELECT**：
   ```
-  {{PROJECT.drivers.database.impl}} --project <code> --source <menu_source.database.source> \
+  {{PROJECT.dbDriver.impl}} --project <code> --source <menu_source.database.source> \
     --filter table=<menu_source.database.table> \
     --filter id=<menu_source.database.columns.id> \
     --filter parentId=<menu_source.database.columns.parentId> \

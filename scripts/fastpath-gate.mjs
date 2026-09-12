@@ -73,6 +73,11 @@ const SUPPORTED_KINDS = Object.freeze(['route', 'fqn', 'fileLine']);
  * 调用方忘了跑 F1.4 反查，G0 也会保守出局（30），不可能“顺眼就当 route 用了”。
  * 识别本身仍有两个作用：给 command 递出 needsLookup 信号，以及让 jsonl 能统计到
  * “本项目有多少输入其实是 A1 类”——那是 P1-① 接 driver 后的真实收益预估。
+ *
+ * 递出的字段刻意叫 `lookupNeed`（要成什么关系）而不是 `lookupVia`（走哪个槽位）：
+ * F-11 之后槽位名归用户，脚本一旦输出 `drivers.logs` 就等于替全天下规定“日志源
+ * 得叫 logs”。反查用哪个槽位由调用方按各槽位的 `desc` 选，选不出唯一一个即出局 ——
+ * 详见 skills/data-fetch/SKILL.md §anchor-lookup。
  */
 const LOOKUP_KINDS = Object.freeze(['traceId', 'ticketNo']);
 
@@ -143,14 +148,14 @@ export function classifyAnchor(raw) {
   const tr = s.match(TRACE_RE);
   if (tr) return {
     kind: 'traceId', value: s, id: tr[1], supported: false, needsLookup: true,
-    lookupVia: 'drivers.logs',
-    reason: 'traceId 不含代码位置：需先经 drivers.logs（日志驱动）反查出唯一接口路由（F1.4）再进门禁'
+    lookupNeed: 'trace_id -> route',
+    reason: 'traceId 不含代码位置：需先经一个能按 trace_id 换回接口路由的只读槽位反查（F1.4）再进门禁'
   };
   const tk = s.match(TICKET_RE);
   if (tk) return {
     kind: 'ticketNo', value: s, id: tk[1], supported: false, needsLookup: true,
-    lookupVia: 'drivers.tickets',
-    reason: '工单号不含代码位置：需先经 drivers.tickets（工单驱动）反查出唯一接口路由（F1.4）再进门禁'
+    lookupNeed: 'ticket_no -> route',
+    reason: '工单号不含代码位置：需先经一个能按工单号换回接口路由的只读槽位反查（F1.4）再进门禁'
   };
 
   return {
@@ -643,7 +648,7 @@ export function evaluateFastPath(o = {}) {
     // needsLookup=true 是给调用方的行动指令（去跑 F1.4 反查），不是放行信号：
     // 本轮仍是 30，只有拿反查出的 route 重新调用才可能得到 0。
     return res(EXIT.NO_ROUTE, false, `锚点不可用：${anchor.reason || anchor.kind || 'none'}`,
-      { needsLookup: anchor.needsLookup === true, lookupVia: anchor.lookupVia ?? null });
+      { needsLookup: anchor.needsLookup === true, lookupNeed: anchor.lookupNeed ?? null });
   }
   if (Array.isArray(allowAnchorKinds)) {
     if (!allowAnchorKinds.includes(anchor.kind)) {

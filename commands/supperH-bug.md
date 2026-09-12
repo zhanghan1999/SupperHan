@@ -45,7 +45,7 @@ permission:
 | 步骤 0 项目解析 | **F0 保留** | 确定性硬门禁，绝不跳 |
 | 步骤 1 输入解析 | **F1 保留** | 多一步锚点抽取 |
 | 步骤 1.6 意图复述（I0） | **两路径常驻** | 快路径不省它 —— 它挡的是"精确执行错误意图"，与时间无关。缺 `--intent-*` → 36（调用姿势错），内容欠定义 → 40（问用户一次） |
-| — | **F1.4 新增** | A1 锚点（traceId/工单号）经 driver 反查成 route；无驱动即跳过 |
+| — | **F1.4 新增** | A1 锚点（traceId/工单号）经只读槽位反查成 route（用哪个槽位按 `desc` 选）；选不出唯一槽位即跳过 |
 | — | **F1.5 新增** | 一次脚本调用完成准入判定（G0–G4b + 否决词表 + I0 意图复述） |
 | 步骤 2 DB 门禁 | **F2 保留** | 只读侧判定仍在 |
 | 步骤 3 新鲜度 → 定向重学 | **省略** | G4a/G4b 已把关：不新鲜（含 batch 级相交）即出局，不在快路径里重学 |
@@ -92,19 +92,19 @@ permission:
 
   **抽不到锚点就不要拿真锚点去调步骤 1.5**（不允许为了走快路径而凑一个看起来像锚点的字符串）；但**步骤 1.6 的 I0 仍要交脚本求值** —— 拿空锚点跑一次，见下面的步骤 1.6。传空串 `--anchor ""` 是合法的（脚本判 30 出局），但**省略 `--anchor` 或省略 `--text` 会让脚本判 36「门禁未求值」** —— `--anchor` / `--text` / `--intent-*` 要么一次给全、要么整段不调。
 
-  > 若你抽到的是 `traceId` / `ticketNo`（脚本 `classifyAnchor` 会返回 `needsLookup: true`），**不要**直接拿它跑步骤 1.5（必判 30）——先走下面的步骤 1.4 反查成 `route`。若本项目未配置 `drivers.logs` / `drivers.tickets`（或 F1.4 反查失败/歧义），直接走完整路径即可，不强凑。
+  > 若你抽到的是 `traceId` / `ticketNo`（脚本 `classifyAnchor` 会返回 `needsLookup: true`），**不要**直接拿它跑步骤 1.5（必判 30）——先走下面的步骤 1.4 反查成 `route`。若从 `drivers` 里挑不出可用的反查槽位（或 F1.4 反查失败/歧义），直接走完整路径即可，不强凑。
 
 ## 步骤 1.4 · A1 锚点反查（**仅当锚点是 traceId / ticketNo**）
 
 锚点字面量不含代码位置时，先把它换成一条接口 route，再交给步骤 1.5。**你自己不能跑 driver**（本命令 bash 窄白名单只允许 `resolve-project.mjs`），故反查必须委派给有 bash 的子 agent：
 
-1. 确认本项目在步骤 0 返回的 `drivers` 里有对应槽位（`traceId`→`drivers.logs`、`ticketNo`→`drivers.tickets`）。**缺槽位或未通过探活 → 直接走完整路径**（快路径依赖内网数据，拿不到就是拿不到）。
-2. 派 `bug-analyzer`，输入 `{mode: "lookup", anchorKind: "traceId"|"ticketNo", anchor: <字面量>, project: <code>}`。它内部经 `data-fetch` 跑对应 driver（契约见 `skills/data-fetch/SKILL.md` 的「anchor-lookup」节），只回一个结果：这条请求/工单对应的**接口路由**。这一步对代码只读、对 driver 也只读（不得写库/改工单）。
+1. 先确认有可用的反查槽位。**L1 不列槽位名清单**（那个源叫什么由用户在 `/supperH-driver` 里定，可能根本不存在一个叫 logs 的东西）：从步骤 0 返回的 `drivers` 键集合里，按各槽位的 `desc` 找能把该锚点换回接口路由、且只读（未声明 `writes`）的槽位 —— `traceId` 要的关系是 `trace_id -> route`，`ticketNo` 是 `ticket_no -> route`。**挑不出唯一一个（0 个或多个）或未通过探活 → 直接走完整路径**（快路径依赖内网数据，拿不到就是拿不到）。
+2. 派 `bug-analyzer`，输入 `{mode: "lookup", anchorKind: "traceId"|"ticketNo", anchor: <字面量>, project: <code>}`。它内部经 `data-fetch` 跑上一步选出的那**一个**槽位（契约见 `skills/data-fetch/SKILL.md` 的「anchor-lookup」节），只回一个结果：这条请求 / 这张单子对应的**接口路由**。这一步对代码只读、对数据源也只读（不得对任何注册源发起写动作）。
 3. 按反查回报分流：
    - **恰好一条 route**（`code: ANALYZED` + `data.route` 非空且 `data.routes.length == 1`）→ 用该 route 作为 `anchor` 继续步骤 1.5（`--anchor "<反查出的 route>"`，`--text` 仍是用户原始描述）。
    - **零条 / 多条 / `TARGET_NOT_FOUND` / driver 报错 / 超时** → **走完整路径**；终判记 `anchor_lookup_failed`。多条时**不许**任选其一。
 
-> 反查是**只读**动作：driver 不得写库、不得改工单状态。它产出的 route 只是「进门禁的钥匙」，仍要过步骤 1.5 的 G0–G4b + 否决词表 + I0——反查成功 ≠ 快路径放行。带反查锚点跑 1.5 时**必须**附 `--anchor-source lookup`，否则 I0 会把“不在用户原话里”的反查结果当成编造引用而判 40。
+> 反查是**只读**动作：不得对任何注册源发起写动作（写库 / 发消息 / 改记录状态）。它产出的 route 只是「进门禁的钥匙」，仍要过步骤 1.5 的 G0–G4b + 否决词表 + I0——反查成功 ≠ 快路径放行。带反查锚点跑 1.5 时**必须**附 `--anchor-source lookup`，否则 I0 会把“不在用户原话里”的反查结果当成编造引用而判 40。
 
 ## 步骤 1.6 · 意图复述（I0，**两条路径常驻**）
 
@@ -271,6 +271,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
   - 若症状暗示需要读写 DB → 明确目标 schema
   - 命中 `{{PROJECT.db.forbidWriteSchemas[]}}` → 终止 + 报告 `DB_GATE_DENY`
   - 允许读写 `{{PROJECT.db.schemas.test}}`（写需 `{{PROJECT.db.writableUser}}`；只读可用 `{{PROJECT.db.readonlyUser}}`）
+- **DB 之外的写动作不在本步骤判**：本次若要变更任何其它注册源（发消息 / 改记录状态 / 上传文件 / 改远端配置），门禁在该槽位登记的 `writes[]`：整段缺席 = 只读源，一律拒；`gate: deny` = 拒且不提供“要不要试试”；`gate: confirm` = 先把完整外发载荷给用户看、拿到明确同意才发（口径唯一定义在 `skills/data-fetch/SKILL.md` §guard）。这三条都由 L2 声明决定，**不由你对“这个动作危不危险”的印象决定，也不由“用户没反对”决定**。
 
 ## 步骤 3 · 学习模块新鲜度检查
 

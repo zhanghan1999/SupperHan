@@ -27,7 +27,7 @@
     "java",
     "multi-agent"
   ],
-  "author": "zhanghan1999",
+  "author": "supperH",
   "license": "MIT",
   "dependencies": {
     "yaml": "^2.3.4"

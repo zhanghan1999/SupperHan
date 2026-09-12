@@ -405,14 +405,18 @@ export function l1PurityProblems({ facts = [], leakPaths = [], files = [], allow
   return problems;
 }
 
+/** 上传物里的“文本文件”判据：行尾体检与 L2 事实扫描共用，两边口径必须一致。 */
+function isL1TextFile(full) {
+  const base = path.basename(full);
+  return TEXT_EXT.has(path.extname(full).toLowerCase())
+    || /^(pre-commit|LICENSE|README.*|\.[Dg]itignore)$|\.md$|\.markdown$/i.test(base);
+}
+
 /** 收集仓库内被上传的文本文件（不依赖 git，克隆后无 git 也能跑；dist/ 不在清单里）。 */
 function l1UploadFiles(toolRoot) {
   const out = [];
   const push = (full, rel) => {
-    const base = path.basename(full);
-    const ok = TEXT_EXT.has(path.extname(full).toLowerCase())
-      || /^(pre-commit|LICENSE|README.*|\.[Dg]itignore)$|\.md$|\.markdown$/i.test(base);
-    if (!ok) return;
+    if (!isL1TextFile(full)) return;
     let text;
     try { text = readText(full); } catch { return; }
     out.push({ path: rel.split(path.sep).join('/'), text });
@@ -427,6 +431,58 @@ function l1UploadFiles(toolRoot) {
     if (fs.existsSync(full)) push(full, f);
   }
   return out;
+}
+
+// ---- 行尾体检：\r\r\n 与裸 \r -------------------------------------------------
+// 实测后果（不是洁癖）：这类文件在编辑器/工具侧会被拆成“每行后多一个空行”，
+// 于是一次改几行的补丁写回时把整份文件重排（391 行 → 813 行），git diff 里根本
+// 看不出真正改了什么。判据是机械的：文本文件里不得出现 \r\r\n，也不得出现不跟 LF 的 \r。
+// 只查源文件：dist 由 readText 统一过，不在范围内。
+export function eolProblems(toolRoot) {
+  const problems = [];
+  const scan = (full, rel) => {
+    if (!isL1TextFile(full)) return;   // 二进制文件不参与行尾体检（修它会把文件改坏）
+    let buf;
+    try { buf = fs.readFileSync(full, 'utf8'); } catch { return; }
+    const pair = (buf.match(/\r\r\n/g) || []).length;
+    const lone = (buf.match(/\r(?!\n)/g) || []).length;
+    if (pair || lone) {
+      problems.push({ file: rel.split(path.sep).join('/'), crlfCr: pair, loneCr: lone });
+    }
+  };
+  for (const d of L1_SCAN_DIRS) {
+    const dir = path.join(toolRoot, d);
+    if (!fs.existsSync(dir)) continue;
+    for (const f of walk(dir)) scan(f, path.relative(toolRoot, f));
+  }
+  for (const f of L1_SCAN_FILES) {
+    const full = path.join(toolRoot, f);
+    if (fs.existsSync(full)) scan(full, f);
+  }
+  return problems;
+}
+
+/** --fix-eol：把 \r\r\n / 裸 \r 统一成 CRLF。只改行尾字节，不碰内容。 */
+function fixEol(toolRoot) {
+  const list = eolProblems(toolRoot);
+  for (const p of list) {
+    const full = path.join(toolRoot, p.file);
+    const raw = fs.readFileSync(full, 'utf8');
+    const out = raw.split('\r\r\n').join('\r\n').replace(/\r(?=\r)/g, '');
+    const fixed = out.replace(/\r(?!\n)/g, '');
+    fs.writeFileSync(full, fixed, 'utf8');
+    console.log(`[sync --fix-eol] ${p.file}: \\r\\r\\n=${p.crlfCr} 裸\\r=${p.loneCr} → 统一 CRLF`);
+  }
+  if (!list.length) console.log('[sync --fix-eol] 无需修正：上传物里没有 \\r\\r\\n / 裸 \\r');
+  return list.length;
+}
+
+/** 两条阻断路径共用：把 eolProblems 的清单打成人话 + 给出修复命令。 */
+function printEol(list, tag) {
+  console.error(`${tag} 行尾异常（出现 \\r\\r\\n 或不跟 LF 的裸 \\r）：`);
+  for (const p of list) console.error(`  ${p.file}: \\r\\r\\n=${p.crlfCr} 裸\\r=${p.loneCr}`);
+  console.error(`${tag} 这类文件在编辑工具里会被拆成「每行后多一个空行」，小改动写回时整份重排、diff 失真。`);
+  console.error(`${tag} run: node scripts/sync-assets.mjs --fix-eol`);
 }
 
 /** 整条纯度扫描的入口：读注册表 + 列上传物 + 求违规。测试直接拿它断言“真仓库当前干净”。 */
@@ -530,6 +586,12 @@ function main() {
   }
   const checkOnly = args.has('--check');
   const info = resolvePrivateRoot();
+  // --fix-eol 是独立一条路：只修行尾字节，不烤 dist、不装 qoder，也就不需要 private root。
+  if (args.has('--fix-eol')) {
+    const n = fixEol(info.toolRoot);
+    console.log(`[sync --fix-eol] 处理文件 ${n} 个`);
+    process.exit(0);
+  }
   if (!info.privateRootExists) {
     console.error(`[sync] private root not found: ${info.privateRoot}`);
     console.error('[sync] run /supperH-bootstrap (creates it) or set SUPPERH_PRIVATE_ROOT, then retry.');
@@ -572,6 +634,11 @@ function main() {
       console.error('[sync --check] BLOCKING. 这些值不能进公开仓库。');
       process.exit(5);
     }
+    const eol = eolProblems(info.toolRoot);
+    if (eol.length) {
+      printEol(eol, '[sync --check]');
+      process.exit(6);
+    }
     const distDir = path.join(info.toolRoot, 'dist', PLUGIN_NAME);
     // A fresh clone has no dist/ at all (it is git-ignored). That is "not built yet",
     // not "built from stale sources" - only the latter is worth blocking on.
@@ -593,7 +660,7 @@ function main() {
       console.error('[sync --check] BLOCKING. run: node scripts/sync-assets.mjs');
       process.exit(4);
     }
-    console.log('[sync --check] OK: 0 residual placeholders; L1 purity clean; dist matches sources; mcp registration valid');
+    console.log('[sync --check] OK: 0 residual placeholders; L1 purity clean; EOL uniform; dist matches sources; mcp registration valid');
     process.exit(0);
   }
 
@@ -602,6 +669,11 @@ function main() {
     printPurity(purity, '[sync]');
     console.error('[sync] BLOCKING. 先清掉上传物里的专有值，再重跑。');
     process.exit(5);
+  }
+  const eol = eolProblems(info.toolRoot);
+  if (eol.length) {
+    printEol(eol, '[sync]');
+    process.exit(6);
   }
   const distDir = ensureDist(info.toolRoot);
   for (const d of COPY_DIRS) {

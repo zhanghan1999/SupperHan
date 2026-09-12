@@ -156,13 +156,7 @@ supper-Han-java/
 
 ## 冲突点提示
 
-- `external_directory: deny` 是**除 prelearn-writer 外**所有 agent 的硬约束。writer 一个放开是因为学习数据要落到仓库外的 `{{PRIVATE_ROOT}}/context/`。
+- `external_directory: deny` 是**除 prelearn-writer / driver-author 外**所有 agent 的硬约束。两个例外的共同特征是“写入落在私有根”且下沉不成脚本：writer 锁 `{{PRIVATE_ROOT}}/context/`（学习数据），driver-author 锁 `{{DRIVERS_ROOT}}`（驱动本体）。名单钉在 `tests/agent-permissions.test.mjs`，只改文案不改名单测试会先红。
 - `.qoder/rules/` **不走变量替换**——Qoder 直接把原文注入 prompt。红线里禁止出现任何 `{{...}}` 与真实项目专有词。
 - Qoder plugin 组件路径禁 `..` 与绝对路径 → sync 阶段把 `{{PRIVATE_ROOT}}` 等替换成绝对路径后写入 `dist/`。
 - MCP 侧是个例外：注册表 `dist/.mcp.json` **只能**是插件相对路径 + `env_vars` 名单，绝对私有根走 `mcp-skeleton/private-root.txt` 指针文件带外传递（sync 的 `--check` 形态断言：出现盘符、写了 env 值、指针缺失 → exit 4）。
-
----
-
-## 许可
-
-MIT

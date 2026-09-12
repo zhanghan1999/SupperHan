@@ -2,6 +2,7 @@
   "name": "supper-han-java",
   "version": "0.1.0",
   "description": "Cross-tool universal Java bug/learn workflow agents (L1 layer).",
+  "private": true,
   "type": "module",
   "engines": {
     "node": ">=18"
@@ -28,7 +29,7 @@
     "multi-agent"
   ],
   "author": "supperH",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "dependencies": {
     "yaml": "^2.3.4"
   }

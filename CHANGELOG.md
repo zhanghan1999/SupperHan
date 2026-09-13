@@ -16,13 +16,14 @@
 
 ## [Unreleased]
 
-下一快照尚未打 tag。本节记录 `v0.1.0` 之后已合入
-[`dev`](https://github.com/zhanghan1999/SupperHan/tree/dev) 的变更（该线上 `83b805a`、`cf765d9`
-两条提交）；逐条实现细节看那条线的提交记录，本节只记能力边界的变化。
+下一快照尚未打 tag。本节记录 `v0.1.0` 之后落在
+[`dev20260913`](https://github.com/zhanghan1999/SupperHan/tree/dev20260913) 的变更（`83b805a`、`cf765d9` 两条提交）；
+逐条实现细节看那条分支的提交记录，本节只记能力边界的变化。
+`dev` 与 `dev20260912` 按既有决定仍停在 `v0.1.0`（= `16383c5`），不含上述两条提交。
 
 > **一处如实声明**：本分支的 `README.md` 与 `docs/` 是**早期快照**，未随上述变更重写
 > （实测本分支上仍有 55 处退役资产名与已过时的数量描述）。要看现行能力边界请以
-> [`dev`](https://github.com/zhanghan1999/SupperHan/tree/dev) 上的同名文件为准；本台账
+> [`dev20260913`](https://github.com/zhanghan1999/SupperHan/tree/dev20260913) 上的同名文件为准；本台账
 > 只按版本追加，正是为了在这种时候仍有一个可信的时间线。
 
 ### Security

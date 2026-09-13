@@ -322,16 +322,42 @@ function pickDbDriver(data, driversExpanded) {
   };
 }
 
+/**
+ * `paths.contextRoot` / `paths.tasksRoot` 的解析单点：默认布局、token 展开、原生分隔符这三件事
+ * 只在这里做一次。
+ *
+ * 导出它是为了让 `buildBinding` 与 `scripts/init-project.mjs --reinit`（清场重配）对同一个问题给出
+ * 同一个答案。清场若自己再推一遍路径，会出现一类两边都不报错的错：条目声明了自定义
+ * `contextRoot`，清场却按默认布局 `<PRIVATE_ROOT>/context/<code>` 去搬 —— 真数据还留在自定义位置
+ * （下次解析照样读到它），而默认位置上若躺着别的项目的数据，会被一起搬走。
+ *
+ * `*Source`（`entry` = 条目里写的 / `default` = 系统默认布局）不是装饰：清场报告必须说清这个路径
+ * 的出处，用户才知道该去改条目，还是接受现状。
+ */
+export function resolveRootPaths(data, { privateRoot, toolRoot, code } = {}) {
+  const loc = privateRootLocation();
+  const ctx = tokenCtx(privateRoot ?? loc.privateRoot, toolRoot ?? loc.toolRoot, code);
+  const pick = (raw, fallback) => (typeof raw === 'string' && raw.trim()
+    ? { value: path.normalize(expandTokens(raw, ctx)), source: 'entry' }
+    : { value: path.normalize(fallback), source: 'default' });
+  const context = pick(data?.paths?.contextRoot, path.join(ctx.privateRoot, 'context', code));
+  const tasks   = pick(data?.paths?.tasksRoot,   path.join(ctx.privateRoot, 'tasks', code));
+  return {
+    contextRoot: context.value, contextRootSource: context.source,
+    tasksRoot: tasks.value, tasksRootSource: tasks.source,
+    driversRoot: ctx.driversRoot,
+  };
+}
+
 function buildBinding(entry, ctx) {
   const { code, data, file } = entry;
   const localCtx = tokenCtx(ctx.privateRoot, ctx.toolRoot, code);
   // Native-path normalisation so downstream consumers get clean OS separators.
   const driversExpanded = expandDriverSlots(data?.drivers, localCtx);
   const toNative = (p) => (p ? path.normalize(p) : p);
-  const defaultCtx = path.join(localCtx.privateRoot, 'context', code);
-  const defaultTask = path.join(localCtx.privateRoot, 'tasks', code);
-  const contextRoot = toNative(expandTokens(data?.paths?.contextRoot ?? defaultCtx, localCtx));
-  const tasksRoot   = toNative(expandTokens(data?.paths?.tasksRoot   ?? defaultTask, localCtx));
+  const roots = resolveRootPaths(data, { privateRoot: ctx.privateRoot, toolRoot: ctx.toolRoot, code });
+  const contextRoot = roots.contextRoot;
+  const tasksRoot   = roots.tasksRoot;
   // Menu-source sidecar: path is always returned (may not exist); `menu` is the
   // parsed object or null. Menu mode of /supperH-learn gates on `menu == null`.
   const menuConfigFile = toNative(path.join(ctx.privateRoot, 'menus', code + '.yaml'));

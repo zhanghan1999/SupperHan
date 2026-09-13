@@ -15,6 +15,15 @@
 //                                      — only on pass (or --force) — writes the
 //                                      file and mkdirs context/<code> tasks/<code>,
 //                                      then verifies the resolver now matches.
+//   --reinit --cwd <abs> | --code <短码>
+//                                      READ-ONLY. 清场计划（teardown plan）：把“init 以前
+//                                      生成过的东西”逐项列出（在不在、目录里几个文件），
+//                                      不搬不改。执行态见 --purge。
+//   --reinit ... --purge [--confirm <code>]
+//                                      执行清场：把注册条目 / 菜单配置 / context+tasks 两个
+//                                      目录 rename 进 <PRIVATE_ROOT>/_retired/<UTC 戳>/<code>/
+//                                      并留 manifest.json。本模式**不删任何东西**；学习数据
+//                                      非空时 --confirm <code> 是必填入参。撤完后校解析器。
 //
 // The same run decides call channels mechanically: a `kind: mcp` slot whose shell
 // plumbing probe fails is written back as `kind: script` (unless it declares
@@ -29,6 +38,9 @@
 //   21 wrote but resolver still does not match cwd (binding bug)
 //   22 menu source missing on FIRST registration (values['menu.source'] empty
 //      and menus/<code>.yaml absent) — NOT bypassable by --force
+//   23 reinit: context/ 或 tasks/ 下有文件而未给 --confirm <code>（学习成果只能重学，
+//      不能跟着一次清场顺手没了）；`--force` 不能绕过它——那是写模式的降级旗标，与清场无关
+//   24 reinit: 搬完了但解析器仍命中同一个 code（撤销不彻底，manifest.json 里有逐条原路径）
 //
 // Not connecting anything is a legitimate answer, not an error: `connect` and the db.*
 // values are all optional. Choosing nothing writes a config with those sections removed
@@ -40,7 +52,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import YAML from 'yaml';
 import { resolvePrivateRoot } from './resolve-private-root.mjs';
-import { resolveProject, expandDrivers } from './resolve-project.mjs';
+import { resolveProject, expandDrivers, resolveRootPaths } from './resolve-project.mjs';
 import { validateAgainstSchema } from './validate-project.mjs';
 
 const TOOL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1080,10 +1092,321 @@ export function initWrite({ cwd, values, force = false } = {}) {
   return result;
 }
 
+// ---- 清场重配（--reinit）：把 init 生成过的注册物整体撤走 -----------------
+// 为什么需要它：`--write` 的语义是“按模板重渲染 + 覆盖”，它盖得住自己生成的那些段，
+// 却撤不掉“已注册”这个状态本身。而 L1 契约一直在演进（F-12 只读收口、F-13 命名空间），
+// 于是会有“条目是上个代际生成的、想回到未注册重来一遍”的时刻 —— 那是另一个语义，就得有条另一个入口。
+//
+// 三条硬规矩（“撤销”这个词的本分）：
+//   ① 不删任何东西：一律 rename 进 <PRIVATE_ROOT>/_retired/<UTC 戳>/<code>/ 并留 manifest.json，
+//      回滚就是把每条 to 移回 from。隔离区就在私有根内，所以 rename 不跨卷（不存在 EXDEV 那种半路失败）。
+//   ② 学习数据非空时必须显式 --confirm <code>（退 23）：context/ 下的学习记录只能由
+//      /supperH-learn 重出来，一次清场顺手吃掉它，代价与“撤个配置”完全不成比例。
+//   ③ 只动本命令生成过的东西：注册条目、菜单配置、context/tasks 两个目录。驱动文件属
+//      /supperH-driver（槽位名与个数归用户），本命令不撤，只在报告里说清它还在盘上。
+const RETIRED_SUB = '_retired';
+// 算“学习成果”的目录种类：默认布局与自定义布局都要算，否则“条目改了路径”会变成绕过门禁的后门。
+const LEARNING_KINDS = new Set(['context', 'tasks', 'context-default', 'tasks-default']);
+
+// Windows 路径大小写不敏感，包含判定先归一；POSIX 保持区分。
+// 没有复用 resolve-project.mjs 的 normKey/isUnder：那两个未导出，而且它的判据服务于
+// “这个目录归属哪个项目”，语义面比这里要的“是不是在私有根内”宽。
+const CI_PATH = process.platform === 'win32';
+function pathKey(p) {
+  if (!p) return null;
+  let s = path.resolve(String(p).trim()).split(path.sep).join('/').replace(/\/+$/, '');
+  return CI_PATH ? s.toLowerCase() : s;
+}
+function isUnderRoot(root, child) {
+  const r = pathKey(root), c = pathKey(child);
+  return !!r && !!c && (c === r || c.startsWith(r + '/'));
+}
+
+// 目录里有多少东西：清场报告要能说出“这一搬带走几个文件”，学习数据的门禁也读这个数。
+function dirFootprint(dir) {
+  const out = { files: 0, bytes: 0 };
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      out.files++;
+      try { out.bytes += fs.statSync(p).size; } catch { /* 拿不到大小不影响“非空”这个结论 */ }
+    }
+  };
+  try { walk(dir); } catch { return out; }
+  return out;
+}
+
+// init 覆盖写盘时自己留的 sidecar（形如 <code>.yaml.bak）：只认“条目文件名 + 一个点”这个形状。
+// 别的一律不碰 —— 手工备份（形如 <code>.<备注>.bak）里存的是什么，只有用户自己知道。
+function sidecarFiles(file) {
+  const dir = path.dirname(file), base = path.basename(file);
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  return names.filter((n) => n !== base && n.startsWith(base + '.'))
+    .sort().map((n) => path.join(dir, n));
+}
+
+// 与条目同前缀的旁系文件（`<code>.<Anything>`）：init 不认识这种形状，所以它不撤，
+// 但清场报告里得列出来。“只按自己认识的模式看盘”恰恰是最容易漏事的那种实现。
+function prefixedSiblings(privateRoot, code, entryFile) {
+  const dir = path.dirname(entryFile), base = path.basename(entryFile);
+  const sidecarPrefix = base + '.';
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  return names
+    .filter((n) => n !== base && !n.startsWith(sidecarPrefix) && n.startsWith(code + '.'))
+    .filter((n) => /\.(ya?ml|bak)$/i.test(n))
+    .sort().map((n) => path.join(dir, n));
+}
+
+// 按短码直读一个条目（--code 入口）。解析不了就明说：清场不能替用户得出“坏了 = 可以扔”。
+function readEntryByCode(privateRoot, code) {
+  const file = path.join(privateRoot, 'projects', code + '.yaml');
+  if (!fs.existsSync(file)) return { file, missing: true };
+  try {
+    let text = fs.readFileSync(file, 'utf8');
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    const data = YAML.parse(text);
+    if (!data || typeof data !== 'object') return { file, unparseable: true, parseError: '解析结果不是对象' };
+    return { file, data };
+  } catch (e) {
+    return { file, unparseable: true, parseError: String(e.message).split(/\r?\n/)[0] };
+  }
+}
+
+// 未命中时最坏的残留：某个条目文件 YAML 根本解析不了，解析器会把它当不存在，
+// 于是“没有条目”与“有条目但读不了”在退出码上同形。报告里把它们分开。
+function unparseableEntries(privateRoot) {
+  const dir = path.join(privateRoot, 'projects');
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const bad = [];
+  for (const n of names.filter((x) => /\.ya?ml$/i.test(x))) {
+    const file = path.join(dir, n);
+    try {
+      let text = fs.readFileSync(file, 'utf8');
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+      const data = YAML.parse(text);
+      if (!data || typeof data !== 'object') bad.push({ file, reason: '空文档或不是对象' });
+      else if (!data.identity?.code) bad.push({ file, reason: '缺 identity.code（解析器认不出它属于谁）' });
+    } catch (e) {
+      bad.push({ file, reason: String(e.message).split(/\r?\n/)[0] });
+    }
+  }
+  return bad;
+}
+
+/**
+ * 清场重配。默认只出计划（一个字节都不动），`purge: true` 才搬。
+ * @returns 计划 / 执行结果 JSON（字段含义见下方各 return）；退出码 0/2/23/24
+ */
+export function reinit({ cwd, code, purge = false, confirm } = {}) {
+  const info = resolvePrivateRoot();
+  if (!info.privateRootExists) {
+    return { ok: false, exitCode: 2, error: 'no-private-root', privateRoot: info.privateRoot };
+  }
+  const pr = info.privateRoot;
+  const mode = purge ? 'purge' : 'plan';
+  if (!cwd && !code) {
+    return { ok: false, exitCode: 2, error: 'need-target', privateRoot: pr,
+      hint: '清场必须知道撤的是哪个项目：给 --cwd <工作区绝对路径>（走解析器）或 --code <项目短码>（按条目名）' };
+  }
+
+  // ---- 定位条目 ----
+  // 两条入口的分工：cwd 能回答“这个目录归属谁”（只有解析器能判），code 能回答“条目文件在哪”；
+  // 两者同时给出时必须一致 —— 撤错项目比不撤更糟糕。
+  let viaCwd = null, resolvedCode = code || null, entry = null;
+  if (cwd) {
+    const res = resolveProject({ cwd });
+    viaCwd = { cwd, ok: !!res.ok, status: res.status ?? 0, message: res.message };
+    if (res.ok) {
+      entry = { file: res.binding.configFile, data: res.binding.project, code: res.binding.code };
+      if (code && code !== res.binding.code) {
+        return { ok: false, exitCode: 2, error: 'code-mismatch', configFile: entry.file,
+          cwdCode: res.binding.code, givenCode: code, viaCwd,
+          hint: `--cwd 解析到的是 '${res.binding.code}'，你给的 --code 是 '${code}'：撤错项目比不撤更糟糕` };
+      }
+      resolvedCode = res.binding.code;
+    } else if (res.status === 11) {
+      return { ok: false, exitCode: 2, error: 'ambiguous-cwd', cwd, candidates: res.candidates ?? null, viaCwd,
+        hint: '该目录在同一深度上命中多个项目：改用 --code <短码> 指名要撤哪一个' };
+    } else if (res.status === 12) {
+      return { ok: false, exitCode: 2, error: 'no-private-root', privateRoot: pr };
+    }
+  }
+  const nothingToUndo = (reason, extra) => ({ ok: true, status: 0, mode, privateRoot: pr, noop: true,
+    reason, items: [], movableCount: 0, learningFiles: 0, notTouched: [], quarantine: null,
+    unparseableEntries: unparseableEntries(pr), next: '盘上本来就没有可撤的东西：直接重跑 /supperH-init 就是首次注册', ...extra });
+  if (code) {
+    const one = readEntryByCode(pr, code);
+    if (one.unparseable) {
+      return { ok: false, exitCode: 2, error: 'entry-unparseable', configFile: one.file, parseError: one.parseError,
+        hint: '条目 YAML 解析不了，本命令不替你决定“坏了 = 可以扔”：先手工修好，或自己确认过内容后手动搬走' };
+    }
+    if (!one.missing) entry = { file: one.file, data: one.data, code };
+    else if (!entry) return nothingToUndo(`projects/${code}.yaml 不存在：这个短码本来就没注册（或已被撤过）`, { code });
+  }
+  if (!resolvedCode) return nothingToUndo('解析器没把该目录命中任何条目：已经是要撤到的状态了', { viaCwd });
+
+  // ---- 列出“init 生成过什么” ----
+  // 根路径一律走 resolveRootPaths（与解析器同一个答案）：条目写了自定义 contextRoot、
+  // 这里却按默认布局去搬，就会既没搬走真数据、又可能把默认位置上的别的项目一并搬走。
+  const data = entry?.data ?? {};
+  const roots = resolveRootPaths(data, { privateRoot: pr, toolRoot: TOOL_ROOT, code: resolvedCode });
+  const items = [];
+  const addItem = (kind, p, role, source) => {
+    const it = { kind, role, path: p, exists: false, ...(source ? { source } : {}) };
+    try {
+      const st = fs.statSync(p);
+      it.exists = true;
+      if (st.isDirectory()) { const fp = dirFootprint(p); it.files = fp.files; it.bytes = fp.bytes; }
+      else it.bytes = st.size;
+    } catch { /* 不存在就是不存在，不是错误 */ }
+    items.push(it);
+    return it;
+  };
+  const configFile = entry?.file ?? path.join(pr, 'projects', resolvedCode + '.yaml');
+  addItem('entry', configFile, '注册条目（本命令 --write 生成）');
+  for (const bak of sidecarFiles(configFile)) addItem('entry-sidecar', bak, '条目覆盖备份（--write 自动留的 sidecar）');
+  const menuFile = path.join(pr, 'menus', resolvedCode + '.yaml');
+  addItem('menu', menuFile, '菜单来源配置（本命令 --write 生成）');
+  for (const bak of sidecarFiles(menuFile)) addItem('menu-sidecar', bak, '菜单配置覆盖备份');
+  addItem('context', roots.contextRoot, '学习数据目录（/supperH-learn 的成果）', roots.contextRootSource);
+  addItem('tasks', roots.tasksRoot, '任务产物目录（修复报告 / SQL 工件）', roots.tasksRootSource);
+  // `--write` 是无条件 mkdir 默认布局的（它当时还不知道条目会自定义路径）：写了自定义
+  // contextRoot/tasksRoot 的项目，默认位置上会留一个空壳。它同样是 init 生成的东西，
+  // 不清掉就没人知道那个目录为什么存在；而一旦里面真有文件（条目改过路径、旧数据还在原地），
+  // 它就是下面那道学习数据门禁要拦的东西。
+  const defCtx  = path.join(pr, 'context', resolvedCode);
+  const defTask = path.join(pr, 'tasks',   resolvedCode);
+  if (roots.contextRootSource === 'entry' && pathKey(defCtx) !== pathKey(roots.contextRoot)) {
+    addItem('context-default', defCtx, '默认布局的学习目录（--write 无条件建过，条目自定义路径后它成了空壳）');
+  }
+  if (roots.tasksRootSource === 'entry' && pathKey(defTask) !== pathKey(roots.tasksRoot)) {
+    addItem('tasks-default', defTask, '默认布局的任务目录（同上）');
+  }
+
+  const movable = [], notTouched = [];
+  for (const it of items) {
+    if (!it.exists) continue;
+    if (isUnderRoot(pr, it.path)) movable.push(it);
+    else notTouched.push({ kind: it.kind, path: it.path,
+      reason: '条目把该路径自定义到私有根外（paths.* 覆写）：本命令只撤私有根内的东西，界外的要你人工确认' });
+  }
+  const movableSet = new Set(movable);
+  for (const it of items) it.willMove = movableSet.has(it);
+
+  // 学习数据 = 学习目录与任务目录里真有的文件（不管条目把这些目录改到了哪里）。这个数决定 23 这道门禁。
+  const learning = movable.filter((it) => LEARNING_KINDS.has(it.kind) && (it.files ?? 0) > 0);
+  const learningFiles = learning.reduce((n, it) => n + (it.files ?? 0), 0);
+
+  // 登记着的驱动：属 /supperH-driver 的产物，不属 init —— 列出来但不搬。
+  if (data.drivers && typeof data.drivers === 'object') {
+    const expanded = expandDrivers(data, { privateRoot: pr, toolRoot: TOOL_ROOT, code: resolvedCode });
+    for (const [slot, cfg] of Object.entries(expanded ?? {})) {
+      if (!cfg || typeof cfg !== 'object' || typeof cfg.impl !== 'string') continue;
+      notTouched.push({ kind: 'driver', slot, path: cfg.impl,
+        reason: '驱动由 /supperH-driver 登记（槽位名与个数归用户），不是 init 生成的：清场不撤它，要撤请人工删' });
+    }
+  }
+  const legacyFile = path.join(pr, 'project.yaml');
+  if (fs.existsSync(legacyFile)) notTouched.push({ kind: 'legacy-entry', path: legacyFile,
+    reason: '迁移前的单文件条目：那是 scripts/migrate-registry.mjs 的地盘，本命令不碰' });
+
+  // 名字以本 code + `.` 开头、却既不是条目也不是 init 自留 sidecar 的文件（手工备份是这一类的典型）。
+  // 不动它们，但必须说出来：不说，“清场清干净了”这句话就是假的 —— 下次有人按名字找旧条目会找不到。
+  for (const p of prefixedSiblings(pr, resolvedCode, configFile)) {
+    notTouched.push({ kind: 'entry-lookalike', path: p,
+      reason: '文件名以本短码开头，但不是 <code>.yaml 也不是 init 留下的 sidecar（可能是手工备份，也可能是另一个条目的名字巧合）：只报告不动' });
+  }
+
+  const plan = {
+    ok: true, status: 0, mode, code: resolvedCode, privateRoot: pr,
+    configFile, menuConfigFile: menuFile, contextRoot: roots.contextRoot, tasksRoot: roots.tasksRoot,
+    viaCwd, items, movableCount: movable.length, learningFiles, notTouched,
+    unparseableEntries: unparseableEntries(pr),
+  };
+  if (!purge) {
+    return { ...plan, quarantine: null, next: !movable.length ? '没有可搬的东西：重跑 /supperH-init 就是首次注册'
+      : learningFiles ? `本次未搬任何东西（计划模式只读）。确认搬走 ${movable.length} 项（含 ${learningFiles} 个学习/产物文件）：再加 --purge --confirm ${resolvedCode}`
+        : `本次未搬任何东西（计划模式只读）。确认搬走 ${movable.length} 项：再加 --purge（全进隔离区，不删）` };
+  }
+  // 两道确认先校哪道有讲究：`--confirm` 给了错值是一个**参数错误**（退 2），不能被降级成
+  // “再确认一次”（退 23）—— 那会把“你确认错了对象”说成“你还没确认”，照着提示补一个
+  // `--confirm <另一个 code>` 就真会动手。
+  if (confirm && confirm !== resolvedCode) {
+    return { ...plan, ok: false, exitCode: 2, error: 'confirm-mismatch', given: confirm, expected: resolvedCode,
+      hint: '--confirm 的值必须就是要撤的项目短码：这是防手滑的唯一一道' };
+  }
+  if (learningFiles && confirm !== resolvedCode) {
+    return { ...plan, ok: false, exitCode: 23, error: 'learning-data-present', needsConfirm: resolvedCode,
+      learning: learning.map((it) => ({ kind: it.kind, path: it.path, files: it.files, bytes: it.bytes })),
+      hint: `学习目录或任务目录下有 ${learningFiles} 个文件。学习成果只能由 /supperH-learn 重出来，不能跟着一次清场顺手没了：` +
+        `确认连它们一起进隔离区，重跑加 --confirm ${resolvedCode}` };
+  }
+  if (!movable.length) return { ...plan, noop: true, quarantine: null, next: '没有可搬的东西，已经是未注册状态' };
+
+  // ---- 执行：逐项 rename，失败当场交代已完成清单（manifest 未写，靠它回滚）----
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');   // 形如 2026-09-13T09-28-52-451Z
+  const quarantine = path.join(pr, RETIRED_SUB, stamp, resolvedCode);
+  const moves = [];
+  try {
+    for (const it of movable) {
+      const dest = path.join(quarantine, path.relative(pr, it.path));
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.renameSync(it.path, dest);
+      moves.push({ kind: it.kind, from: it.path, to: dest, files: it.files ?? 1 });
+    }
+  } catch (e) {
+    return { ...plan, ok: false, exitCode: 2, error: 'teardown-failed-midway', cause: e.message, quarantine,
+      movesDone: moves, remaining: movable.slice(moves.length).map((it) => it.path),
+      hint: `已搬走 ${moves.length} 项，剩余项原地未动（manifest 未写）。把 ${quarantine} 下的内容按 from 路径移回即回滚` };
+  }
+  const manifestFile = path.join(quarantine, 'manifest.json');
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    code: resolvedCode, at: new Date().toISOString(), privateRoot: pr,
+    why: 'scripts/init-project.mjs --reinit --purge（清场重配）', viaCwd, moves, notTouched,
+    restore: '回滚 = 先确认 from 位置仍为空，再把每条 to 移回 from；然后可重跑 /supperH-init',
+  }, null, 2) + '\n', 'utf8');
+
+  // 搬完必须验解析器：只校“同一个 code 不再命中”。若它改命中了**另一个**项目（目录嵌套布局），
+  // 那是事实不是故障 —— 本次要撤的那个已经搬干净了。
+  const after = cwd ? resolveProject({ cwd }) : null;
+  const stillBound = !!(after?.ok && after.binding.code === resolvedCode);
+  const out = { ...plan, mode: 'purge', ok: !stillBound, quarantine, manifest: manifestFile, moves,
+    resolverAfter: after ? { ok: !!after.ok, status: after.status ?? 0, code: after.binding?.code ?? null, message: after.message } : null };
+  out.next = stillBound ? null
+    : `已回到未注册状态。重跑首次注册：/supperH-init（要回滚就把 ${manifestFile} 里每条 to 移回 from）`;
+  if (stillBound) {
+    out.ok = false; out.exitCode = 24; out.error = 'still-registered-after-teardown';
+    out.hint = `搬完解析器仍命中 '${resolvedCode}'：盘上还有第二个条目指向这个目录（看 notTouched 与 unparseableEntries）。` +
+      `manifest 已落在 ${manifestFile}，可按它回滚`;
+  }
+  return out;
+}
+
 // ---- CLI ----
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const argv = process.argv.slice(2);
   const getArg = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : null; };
+
+  // 清场是第三条路：参数集与“扫描 / 落盘”两条不重叠，所以先分流再解公共参数。
+  // 本模式不认的旗标一律退 2：静默忽略等于假装还在听旧协议。
+  if (argv.includes('--reinit')) {
+    const stray = ['--write', '--force', '--values'].filter((f) => argv.includes(f));
+    if (stray.length) die(`--reinit 不接受 ${stray.join(' / ')}：清场没有“渲染落盘”这一步（执行用 --purge，允许带走学习数据用 --confirm <code>）`);
+    if (argv.includes('--confirm') && !argv.includes('--purge')) {
+      die('--confirm 只在执行态有意义（配 --purge）：计划模式下它什么都不做');
+    }
+    const r = reinit({
+      cwd: getArg('--cwd') || undefined, code: getArg('--code') || undefined,
+      purge: argv.includes('--purge'), confirm: getArg('--confirm') || undefined,
+    });
+    console.log(JSON.stringify(r, null, 2));
+    process.exit(r.ok ? 0 : (r.exitCode || 2));
+  }
+
   const cwd = getArg('--cwd') || process.cwd();
   const mode = argv.includes('--write') ? 'write' : 'scan';
 

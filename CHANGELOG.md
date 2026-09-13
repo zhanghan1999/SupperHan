@@ -5,19 +5,20 @@
 - 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
   [语义化版本](https://semver.org/lang/zh-CN/)。
 - **本文件只按版本组织，不按分支组织**：一节 = 一个 tag = 一次对外快照。
-  逐条提交记录不在这里，看 `dev` 分支的 `git log`。
+  逐条提交记录不在这里，看对应开发线分支的 `git log`（当前是哪条分支写在各节开头）。
 - **只追加，不删旧节。** 要更正已发布版本的说法，往下新开一节写“更正”，不改原文。
 - **本文件不构成任何许可授予**，也不得被用来放宽、替换或删减 README 末尾的权利声明。
   「不授予任何许可 / 全部权利保留 / 禁止商用（除非事先取得书面授权）」是既成条款，
   本文件只记录它的生效事实，不新增任何例外、免责或许可表述。
-- 本文件所在的 `master` 分支**只放说明文件，不含实现代码**；实现与全量代码在
-  [`dev`](https://github.com/zhanghan1999/SupperHan/tree/dev) 分支。因此下面的条目描述的是
-  **能力**，不是本分支上的文件清单。
+- 本文件所在的 `master` 分支**只放说明文件，不含实现代码**；实现与全量代码在开发线分支
+  （形如 `dev` / `dev<日期>`，[分支清单](https://github.com/zhanghan1999/SupperHan/branches)，
+  本节当前对应哪条写在该节开头）。因此下面的条目描述的是**能力**，不是本分支上的文件清单。
 
 ## [Unreleased]
 
 下一快照尚未打 tag。本节记录 `v0.1.0` 之后落在
-[`dev20260913`](https://github.com/zhanghan1999/SupperHan/tree/dev20260913) 的变更（`83b805a`、`cf765d9` 两条提交）；
+[`dev20260913`](https://github.com/zhanghan1999/SupperHan/tree/dev20260913) 的变更
+（`83b805a` 数据库通道只读收口、`cf765d9` 资产标识符命名空间，两条均已推送到 `origin`）；
 逐条实现细节看那条分支的提交记录，本节只记能力边界的变化。
 `dev` 与 `dev20260912` 按既有决定仍停在 `v0.1.0`（= `16383c5`），不含上述两条提交。
 
@@ -117,7 +118,7 @@
 
 ---
 
-[unreleased]: https://github.com/zhanghan1999/SupperHan/tree/dev
+[unreleased]: https://github.com/zhanghan1999/SupperHan/tree/dev20260913
 [0.1.0]: https://github.com/zhanghan1999/SupperHan/tree/v0.1.0
 
 <!-- 不用 compare 链接（`/compare/v0.1.0...HEAD`）是刻意的：master 与 dev 两条历史无共同祖先，

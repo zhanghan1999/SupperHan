@@ -19,7 +19,7 @@ codes         exit-code table + driver-exit -> JSON-RPC error mapping
 envelope      the stdout/tool-result payload shape (isomorphic to base_driver)
 private_root  env -> baked pointer -> tool-root sibling discovery chain
 registry      projects/<code>.yaml loading + `drivers.<slot>.mcp` binding lookup
-guards        SELECT-only / forbidWriteSchemas / read-only transaction prefix
+guards        SELECT-only 判据（写关键词 + 副作用函数）/ 只读事务前缀
 
 Nothing in here connects to a network or reads a credential file: reaching a real
 backend stays the adapter's job, so this package can be imported and unit-tested

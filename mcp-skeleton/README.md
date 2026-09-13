@@ -84,9 +84,9 @@ def handle(source: str, params: dict, ctx: dict) -> dict:
     返回 envelope（用 ok_envelope / err_envelope），或 (columns, rows[, meta 增量])
     由壳包装。禁止 sys.exit()：那会杀掉 server 进程。写保护用 ctx['guard']。
     """
-    guard = ctx["guard"]          # ReadOnlyGuard: DB_GATE_DENY + forbidWriteSchemas
+    guard = ctx["guard"]          # ReadOnlyGuard: 无条件 SELECT-only，命中即 DB_GATE_DENY
     sql = build_sql(source, params)
-    guard.check(sql, target_schema=ctx["config"].get("schema", ""))
+    guard.check(sql)              # 只交语句本身；不再比对任何库名（见下）
     columns, rows = fetch(sql)
     # 第三个元是给 adapter 自己申报语句用的：只有它知道真跑了什么，壳只能诚实
     # 说 `adapter_opaque`。不给这个口子，MCP 通道就永远交不出可核对的结果。
@@ -99,6 +99,13 @@ def handle(source: str, params: dict, ctx: dict) -> dict:
   `skills/driver-contract/SKILL.md` §字段规约；本仓库的示例 fixture adapter 会申报
   语句，因为 `tests/mcp-manifest.test.mjs` 拿两条通道的 meta 键集做对称比对，
   一边报一边不报会在那里失败，而不是悄悄分叉。
+
+**为什么 `guard.check()` 不再收 `target_schema`**：旧契约要求 adapter 传"目标 schema 名"，
+守卫拿它去比对 L2 的 `db.forbidWriteSchemas`。这条链断在三处——清单为空时一条都不拦、config 没写
+schema 时传空串同样不拦、以及层级错配：清单里登记的是 database 名（`appdb`），而按 PG 语义该传的
+是 database 之内那一层（`app_dw`，即 jdbc URL 里的 `currentSchema`），两个命名空间的字符串永不相等，
+于是配置越正确、门禁越空转。该机制已从 L1 契约退役（数据库通道 = 只读源，写数据请产出 SQL 工件，
+见 `skills/driver-contract/SKILL.md` §SQL 工件契约）；`check()` 保留第二个形参仅作兼容位。
 
 - **不实现**：任意 URL 的 `http_fetch`、无守卫的自由文本 `sql` 参数、把 `*.local.json`
   路径当参数暴露给模型。

@@ -47,9 +47,11 @@ fix_request:
       touched_files: [<abs path>, ...]
       touched_methods: [<sig>, ...]
       requires_db_write: <bool>
-      db_gate:                # 若 requires_db_write
-        target_schema: <name> # 必须不在 {{PROJECT.db.forbidWriteSchemas[]}}
-        statement_summary: <text>
+      db_write_artifact:      # 若 requires_db_write：问题从来不是“能不能过门禁”，而是“工件写好了没”
+        target_env: prod | uat | test
+        target_schema: <name> # 按 target_env 从 db.schemas 取；AI 只标注，不执行
+        sql_path: <{{TASKS_ROOT}}/<task_id>/sql/NNNN-<slug>.sql>
+        six_segments: [目标标注, 前置校验, 变更语句, 回滚, 证据链, 禁用项]
       rollback_hint: <text>
   approved_plan_id: p1      # 用户或主 agent 选定的方案
   delivery_mode: none       # 来自 L2 git.deliveryMode，由 --preflight 解析后递出；缺省 none
@@ -144,7 +146,8 @@ Snapshot 是**回滚锚点**，不是提交动作。它必须满足三条：不�
 | Apply 中途 IO 失败 | `fail` | 对已改文件按 Snapshot 逐个回滚；回滚失败列清单给人工 |
 | Verify 编译失败 | `fail` | 全部回滚；报 `COMPILE_FAIL` + stderr |
 | Verify 单测失败 | `fail` | 全部回滚；报 `FAIL_TESTS` + 失败用例清单 |
-| DB 门禁命中 | `aborted` | 不进 Apply；报 `DB_GATE_DENY` |
+| 守卫拦下写语句（driver 侧漏实现） | `aborted` | 不进 Apply；报 `DB_GATE_DENY` |
+| 本次需要写 DB | `partial` | 不进 Apply；按 `driver-contract` §SQL 工件契约产出 SQL 文件 + 报 `DB_WRITE_OUT_OF_SCOPE`（不是失败，也不补跑） |
 | `update-ref` 建快照失败 | `aborted` | 未 Apply，无副作用；报 `SNAPSHOT_REF_FAIL`（**没有锚点就不许进 Apply**） |
 | 脏文件命中本次 plan 的 `touched_files` | `aborted` | **停下来问用户**（硬清单第 1 条）；脏文件不在 plan 内则只记录继续 |
 | 快照恢复失败（ref 缺失 / sha 为空但确有改动） | `partial` | **停下来问用户**（硬清单第 2 条）；不得伪装成"已回滚" |

@@ -73,12 +73,14 @@ class MyDbDriver(BaseDriver):
         db_cfg = project_cfg["db"]
         secret = json.loads((Path(__file__).parent / ".secrets" / "db.local.json").read_text())
 
-        # SELECT-only 守卫（读操作也跑一遍防御性检查）
+        # SELECT-only 守卫：这是本通道唯一允许的语句形态（空语句 / 仅注释 = 未知即拒）
         # 占位符与绑定值分开返：`query` 要报的是真执行的那一条，不是拼好值的那一条
         sql, bound = build_sql_from(args, filters)
-        SELECT_only_guard(sql, db_cfg["schemas"]["test"], db_cfg["forbidWriteSchemas"])
+        SELECT_only_guard(sql)      # 后两个形参是已退役禁写清单的兼容位，不参与判定
 
         # 真实连接
+        # 只有这一份凭据：L2 契约里已不存在"写账号"（db.writableUser 退役），
+        # 所以驱动拿不到任何可写的身份 —— 这是"AI 手里没有能执行的写"的物理落点。
         conn = connect(host=db_cfg["host"], port=db_cfg["port"],
                        user=secret["readonly_user"], password=secret["readonly_pwd"])
         rows = conn.query(sql, bound, limit=args.limit)

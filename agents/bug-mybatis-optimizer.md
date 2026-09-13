@@ -33,7 +33,7 @@ permission:
 3. **应用优化** — 一次一个 `<select>`
 4. **等价验证** — 同参数再跑一次；结果哈希必须一致
    - 不一致 → 回滚该次改动，标记 `NOT_EQUIVALENT`
-5. **DB 门禁** — 任何 DML 都走 `{{PROJECT.db.schemas.test}}`；`{{PROJECT.db.forbidWriteSchemas[]}}` 命中的库**只读**
+5. **只读边界** — 建基线与等价验证两步都只跑 SELECT（数据库通道无条件只读，判据见 `skills/driver-contract/SKILL.md` §守卫契约）。需要改数据才能构造入参 → **不执行**，按 §SQL 工件契约产出 SQL 交人工，本次验证记缺口。Mapper 里的 `<insert>` / `<update>` / `<delete>` 是被优化的对象，不是你可以跑的语句
 6. **编译 + 单测** 全流程
 
 ## 输入契约

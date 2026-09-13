@@ -32,8 +32,6 @@ const DOC = {
     port: 5432,
     schemas: { prod: 'acme_prod', uat: 'acme_uat', test: 'acme_test' },
     readonlyUser: 'acme_ro',
-    writableUser: 'acme_rw',
-    forbidWriteSchemas: ['acme_prod', 'acme_uat'],
   },
 };
 const values = (facts) => facts.map((f) => f.value);
@@ -43,9 +41,20 @@ const values = (facts) => facts.map((f) => f.value);
 test('高信号 L2 字段进事实集：短码/显示名/包根/库名/账号/主机/代码根', () => {
   const v = values(collectL2Facts(DOC, 'acme.yaml'));
   for (const want of ['acme', 'Acme Portal', 'com.acme.portal', 'dw.acme-corp.cn',
-    'acme_prod', 'acme_uat', 'acme_ro', 'acme_rw', 'C:\\ws\\acme-portal']) {
+    'acme_prod', 'acme_uat', 'acme_ro', 'C:\\ws\\acme-portal']) {
     assert.ok(v.includes(want), `${want} 应被当作项目专有事实`);
   }
+});
+
+// F-12：事实采集面跟着契约收窄。写账号与它的黑名单已不在 FACT_FIELDS 里 —— 不是放宽扫描，
+// 而是这两个值出现在盘上时 validate 已经退 2 拦下了，轮不到纯度门禁来兜（两道判据各管一头）。
+test('退役键不参与事实采集：存量条目残留 writableUser 也不会被当成事实扫', () => {
+  const legacy = structuredClone(DOC);
+  legacy.db.writableUser = 'acme_rw';
+  legacy.db.forbidWriteSchemas = ['acme_prod', 'acme_uat'];
+  const v = values(collectL2Facts(legacy, 'legacy.yaml'));
+  assert.ok(!v.includes('acme_rw'), '写账号已随写能力从契约退役，采集面没有这个字段');
+  assert.equal(v.filter((x) => x === 'acme_prod').length, 1, '库名只从 db.schemas.* 采一份，不是从黑名单再采一遍');
 });
 
 test('通用形态的值不参与比对：模板自身与示例项目不该天天误报', () => {

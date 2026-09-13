@@ -42,11 +42,11 @@ L1 里唯一被赋予机器语义的是 `role: database`（全项目最多一个
 
 ### 2. guard（守卫，硬性）
 
-- **DB 门禁**：本次取数落在**数据库通道**（`dbDriver` 指向的槽位）且 SQL 里的目标 schema 命中 `{{PROJECT.db.forbidWriteSchemas[]}}` 且 SQL 是写语句（INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/CREATE/GRANT/REVOKE） → 抛 `DB_GATE_DENY`；不弹确认、不改写 SQL、不换 schema。
-- **清单缺失 = 拒绝，不是放行**：拿不到禁写清单（项目未接入数据库，L2 无 `db` 段或清单为空）时，写语句一律不得发出，报 `DB_GATE_NO_SCHEMA_LIST`；只读语句也没地方可发（`dbDriver` 为 `null`，没有 SQL 通道），该源记为不可用。把“列表为空”当成“无限制”是本契约里最贵的一种错（`supperh_contract/guards.py` 的 `select_only_guard` 对空清单就是一条都不拦，所以客户端必须自己兜住）。
-- **SELECT-only 判定**：SQL 里出现写关键字（不区分大小写、忽略注释和字符串常量）→ 视为写；其它视为读。
+- **DB 门禁 = 只读判定，不看库名**：本次取数落在**数据库通道**（`dbDriver` 指向的槽位）时，只允许发出能被证明只读的 SQL。命中写关键词或副作用形态（完整清单见 `driver-contract` §守卫契约）→ 抛 `DB_GATE_DENY`；不弹确认、不改写 SQL、不换 schema、不重试。**判据与“它写到哪个库”无关** —— 旧写法先比 `forbidWriteSchemas` 清单再决定要不要看语句，清单为空 / 传空串 / 库名层级错配三种情形都静默放行，那是本契约已收口的缺陷。
+- **未知即拒**：空语句、只有注释的语句证明不出只读 → 同样 `DB_GATE_DENY`。没有“判不出来就算读”这一档。
+- **要变更数据不是本 skill 的事**：四段流水线的正常产物是行集，不是变更。需要改数据时按 `driver-contract` §SQL 工件契约产出交人工执行的 SQL 文件，本次 DB 侧结论记 `partial` + `DB_WRITE_OUT_OF_SCOPE`（与 `DB_UNREACHABLE` 分开：一个是“不授予”，一个是“连不上”）。
 - **非库槽位的写动作门禁（与 DB 门禁叠加，不互替）**：上面两条只管数据库通道。其它源（发消息、改记录状态、上传文件、改远端配置）受各槽位自己的 `writes` 段约束，判据全部来自 L2 声明而不是模型对“这个动作危不危险”的印象：
-  - 该槽位未声明 `writes` 段 → **只读源**，任何写动作直接拒（exit 2 + `error` 写 `WRITE_NOT_DECLARED:` 前缀，形态同 `DB_GATE_DENY`，不是新退出码）。“没列出来”等于“没授权”，不等于“没限制”（与空 `forbidWriteSchemas` 同纪律）。
+  - 该槽位未声明 `writes` 段 → **只读源**，任何写动作直接拒（exit 2 + `error` 写 `WRITE_NOT_DECLARED:` 前缀，形态同 `DB_GATE_DENY`，不是新退出码）。“没列出来”等于“没授权”，不等于“没限制”。
   - 动作在其 `writes[].action` 里且 `gate: deny` → 直接拒，**不提供“要不要试试”的选项**；用户口头坚持（“我就要发”）不是绕道，要改的是声明而不是绕过它。
   - `gate: confirm` → 把**要发出去的完整载荷**（哪个源、哪条记录、什么内容）先给用户看，拿到明确同意才执行。“用户没反对”永远不等于“用户同意”。
   - 要做的动作不在词表里也不是用户登记过的 `other` → 停下问用户归类（归类结果由 `/supperH-driver` 写回 L2），**不得自己挑一个最接近的类别执行**。

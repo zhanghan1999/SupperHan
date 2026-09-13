@@ -73,12 +73,12 @@ node scripts/validate-project.mjs   # 独立命令；sync 不调它（旧版本�
       │  ├─ 另查解析器自查不到的完整性：缺 identity.code、code 重复、文件名 ≠ code
       │  ├─ 另查跨字段通道规则（本仓库最小校验器不支持 if/then/allOf，故写在代码里）：
       │  │   kind=mcp 必带 mcp 绑定且 sources 非空、script 槽位不得挂 mcp 段；废弃槽位只警告不阻断
-      │  ├─ 另查写保护覆盖度：forbidWriteSchemas 必须包含 db.schemas.prod 与 db.schemas.uat 的值
-      │  │   （清单非空但一条都不命中 = 写保护不存在；driver ReadOnlyGuard / bug-dev DB 门禁全靠这个列表）
+      │  ├─ 另查退役键（F-12）：db.writableUser / db.forbidWriteSchemas / writes[].action=sql_write
+      │  │   出现即 exit 2 并点名怎么删；数据库通道上出现 writes 段同样是错（该通道无条件只读）
       │  ├─ 另查模板假值残留（只看 db / drivers 两棵子树的所有字符串）：残留 example_* → exit 2
       │  │   （这两段会被当真凭据/真库名/真驱动路径拿去用；codeRoot/packageRoot 里的 EXAMPLE 只会“匹配不上”，不属同类伤害）
-      │  ├─ 另查 db 与数据库通道（role: database 的槽位）必须彼此成立：有驱动没 db 段 = 错（guards.py 的 select_only_guard 对空清单
-      │  │   一条都不拦 = 写保护默认失效）；有 db 段没驱动 = 警告（库信息是事实，只是暂时无通道）
+      │  ├─ 另查 db 与数据库通道（role: database 的槽位）必须彼此成立：有驱动没 db 段 = 错（这条 SQL 通道没有
+      │  │   host/port/账号可连，也没有环境名→库名映射）；有 db 段没驱动 = 警告（库信息是事实，只是暂时无通道）
       │  └─ exit 0 有效 / 2 违规或无可校验 / 3 用法错误
       │
       ▼
@@ -449,7 +449,7 @@ G0–G5 全在回答"这个 bug 落在哪段代码"，没有一处在回答"用�
 
 - `validate-project.mjs` 只看结构与类型——假值全是合法字符串；
 - 连通门禁的算式是“已配置的 driver 无一探活 → 20”，零个已配置 = 无可探对象 = 自动放行；
-- `forbidWriteSchemas: [example_prod, example_uat]` 非空、过形状检查，但 `guards.py` 的 `select_only_guard` 是**比字面库名**，真库 `demo_prod` 一条都不命中——写保护存在但永不生效。
+- `forbidWriteSchemas: [example_prod, example_uat]` 非空、过形状检查，但 `guards.py` 的 `select_only_guard` 是**比字面库名**，真库 `demo_prod` 一条都不命中——写保护存在但永不生效。（该键与这套"清单+比库名"判据后来整体退役，见 §10.17；本节保留是因为它是"缺席即语义"这条纪律的来处，不是因为它还描述现状。）
 
 现在的规则是**缺席即语义**，四处必须一致（只改提问文案不算修完）：
 
@@ -552,6 +552,48 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 
 所以菜单这一路改成三条（与 §10.12 / §10.15 同纪律，不是新发明）：没答的可选键**删行**（`slot` / `order` / `rootParentId` / `extraFilter`；`limit` 5000 与逻辑源名 `menu` 是文书里写明的缺省，不删）、未被选中的分支**整段不写**、选中的那一支必填项缺任一项则**写盘前退 2**（`planMenuChoices` → `menu-choices-incomplete`，逐项点名）。菜单比 `db` 段更需要这道机械拦：`validate-project.mjs` 不读 `menus/*.yaml`，模板残留扫描也只盖 projects 条目——菜单写坏没有任何一层会在后面兜住。
 
+### 10.17 数据库通道收口为无条件只读：写数据的产物改成 SQL 工件（F-12）
+
+**改了什么**：`db.writableUser` 与 `db.forbidWriteSchemas` 从 L2 契约退役；动作词表删掉 `sql_write`；
+两条通道的守卫改为「无条件只读 + 未知即拒 + 不比对库名」（`guards.select_only_guard` /
+`SELECT_only_guard`，判据逐字相同）。需要变更数据时唯一合法产物是一份交人工执行的 **SQL 工件**
+（六段，规范在 `skills/driver-contract/SKILL.md` §SQL 工件契约）。
+
+**为什么黑名单必须整个换掉**（三条实测事实，不是推演）：
+
+| 缺陷 | 事实 |
+|---|---|
+| 判据顺序倒了 | 旧 `select_only_guard` 先问"目标库名在不在清单里"，命中才去扫语句；不在清单里 → 否定分支**什么都不做**，连 `detect_write` 都不执行。清单为空 = 全放开 |
+| 判据是承诺式的 | 被扫的两个真实业务仓共 33 条 jdbc URL，回环 host = **0 条**；而 L2 登记的 host 与仓里出现过的三个 IP 一个都不相同（走的是 VIP）。清单里写什么，全靠用户抄对 |
+| 层级错配 | 清单装的是 database 名（`appdb`），而契约样例要求 adapter 传 PG schema 名（`app_dw`，jdbc URL 的 `currentSchema`）。两个命名空间的字符串**永不相等** —— 配置越正确，门禁越空转 |
+
+**为什么数据库是唯一的例外**（这是本轮真正的病根）：其它外部源的授权形态是 `drivers.<槽位>.writes[]`，
+**整段缺席 = 只读源**，与 §10.12 的"缺席即语义"一致。唯独 db 段是"默认允许写 + 黑名单拦截"，于是
+"没配好"在数据库这一路读成"无限制"，在别的路读成"禁止"。收口之后数据库与其它源同一形状。
+
+**为什么不用"只允许本机（127.0.0.1）写"**：用户当场提的替代方案。它依旧是承诺式判据（host 字符串由人填），
+真落地要 DBA 改服务端 `pg_hba` 与账号权限，还得对抗隧道与端口转发；把 host 填成 `127.0.0.1` 而实际转发到生产，
+保护照旧为空。"AI 手里没有写出口"则不依赖任何人填对什么 —— 判据从"识别这句话想不想写"（无完备解：
+`SELECT setval` / `SELECT ... INTO` / 函数体内 UPDATE 全是盲区）换成"这条通道有没有出口"（恒定可审计）。
+
+**代价（写下来，别装作没有）**：
+
+- `bug-tester` 的"需要写 DB 时用测试库自动验证"这条路径永久 `partial`：跑 `build.testCmd` 时测试经应用自己的
+  数据源连库，那条路不经过 L1 守卫。测试侧边界改由用例形态守（T4 类级 `@Transactional` / `@Rollback`）。
+- 写门禁从"运行期可放行"变成"永远不可放行"：改数据必须有人在场。这是本条的设计目的，也是它唯一的用处。
+- 存量 L2 条目里的两个退役键会变成校验错误（`checkRetiredWriteKeys`，exit 2），需人工删一次；init 不再采集
+  第七项 `db.writableUser`，`syncForbidWriteSchemas` 那段文本级手术整体删除。
+
+**消息标记**：新增 `DB_WRITE_OUT_OF_SCOPE`（契约不授予写）与 `DB_UNREACHABLE`（连不上）严格分开 —— 混报会把人
+引去查网络，而问题从来不在网络。`DB_GATE_NO_SCHEMA_LIST` 随清单一起退役：没有清单，就没有"清单缺失"这个状态。
+守卫拒绝的语句仍报 `DB_GATE_DENY`（两条通道同一 ASCII 前缀 `DB_GATE_DENY: write side effect <TOKEN>`，日志一处 grep 通吃）。
+
+**回归面怎么核算**：改的是守卫与契约文本，不动任何存量 L2 条目的连接参数；受影响的只有“曾经真的
+  跑过写 SQL”的驱动 —— 它们会开始收到 `DB_GATE_DENY`。私有根里有没有 `role: database` 槽位是可以在
+  本机数出来的（`node scripts/validate-project.mjs` 会对“有 db 段但没有库通道”报警告），本仓不把这个
+  数写进契约：它是 L2 事实，写进 L1 就会过期。
+
+---
 ## 11. 一期范围与二期规划
 
 **一期做**：
@@ -572,7 +614,7 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 
 - **外部数据源可选化（本轮，见 §10.12）**：`schemas/project.schema.yaml` 顶层 `required` 去 `db`/`drivers`；`init-project.mjs` 新增 `planConnections`/`applyConnectionChoices`（不接 = 整段不写，接 = 整段生成，接一半 = 写盘前退 2 `connection-choices-incomplete`）；`validate-project.mjs` 新增 `checkTemplateResidue`（`example_*` 残留 → 2）与 `checkDbDriverCoherence`（有驱动无库 = 错、有库无驱动 = 警告）；`resolve-project.mjs --env` 在无 `db` 段时退 **36**（36 的触发条件扩展，**码集不变**）。`schemas/project.example.yaml` 的 db/drivers 两段改为注释形态的字段说明书（模板不再携带可被误用的假值），`/supperH-init` 步骤 2 改为一次多选接入清单。**端到端实证顺带抓出一个只在真实 CLI 路径才触发的缺陷**：`initWrite` 里 `cfgText` 被误写成 `const`，`decideChannels` 回写 `kind` 时抛 TypeError → `--write` 每次退 1，而当时全绿的都是渲染层用例。已修，并补 2 条 `spawnSync` 真实 CLI 用例（纯代码模式退 0 且落盘无 db/drivers；接一半退 2 且不落盘）—— **落盘类行为一律要有走命令行的用例，只测渲染层等于没测**。
 
-- **L1 纯度门禁（本轮，对外发布前的补欠）**：`sync-assets.mjs` 新增 `checkL1Purity()`，`--check` 与写模式（构建 dist 前）都是**退 5 硬阻断**。判据两条：上传物里不得出现注册条目的专有值（`identity.code` / `displayName` / `aliases[]` / `packageRoot` / `codeRoot` / `db.host` / 三个库名 / 两个账号 / `forbidWriteSchemas[]`），也不得出现本机三个绝对路径（私有根 / 仓库父目录 / 家目录）。三个设计决定：① **值从 L2 运行期取，不写硬黑名单**——把公司名抄进 deny 列表等于把它再公开一遍；② 比对按**段**过滤示例形态（`example_*` / `demo_*` / `<占位符>`），否则模板自身天天误报；③ 不把模块名/分支名当事实（`order` / `dev` 这类高复用词淹没信号），环境词（prod/uat/dev）也**不列进过滤表**——列了会连带屏蔽掉 `<code>_prod` 这种真库名。为什么现在才做：文档与红线一直写着“sync 的敏感字扫描会拦下”，而这条扫描从未存在；失去机械判据后，真实项目短码、真实包根、真实工作区路径成片躺在 `tests/` 夹具与 `mcp-skeleton/README.md` 示例里（手工才找得到，因此对外发布前的全量人工扫描是必须的一道）。同时 `main()` 加了 `import.meta.url` 守卫——无守卫的入口脚本被测试 import 时会重烤 dist 并 `process.exit`。
+- **L1 纯度门禁（本轮，对外发布前的补欠）**：`sync-assets.mjs` 新增 `checkL1Purity()`，`--check` 与写模式（构建 dist 前）都是**退 5 硬阻断**。判据两条：上传物里不得出现注册条目的专有值（`identity.code` / `displayName` / `aliases[]` / `packageRoot` / `codeRoot` / `db.host` / 三个库名 / 只读账号），也不得出现本机三个绝对路径（私有根 / 仓库父目录 / 家目录）。三个设计决定：① **值从 L2 运行期取，不写硬黑名单**——把公司名抄进 deny 列表等于把它再公开一遍；② 比对按**段**过滤示例形态（`example_*` / `demo_*` / `<占位符>`），否则模板自身天天误报；③ 不把模块名/分支名当事实（`order` / `dev` 这类高复用词淹没信号），环境词（prod/uat/dev）也**不列进过滤表**——列了会连带屏蔽掉 `<code>_prod` 这种真库名。为什么现在才做：文档与红线一直写着“sync 的敏感字扫描会拦下”，而这条扫描从未存在；失去机械判据后，真实项目短码、真实包根、真实工作区路径成片躺在 `tests/` 夹具与 `mcp-skeleton/README.md` 示例里（手工才找得到，因此对外发布前的全量人工扫描是必须的一道）。同时 `main()` 加了 `import.meta.url` 守卫——无守卫的入口脚本被测试 import 时会重烤 dist 并 `process.exit`。
 **一期不做**：
 
 - `/supperH-flow`、`/supperH-package`、`/supperH-test`（二期）

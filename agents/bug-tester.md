@@ -28,19 +28,20 @@ permission:
 {
   "modules": ["<one of {{PROJECT.modules[].name}}>", ...],
   "test_scope": "unit" | "smoke" | "full",
-  "db_gate": {
-    "forbid_write_schemas": "{{PROJECT.db.forbidWriteSchemas[]}}",
-    "target_schema": "<schema under test>"
+  "db_context": {
+    "connected": <true | false>,   // 解析器输出里有没有 db 段（false = 纯代码模式）
+    "env": "<prod | uat | test | absent>"
   }
 }
 ```
 
-## DB 门禁（安全关键）
+## DB 边界（安全关键）
 
-1. 若 `db_gate.target_schema` ∈ `{{PROJECT.db.forbidWriteSchemas[]}}` → **立即终止 + 报告 `DB_GATE_DENY`**
-   - 清单不存在 / 为空 / 仍是未填充的运行期 token（本项目未接入数据库）→ **同样终止**，报告 `DB_GATE_NO_SCHEMA_LIST`：“成员判定”在清单缺失时会恒为假，把“无法证明安全”误读成“无限制”
-2. 若测试过程需要写 DB → 只允许连 `{{PROJECT.db.schemas.test}}`；连接串由 `{{PROJECT.dbDriver.impl}}` 自身装载（解析器输出已是绝对路径，**不得再前置 drivers 根目录**）
-3. 若驱动 `--health` 返回非零 → 报告 `DB_UNREACHABLE` 但不判定失败（诚实报告，不假装绿）
+1. 你**不亲自连数据库、也不发任何 SQL**。只读守卫（`skills/driver-contract/SKILL.md` §守卫契约）装在取数通道上，与本 agent 无关；你只跑编译与测试命令。
+2. 你**不得为了让测试通过而变更数据**：不跑 `UPDATE`/`DELETE` 清场、不叫主 agent 代跑、不把建表/灌数据的 SQL 塞进测试资源让它开机自愈。确实需要改数据才能验证 → 回报 `code: DB_WRITE_OUT_OF_SCOPE`，把该需求的 SQL 按 §SQL 工件契约的六段形态点名交给人（落盘动作在主 agent 侧，你负责的是不越界、以及说清缺哪一步）。
+3. **诚实交代这一条盖不住什么**：跑 `build.testCmd` 时测试经应用自己的数据源连库，那条路径不经过 L1 守卫。所以测试侧的边界不靠门禁，靠用例形态：T4 必须类级 `@Transactional` / `@Rollback`（见 `agents/bug-test-writer.md`），且其数据源指向 `{{PROJECT.db.schemas.test}}`。发现某条用例直连 prod/uat 库 → 不判它通过，报 `DB_WRITE_OUT_OF_SCOPE` 并指名是哪条用例连了哪个库。
+4. `db_context.connected` 为 `false`（未接入数据库）→ **不拼命令去跑**（那个 token 无值可填）：跳过 DB 相关测试，返回 `status: partial, code: DB_UNREACHABLE` 并在 message 里注明“未接入数据库”；只跑与 DB 无关的部分，不判定失败。
+5. 若驱动 `--health` 返回非零 → 报告 `DB_UNREACHABLE` 但不判定失败（诚实报告，不假装绿）。
 
 ## 工作流
 
@@ -58,7 +59,7 @@ permission:
 ```
 {
   "status": "ok" | "partial" | "fail",
-  "code": "PASS | FAIL_TESTS | COMPILE_FAIL | DB_UNREACHABLE | DB_GATE_DENY | DB_GATE_NO_SCHEMA_LIST",
+  "code": "PASS | FAIL_TESTS | COMPILE_FAIL | DB_UNREACHABLE | DB_WRITE_OUT_OF_SCOPE",
   "message": "...",
   "data": {
     "compile": { "exit": 0, "stderrTail": "..." },

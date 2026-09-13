@@ -227,7 +227,78 @@ test('写守卫关键字表两处一致，且 deny 消息带 DB_GATE_DENY 标记
   const b = keywordTuple(mcpSrc, 'WRITE_SQL_KEYWORDS');
   assert.ok(a && a.length, 'base_driver 的关键字表没解析到');
   assert.deepEqual(b, a, '两条通道必须拒绝同一批语句');
-  assert.match(mcpSrc, /DB_GATE_DENY: write keyword/, 'deny 文案与脚本通道同形，日志 grep 才能一处通吃');
+  // 判据换成「无条件只读」后文案改口为 write side effect；两条通道同一 ASCII 前缀，
+  // 日志与测试一处 grep 通吃。未知即拒那条也要同形，否则只剩一半是可 grep 的。
+  for (const [src, who] of [[mcpSrc, 'mcp'], [scriptSrc, 'script']]) {
+    assert.match(src, /DB_GATE_DENY: write side effect /, `${who} 通道的写拒绝消息要带稳定标记`);
+    assert.match(src, /DB_GATE_DENY: unjudgeable statement/, `${who} 通道的未知即拒要带同一前缀`);
+  }
+  assert.ok(!/DB_GATE_DENY: write keyword/.test(mcpSrc + scriptSrc), '旧文案不得在任一通道残留');
+});
+
+// ---------- 守卫按行为锁（F-12）---------------------------------------------
+// 上面那条只比对两张关键字表，它保证"两张表一样"，保证不了"两张表都在拦"。
+// 本轮把判据从"目标库名命中清单才去看语句"换成"无条件只读 + 未知即拒"，那三个静默放行口
+// （清单为空 / schema 传空串 / database 名与 PG schema 名层级错配）只能靠行为断言钉住：
+// 每张表都得真拒下来，且拒不拒与传进来的库名无关。
+const GUARD_CASES = [
+  { sql: 'select id from t where a = 1', want: 'ALLOW', why: '普通只读' },
+  { sql: "select 'insert into fake' as txt", want: 'ALLOW', why: '字符串常量里的关键词不算写' },
+  { sql: '', want: 'DENY', why: '未知即拒：空语句证不出只读' },
+  { sql: '-- 只是注释', want: 'DENY', why: '未知即拒：仅含注释' },
+  { sql: 'insert into t values (1)', want: 'DENY', why: '写关键词' },
+  { sql: 'with x as (delete from t returning *) select * from x', want: 'DENY', why: 'CTE 里藏的写' },
+  { sql: "select setval('s', 9)", want: 'DENY', why: '关键词表盖不到的副作用' },
+  { sql: 'select a into t2 from t1', want: 'DENY', why: 'SELECT ... INTO 是 CTAS 的别名' },
+  { sql: "select dblink_exec('host=x', 'delete from t')", want: 'DENY', why: '跨库调用' },
+  { sql: 'update t set a = 1', want: 'DENY', why: '旧放行口①：清单为空', forbid: [] },
+  { sql: 'update t set a = 1', want: 'DENY', why: '旧放行口②：schema 传空串', schema: '', forbid: ['anything'] },
+  { sql: 'update t set a = 1', want: 'DENY', why: '旧放行口③：库名与 schema 名层级错配',
+    schema: 'app_dw', forbid: ['appdb'] },
+];
+
+// 两条通道在同一个 python 进程里各判一遍：同一份语句表 → 两个裁决列，逐列比对。
+const GUARD_PY = [
+  'import os, sys, io, json',
+  "root = os.environ['SUPPERH_TEST_ROOT']",
+  "sys.path.insert(0, os.path.join(root, 'mcp-skeleton'))",
+  "sys.path.insert(0, os.path.join(root, 'drivers-skeleton'))",
+  'from supperh_contract.guards import ReadOnlyGuard, ContractViolation',
+  'import base_driver',
+  "def mcp(c):",
+  "    try:",
+  "        ReadOnlyGuard(c.get('forbid', [])).check(c['sql'], c.get('schema', ''))",
+  "        return 'ALLOW'",
+  '    except ContractViolation:',
+  "        return 'DENY'",
+  "def script(c):",
+  '    buf, out = io.StringIO(), sys.stdout',
+  '    sys.stdout = buf',
+  '    try:',
+  "        base_driver.SELECT_only_guard(c['sql'], c.get('schema', ''), c.get('forbid', []))",
+  "        return 'ALLOW'",
+  '    except SystemExit:',
+  "        return 'DENY'",
+  '    finally:',
+  '        sys.stdout = out',
+  "cases = json.loads(os.environ['SUPPERH_GUARD_CASES'])",
+  "print(json.dumps([[mcp(c), script(c)] for c in cases]))",
+].join('\n');
+
+test('两条通道按行为拒同一批语句：三个旧静默放行口现在全都拒得下来', (t) => {
+  if (!hasPy) return t.skip(`${PY} 不可用：守卫行为比对不了，只保留静态比表`);
+  const r = spawnSync(PY, ['-c', GUARD_PY], {
+    encoding: 'utf8', cwd: ROOT,
+    env: { ...process.env, SUPPERH_TEST_ROOT: ROOT, SUPPERH_GUARD_CASES: JSON.stringify(GUARD_CASES) },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const got = JSON.parse(String(r.stdout).trim().split(/\r?\n/).pop());
+  assert.equal(got.length, GUARD_CASES.length, 'python 侧条数要与用例对齐');
+  GUARD_CASES.forEach((c, i) => {
+    const [m, s] = got[i];
+    assert.equal(m, c.want, `mcp 通道 / ${c.why} / ${JSON.stringify(c.sql)}`);
+    assert.equal(s, c.want, `script 通道 / ${c.why} / ${JSON.stringify(c.sql)}`);
+  });
 });
 
 // ---------- 壳的 CLI（退出码 = driver 码，探测项靠这个） ----------

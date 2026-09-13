@@ -56,7 +56,7 @@ before(() => {
   fs.mkdirSync(path.join(privateRoot, 'projects'), { recursive: true });
   fs.mkdirSync(workspace, { recursive: true });
   fs.writeFileSync(path.join(privateRoot, 'projects', 'demo.yaml'),
-    `schemaVersion: 1\nidentity:\n  code: demo\n  displayName: Demo\n  workspaces:\n    - "${workspace.replace(/\\/g, '/')}"\ncodeRoot: "${workspace.replace(/\\/g, '/')}"\npackageRoot: com.demo\nmodules:\n  - name: order\n    entryPattern: '**/*.java'\nbuild:\n  tool: maven\n  jdk: '1.8'\n  compileCmd: mvn compile\n  testCmd: mvn test\ndb:\n  host: localhost\n  port: 5432\n  schemas: { prod: p, uat: u, test: t }\n  readonlyUser: ro\n  writableUser: rw\n  forbidWriteSchemas: [p, u]\nbranches: { prod: prod, uat: uat, dev: dev }\ndrivers:\n  database: { impl: noop.py, healthCheck: noop.py }\nnaming:\n  commandPrefix: /supperH\n`, 'utf8');
+    `schemaVersion: 1\nidentity:\n  code: demo\n  displayName: Demo\n  workspaces:\n    - "${workspace.replace(/\\/g, '/')}"\ncodeRoot: "${workspace.replace(/\\/g, '/')}"\npackageRoot: com.demo\nmodules:\n  - name: order\n    entryPattern: '**/*.java'\nbuild:\n  tool: maven\n  jdk: '1.8'\n  compileCmd: mvn compile\n  testCmd: mvn test\ndb:\n  host: localhost\n  port: 5432\n  schemas: { prod: p, uat: u, test: t }\n  readonlyUser: ro\nbranches: { prod: prod, uat: uat, dev: dev }\ndrivers:\n  database: { impl: noop.py, healthCheck: noop.py }\nnaming:\n  commandPrefix: /supperH\n`, 'utf8');
   const modDir = path.join(privateRoot, 'context', 'demo', 'order');
   fs.mkdirSync(path.join(modDir, GEN), { recursive: true });
   fs.writeFileSync(path.join(modDir, 'CURRENT'), GEN + '\n', 'utf8');
@@ -221,7 +221,7 @@ test('P1-③ fastPath.enabled=false 端到端：binding.project.fastPath 传给�
   const ws2 = path.join(root, 'ws-off'); fs.mkdirSync(ws2, { recursive: true });
   const w = ws2.replace(/\\/g, '/');
   fs.writeFileSync(path.join(privateRoot, 'projects', 'off.yaml'),
-    `schemaVersion: 1\nidentity:\n  code: off\n  displayName: Off\n  workspaces:\n    - "${w}"\ncodeRoot: "${w}"\npackageRoot: com.off\nmodules:\n  - name: order\n    entryPattern: '**/*.java'\nbuild:\n  tool: maven\n  jdk: '1.8'\n  compileCmd: mvn compile\n  testCmd: mvn test\ndb:\n  host: localhost\n  port: 5432\n  schemas: { prod: p, uat: u, test: t }\n  readonlyUser: ro\n  writableUser: rw\n  forbidWriteSchemas: [p, u]\nbranches: { prod: prod, uat: uat, dev: dev }\ndrivers:\n  database: { impl: noop.py, healthCheck: noop.py }\nnaming:\n  commandPrefix: /supperH\nfastPath:\n  enabled: false\n`, 'utf8');
+    `schemaVersion: 1\nidentity:\n  code: off\n  displayName: Off\n  workspaces:\n    - "${w}"\ncodeRoot: "${w}"\npackageRoot: com.off\nmodules:\n  - name: order\n    entryPattern: '**/*.java'\nbuild:\n  tool: maven\n  jdk: '1.8'\n  compileCmd: mvn compile\n  testCmd: mvn test\ndb:\n  host: localhost\n  port: 5432\n  schemas: { prod: p, uat: u, test: t }\n  readonlyUser: ro\nbranches: { prod: prod, uat: uat, dev: dev }\ndrivers:\n  database: { impl: noop.py, healthCheck: noop.py }\nnaming:\n  commandPrefix: /supperH\nfastPath:\n  enabled: false\n`, 'utf8');
   const r = runCli(['--cwd', ws2, '--module', 'order', '--anchor', 'POST /api/v1/order/create', '--text', '字段为空']);
   assert.equal(r.status, 30, 'enabled=false 应短路为 30（无需求 HEAD/index）');
   assert.equal(r.json.fastPath.disabled, true);
@@ -237,7 +237,7 @@ test('阶段0：binding.drivers.* 输出已展开的绝对路径，不含 {{ 也
   const ws3 = path.join(root, 'ws-drv'); fs.mkdirSync(ws3, { recursive: true });
   const w = ws3.replace(/\\/g, '/');
   fs.writeFileSync(path.join(privateRoot, 'projects', 'drv.yaml'),
-    `schemaVersion: 1\nidentity:\n  code: drv\n  displayName: Drv\n  workspaces:\n    - "${w}"\ncodeRoot: "${w}"\npackageRoot: com.drv\nmodules:\n  - name: order\n    entryPattern: '**/*.java'\nbuild:\n  tool: maven\n  jdk: '1.8'\n  compileCmd: mvn compile\n  testCmd: mvn test\ndb:\n  host: localhost\n  port: 5432\n  schemas: { prod: p, uat: u, test: t }\n  readonlyUser: ro\n  writableUser: rw\n  forbidWriteSchemas: [p, u]\nbranches: { prod: prod, uat: uat, dev: dev }\ndrivers:\n  database:\n    impl: "{{DRIVERS_ROOT}}/db-example.py"\n    healthCheck: "{{DRIVERS_ROOT}}/db-example.py --project {{PROJECT.identity.code}} --health"\n  logs:\n    impl: "{{DRIVERS_ROOT}}/log-example.py"\n    healthCheck: "{{DRIVERS_ROOT}}/log-example.py --health"\n    config:\n      indexPattern: "app-logs-*"\nnaming:\n  commandPrefix: /supperH\n`, 'utf8');
+    `schemaVersion: 1\nidentity:\n  code: drv\n  displayName: Drv\n  workspaces:\n    - "${w}"\ncodeRoot: "${w}"\npackageRoot: com.drv\nmodules:\n  - name: order\n    entryPattern: '**/*.java'\nbuild:\n  tool: maven\n  jdk: '1.8'\n  compileCmd: mvn compile\n  testCmd: mvn test\ndb:\n  host: localhost\n  port: 5432\n  schemas: { prod: p, uat: u, test: t }\n  readonlyUser: ro\nbranches: { prod: prod, uat: uat, dev: dev }\ndrivers:\n  database:\n    impl: "{{DRIVERS_ROOT}}/db-example.py"\n    healthCheck: "{{DRIVERS_ROOT}}/db-example.py --project {{PROJECT.identity.code}} --health"\n  logs:\n    impl: "{{DRIVERS_ROOT}}/log-example.py"\n    healthCheck: "{{DRIVERS_ROOT}}/log-example.py --health"\n    config:\n      indexPattern: "app-logs-*"\nnaming:\n  commandPrefix: /supperH\n`, 'utf8');
 
   const r = runCli(['--cwd', ws3]);
   assert.equal(r.status, 0, r.stderr);
@@ -262,7 +262,7 @@ function roleYaml(code, ws, driversBlock) {
     'identity:', `  code: ${code}`, `  displayName: ${code} role`, `  workspaces:\n    - "${w}"`,
     `codeRoot: "${w}"`, 'packageRoot: com.role', 'modules:\n  - name: order\n    entryPattern: \'**/*.java\'',
     'build:\n  tool: maven\n  jdk: \'1.8\'\n  compileCmd: mvn compile\n  testCmd: mvn test',
-    'db: { host: localhost, port: 5432, schemas: { prod: p, uat: u, test: t }, readonlyUser: ro, writableUser: rw, forbidWriteSchemas: [p, u] }',
+    'db: { host: localhost, port: 5432, schemas: { prod: p, uat: u, test: t }, readonlyUser: ro }',
     'branches: { prod: prod, uat: uat, dev: dev }',
     ...(driversBlock ? ['drivers:', ...driversBlock] : []),
     'naming:\n  commandPrefix: /supperH', ''
@@ -361,7 +361,7 @@ function freshRepoProject(code, wsName, headOut) {
 
   const w = ws.replace(/\\/g, '/');
   fs.writeFileSync(path.join(privateRoot, 'projects', `${code}.yaml`),
-    `schemaVersion: 1\nidentity:\n  code: ${code}\n  displayName: I0\n  workspaces:\n    - "${w}"\ncodeRoot: "${w}"\npackageRoot: com.i0\nmodules:\n  - name: order\n    entryPattern: '**/*.java'\nbuild:\n  tool: maven\n  jdk: '1.8'\n  compileCmd: mvn compile\n  testCmd: mvn test\ndb:\n  host: localhost\n  port: 5432\n  schemas: { prod: p, uat: u, test: t }\n  readonlyUser: ro\n  writableUser: rw\n  forbidWriteSchemas: [p, u]\nbranches: { prod: prod, uat: uat, dev: dev }\ndrivers:\n  database: { impl: noop.py, healthCheck: noop.py }\nnaming:\n  commandPrefix: /supperH\n`, 'utf8');
+    `schemaVersion: 1\nidentity:\n  code: ${code}\n  displayName: I0\n  workspaces:\n    - "${w}"\ncodeRoot: "${w}"\npackageRoot: com.i0\nmodules:\n  - name: order\n    entryPattern: '**/*.java'\nbuild:\n  tool: maven\n  jdk: '1.8'\n  compileCmd: mvn compile\n  testCmd: mvn test\ndb:\n  host: localhost\n  port: 5432\n  schemas: { prod: p, uat: u, test: t }\n  readonlyUser: ro\nbranches: { prod: prod, uat: uat, dev: dev }\ndrivers:\n  database: { impl: noop.py, healthCheck: noop.py }\nnaming:\n  commandPrefix: /supperH\n`, 'utf8');
   const modDir = path.join(privateRoot, 'context', code, 'order');
   fs.mkdirSync(path.join(modDir, GEN), { recursive: true });
   fs.writeFileSync(path.join(modDir, 'CURRENT'), GEN + '\n', 'utf8');
@@ -663,8 +663,6 @@ function pfYaml(code, ws, gitLines) {
     '  port: 5432',
     '  schemas: { prod: p, uat: u, test: t }',
     '  readonlyUser: ro',
-    '  writableUser: rw',
-    '  forbidWriteSchemas: [p, u]',
     'branches: { prod: prod, uat: uat, dev: dev }',
     'drivers:',
     '  database: { impl: noop.py, healthCheck: noop.py }',

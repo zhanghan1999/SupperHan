@@ -407,37 +407,12 @@ function setWorkspaces(text, root) {
   return lines.join(eol);
 }
 
-// ---- db.forbidWriteSchemas 必须跟着 db.schemas 的实际值走 ----
-// 模板里这一节写死 example_prod / example_uat，而旧实现只替换 db.schemas.*。结果：注册完成后
-// 真实生产库名根本不在禁写清单里 —— driver 的 ReadOnlyGuard 与 bug-dev 的 DB 门禁对 prod/uat
-// 形同虚设（写错库不会报错，只会静默放行）。清单看着齐备但一条都不命中，是最危险的失败形态。
-// export 只为测试：这段文本级手术必须能单独断言，不必跑完整个 initWrite。
-export function syncForbidWriteSchemas(text) {
-  const eol   = /\r\n/.test(text) ? '\r\n' : '\n';
-  const lines = text.split(/\r?\n/);
-  const clean = (s) => String(s == null ? '' : s).trim().replace(/^['"]|['"]$/g, '');
-  const sIdx = lines.findIndex(l => /^[ \t]+schemas[ \t]*:/.test(l));
-  if (sIdx < 0) return text;
-  const got = {};
-  const flow = lines[sIdx].match(/\{([^}]*)\}/);
-  if (flow) {
-    for (const kv of flow[1].split(',')) { const i = kv.indexOf(':'); if (i > 0) got[clean(kv.slice(0, i))] = clean(kv.slice(i + 1)); }
-  } else {
-    for (let i = sIdx + 1; i < lines.length && /^[ \t]+\S/.test(lines[i]); i++) {
-      const m = lines[i].match(/^[ \t]+(\w+)[ \t]*:[ \t]*(.*)$/);
-      if (m) got[m[1]] = clean(m[2]);
-    }
-  }
-  const want = [...new Set([got.prod, got.uat].filter(Boolean))];
-  const fIdx = lines.findIndex(l => /^[ \t]*forbidWriteSchemas[ \t]*:/.test(l));
-  if (!want.length || fIdx < 0) return text;
-  const ind = lines[fIdx].match(/^[ \t]*/)[0];
-  let end = fIdx + 1;
-  while (end < lines.length && /^[ \t]+-[ \t]/.test(lines[end])) end++;   // 吃掉原有条目（不堆重复键）
-  const block = want.map(n => ind + '  - \'' + n.replace(/'/g, "''") + '\'');
-  lines.splice(fIdx, end - fIdx, lines[fIdx].replace(/:.*$/, ':'), ...block);
-  return lines.join(eol);
-}
+// ---- 曾经这里有 syncForbidWriteSchemas(text)：按刚落盘的库名重建 db.forbidWriteSchemas ----
+// 它修的是上一版缺陷（模板写死 example_prod/example_uat，init 只替换 db.schemas.*，于是真生产
+// 库名根本不在清单里，写保护一条都不命中）。修好之后仍然只剩一半对：把库名填对，判据依旧是
+// “这条语句的目标库名在不在名单里”——而名单为空 / config 没写 schema 传空串 / database 名与 PG
+// schema 名层级错配，三种情形都会静默放行。既然数据库通道改成无条件只读（判据在 guards.py，
+// 不看库名），这段文本级手术就没有存在理由了：整个函数删除，落盘的 db 段里也不再写这个键。
 
 // ---- 接入清单（F-7）：接不接外部数据源由用户决定，脚本只负责"不接就别造假值" ----
 // 两条规则：
@@ -445,14 +420,16 @@ export function syncForbidWriteSchemas(text) {
 //   接   → 该段所有必填值必须真给出来，缺一项在写盘之前就退 2（不补默认值、不保留模板值）。
 // 旧实现是 `setLine` 见空值就 return，于是模板的 example_* 原样留在 projects/<code>.yaml 里：
 // 结构合法、validate 退 0、连通门禁因"0 个已配置驱动"自动放行 —— 三份机制全都看不出它没被配好。
+// 六项：连接/映射事实 + 两个账号位里的只读那一个。写账号（db.writableUser）已随写能力一起
+// 退役 —— 少问的不是一个问题，是那一问从此没有合法答案。
 const DB_VALUE_KEYS = ['db.host', 'db.port', 'db.schemas.prod', 'db.schemas.uat', 'db.schemas.test',
-                       'db.readonlyUser', 'db.writableUser'];
+                       'db.readonlyUser'];
 // ---- 槽位名归用户（F-11）----
 // 这里曾写着 `const DRIVER_SLOTS = ['database','logs','tickets','efficiency']`：那份名单把
 // "一个项目最多接四种外部源"变成了 L1 契约，自定义槽位在 schema 阶段就退 2（实测
 // `$.drivers.<自定义名>: additional property not allowed`），而 `tickets`/`efficiency` 本身
 // 还是某家公司的产品类别（红线 R3 的 L2 泄漏）。现在键名只是标识符，唯一的语义承载是
-// `role: database`（全项目最多一个）——它才是"这条通道发的 SQL 要过禁写清单"的判据。
+// `role: database`（全项目最多一个）——它才是"这条通道发的 SQL 要过无条件只读守卫"的判据。
 const SLOT_KEY_RE  = /^[A-Za-z][A-Za-z0-9_-]{1,39}$/;   // 与 schemas/project.schema.yaml 的 patternProperties 同一判据
 const DB_SLOT_NAME = 'database';   // 仅是"库信息没处挂靠时的默认名"，不携带特权：特权在 role
 const DB_ROLE      = 'database';
@@ -491,7 +468,7 @@ export function planConnections(values) {
     else roleProblems.push(`给了 db.* 但声明的槽位（${declared.join(', ')}）里没有标 role: database 的：哪个通道发 SQL 不能靠猜，请给其中一个补 drivers.<槽位>.role: database`);
   }
   if (dbSlot && !dbConfigured) {
-    roleProblems.push(`drivers.${dbSlot} 标了 role: database 却没有任何 db.* 值：禁写清单（db.forbidWriteSchemas）拿不到库名，而空清单 = 任何库都不拦（写保护默认失效）`);
+    roleProblems.push(`drivers.${dbSlot} 标了 role: database 却没有任何 db.* 值：这条 SQL 通道没有 host/port/账号可连，也没有 schemas 做环境名→库名映射（--env 与 SQL 工件的目标标注都要从这里取）`);
   }
   const badNames = declared.filter(s => !SLOT_KEY_RE.test(s));
   const dbMissing = dbConfigured ? DB_VALUE_KEYS.filter(k => !isGiven(v[k])) : [];
@@ -562,11 +539,10 @@ function buildDbBlock(v) {
     `    uat:  ${yqv(v['db.schemas.uat'])}`,
     `    test: ${yqv(v['db.schemas.test'])}`,
     `  readonlyUser: ${yqv(v['db.readonlyUser'])}`,
-    `  writableUser: ${yqv(v['db.writableUser'])}`,
-    '  forbidWriteSchemas: []',
   ];
-  // 禁写清单只有一处实现：让 syncForbidWriteSchemas 按刚落盘的库名重建，不在这里再拼一遍
-  return syncForbidWriteSchemas(lines.join('\n'));
+  // 落盘形态到此为止。曾经下面还有一行 forbidWriteSchemas + 一次 syncForbidWriteSchemas 重建，
+  // 随该键从 L1 契约退役一并删除：数据库通道无条件只读，判据在 guards.py，不看库名。
+  return lines.join('\n');
 }
 
 /** 把一个槽位的字段列表渲染成 `  <slot>:` 开头的文本行（init 与 /supperH-driver 共用同一渲染顺序）。 */

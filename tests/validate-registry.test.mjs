@@ -6,7 +6,8 @@
 // 每一个真实注册过的项目都会被判成违规。
 // 以及跨字段通道规则（schema 表达不了：本仓库最小校验器没有 if/then/allOf）：
 // kind=mcp 必须带 mcp 绑定、script 槽位不得挂 mcp 段、废弃槽位只警告不阻断，
-// 以及 forbidWriteSchemas 必须真盖住 db.schemas.prod/uat（清单非空但一条都不命中 = 写保护不存在）。
+// 以及退役键清点（F-12）：db.writableUser / db.forbidWriteSchemas / writes[].action=sql_write
+// 出现即退 2 并点名怎么删。旧形态查的是"禁写清单盖没盖住 prod/uat"，那份清单已整个退役。
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs     from 'node:fs';
@@ -41,8 +42,6 @@ function projYaml(code) {
     '  port: 5432',
     '  schemas: { prod: p, uat: u, test: t }',
     '  readonlyUser: ro',
-    '  writableUser: rw',
-    '  forbidWriteSchemas: [p, u]',
     'branches: { prod: prod, uat: uat, dev: dev }',
     'drivers:',
     '  database: { impl: noop.py, healthCheck: noop.py }',
@@ -349,9 +348,11 @@ test('git 段写错会被拦下：非法 mode / TTL 越界 / 未知子键', () =
   assert.ok(extra.errors.some((e) => /git\.autoPush/.test(e) && /additional property/.test(e)), JSON.stringify(extra.errors));
 });
 
-// ---- 写保护覆盖度（F-6）---------------------------------------------------
-// /supperH-init 曾经只替 db.schemas.*、不动 forbidWriteSchemas，于是落盘的清单里仍是
-// example_prod/example_uat：模式上合法、语义上零防护。这一类“门禁在但拦不到”必须被 validate 拦下。
+// ---- 退役键点名（F-6 的继承者 = F-12）--------------------------------------
+// 旧 F-6 查的是“禁写清单盖没盖住 prod/uat”。数据库通道收口为无条件只读之后，判据不再看库名，
+// 那份清单也就没有读者了 —— 于是本节的职责从「查覆盖度」变成「让这些字符串从盘上消失」：
+// schema 的 additionalProperties:false 会拒这两个键，但它只会说 unknown field，说不出该删谁、
+// 改成什么，所以还要一条带迁移指引的检查。两道判据都得在，删掉任一道都会留一个静默口子。
 function checkRaw(name, code, text) {
   const pr = mkPrivate(name, { [`${code}.yaml`]: text });
   const r = run(['--json'], pr);
@@ -363,27 +364,66 @@ function checkRaw(name, code, text) {
 
 // 拼装用的固定行（projYaml 用 '\n' 拼接，这里逐行删除比正则可靠）
 const DB_LINES = ['db:', '  host: localhost', '  port: 5432',
-  '  schemas: { prod: p, uat: u, test: t }', '  readonlyUser: ro', '  writableUser: rw',
-  '  forbidWriteSchemas: [p, u]'];
+  '  schemas: { prod: p, uat: u, test: t }', '  readonlyUser: ro'];
 const DRV_LINES = ['drivers:', '  database: { impl: noop.py, healthCheck: noop.py }'];
 const without = (text, lines) => text.split('\n').filter(l => !lines.includes(l)).join('\n');
 
-test('写保护清单没盖住 prod/uat → 2：非空但一条不命中等于没有门禁', () => {
-  const stale = projYaml('gw').replace('  forbidWriteSchemas: [p, u]', '  forbidWriteSchemas: [example_prod, example_uat]');
-  const r = checkRaw('guard-stale', 'gw', stale);
+test('退役键残留在盘上 → 2：schema 说不出的「该删谁、改成什么」由迁移说明补上', () => {
+  const stale = projYaml('gw').replace('  readonlyUser: ro',
+    '  readonlyUser: ro\n  writableUser: rw\n  forbidWriteSchemas: [p, u]');
+  const r = checkRaw('retired-db', 'gw', stale);
   assert.equal(r.status, 2);
-  assert.ok(r.errors.some((e) => /forbidWriteSchemas/.test(e) && /\.prod=/.test(e)), JSON.stringify(r.errors));
-  assert.ok(r.errors.some((e) => /forbidWriteSchemas/.test(e) && /\.uat=/.test(e)), JSON.stringify(r.errors));
-
-  const half = projYaml('gh').replace('  forbidWriteSchemas: [p, u]', '  forbidWriteSchemas: [p]');
-  const r2 = checkRaw('guard-half', 'gh', half);
-  assert.equal(r2.status, 2, '只盖住 prod 不算过：uat 同样是禁写库');
-  assert.ok(r2.errors.some((e) => /uat/.test(e)), JSON.stringify(r2.errors));
+  for (const k of ['writableUser', 'forbidWriteSchemas']) {
+    const hit = r.errors.filter((e) => e.includes(`db.${k}`));
+    assert.ok(hit.length, `${k} 要被逐项点名：${JSON.stringify(r.errors)}`);
+    assert.ok(hit.some((e) => /SQL 工件/.test(e)), `${k} 的报错要给出路：${JSON.stringify(hit)}`);
+  }
+  assert.ok(r.errors.some((e) => /additional property not allowed/.test(e)),
+    'schema 侧同一份盘也得红（两道判据只留一道 = 另一半会静默）：' + JSON.stringify(r.errors));
 });
 
-test('写保护清单带额外加固项 → 通过（规则只查覆盖度，不禁止多保护）', () => {
-  const ok = checkRaw('guard-ok', 'gi', projYaml('gi').replace('  forbidWriteSchemas: [p, u]', '  forbidWriteSchemas: [p, u, admin]'));
-  assert.equal(ok.status, 0, JSON.stringify(ok.errors));
+test('动作词表里的 sql_write 已退役 → 2：改数据不再是驱动能执行的动作', () => {
+  const r = checkDrivers('retired-sql-write', 'gx', [
+    '  database: { impl: noop.py, healthCheck: noop.py, role: database }',
+    '  crm:',
+    '    desc: 客户主数据',
+    '    impl: c.py',
+    '    healthCheck: c.py',
+    '    writes:',
+    '      - action: sql_write',
+    '        gate: confirm',
+  ]);
+  assert.equal(r.status, 2);
+  assert.ok(r.errors.some((e) => /sql_write/.test(e) && /退役/.test(e)), JSON.stringify(r.errors));
+});
+
+test('数据库通道（role: database）上出现 writes 段 → 2：该段在这条通道上没有合法内容', () => {
+  const r = checkDrivers('db-channel-writes', 'gy', [
+    '  database:',
+    '    desc: 业务主库',
+    '    impl: noop.py',
+    '    healthCheck: noop.py',
+    '    role: database',
+    '    writes:',
+    '      - action: status_change',
+    '        gate: deny',
+  ]);
+  assert.equal(r.status, 2, '一份 gate: deny 的声明看着像有门禁，其实拦它的是守卫本身');
+  assert.ok(r.errors.some((e) => /无条件只读/.test(e)), JSON.stringify(r.errors));
+});
+
+test('非库槽位的 writes 声明照旧合法：收口只拿走数据库通道的写能力', () => {
+  const r = checkDrivers('non-db-writes', 'gz', [
+    '  database: { impl: noop.py, healthCheck: noop.py, role: database }',
+    '  im:',
+    '    desc: 内部 IM，发通知消息',
+    '    impl: i.py',
+    '    healthCheck: i.py',
+    '    writes:',
+    '      - action: message_send',
+    '        gate: confirm',
+  ]);
+  assert.equal(r.status, 0, JSON.stringify(r.errors));
 });
 
 // ---- 纯代码模式与模板假值残留（F-7）-------------------------------------------
@@ -400,11 +440,10 @@ test('“不接”但假值还在盘上 → 2：残留的 example_* 会骗过写
   const stale = projYaml('pb')
     .replace('  host: localhost', '  host: db.example.internal')
     .replace('  schemas: { prod: p, uat: u, test: t }', '  schemas: { prod: example_prod, uat: example_uat, test: example_test }')
-    .replace('  forbidWriteSchemas: [p, u]', '  forbidWriteSchemas: [example_prod, example_uat]')
     .replace('  database: { impl: noop.py, healthCheck: noop.py }',
       '  database: { impl: "C:/priv/drivers/db-example.py", healthCheck: "C:/priv/drivers/db-example.py --health" }');
   const r = checkRaw('residue', 'pb', stale);
-  assert.equal(r.status, 2, '写保护清单自己盖住了假库名，但整段仍是模板值：残留规则必须独立拦住');
+  assert.equal(r.status, 2, '整段仍是模板值：残留规则必须独立拦住（旧形态在这里靠清单覆盖度判）');
   assert.ok(r.errors.some((e) => /db\.host/.test(e) && /模板假值/.test(e)), JSON.stringify(r.errors));
   assert.ok(r.errors.some((e) => /db\.schemas\.prod/.test(e)), '逐个字段点名，不能只报一句“有残留”');
   assert.ok(r.errors.some((e) => /drivers\.database\.impl/.test(e)), JSON.stringify(r.errors));
@@ -417,8 +456,8 @@ test('“不接”但假值还在盘上 → 2：残留的 example_* 会骗过写
 test('驱动与 db 段必须彼此成立：有驱动没库 = 错，有库没驱动 = 警告', () => {
   const driverOnly = checkRaw('driver-no-db', 'pd', without(projYaml('pd'), DB_LINES));
   assert.equal(driverOnly.status, 2);
-  assert.ok(driverOnly.errors.some((e) => /forbidWriteSchemas/.test(e) && /写保护/.test(e)),
-    '空清单 = 一条都不拦，这等于把写保护默认关掉：' + JSON.stringify(driverOnly.errors));
+  assert.ok(driverOnly.errors.some((e) => /没有 db 段/.test(e) && /role: database/.test(e)),
+    '库通道没有 host/port/账号可连 = 这条 SQL 通道是空的：' + JSON.stringify(driverOnly.errors));
 
   const dbOnly = checkRaw('db-no-driver', 'pe', without(projYaml('pe'), DRV_LINES));
   assert.equal(dbOnly.status, 0, JSON.stringify(dbOnly.errors));

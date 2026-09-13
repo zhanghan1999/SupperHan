@@ -48,8 +48,10 @@
 | `{{PROJECT.db.schemas.prod}}` | `db.schemas.prod` | string |
 | `{{PROJECT.db.schemas.uat}}` | `db.schemas.uat` | string |
 | `{{PROJECT.db.schemas.test}}` | `db.schemas.test` | string |
-| `{{PROJECT.db.readonlyUser}}` | `db.readonlyUser` | string |
-| `{{PROJECT.db.writableUser}}` | `db.writableUser` | string |
+
+> `{{PROJECT.db.writableUser}}` 与 `{{PROJECT.db.forbidWriteSchemas[]}}` 已随写能力退役（F-12，
+> 见 `docs/architecture.md` §10.17）。prompt 里再出现这两个 token 不会报错，只会在运行期展开成空
+> ——「看着有判据其实没判据」的老形态，所以引用它们等同于引用一个不存在的字段。| `{{PROJECT.db.readonlyUser}}` | `db.readonlyUser` | string |
 | `{{PROJECT.branches.prod}}` | `branches.prod` | string |
 | `{{PROJECT.branches.uat}}` | `branches.uat` | string |
 | `{{PROJECT.branches.dev}}` | `branches.dev` | string |
@@ -65,7 +67,6 @@
 | `{{PROJECT.identity.aliases[]}}` | 全部 alias 逗号拼接 | `myapp,myapp-legacy,mal` |
 | `{{PROJECT.identity.workspaces[]}}` | 全部绑定工作区路径逗号拼接（解析器用它 + `codeRoot` 匹配 cwd；一般不在 prompt 里引用） | `D:/ws/a,E:/ws/b` |
 | `{{PROJECT.modules[].name}}` | 全部 module 名逗号拼接 | `order,payment,user` |
-| `{{PROJECT.db.forbidWriteSchemas[]}}` | 全部禁止写的 schema 逗号拼接 | `prod_schema,uat_schema` |
 | `{{PROJECT.modules[].entryPattern}}` | 全部 entryPattern 逗号拼接 | `**/order/controller/*.java,**/pay/...` |
 
 **按下标访问**（如需）：`{{PROJECT.modules[0].name}}` — 一期不启用（下标语义太脆弱）；如需请按 module 名显式列出。
@@ -168,7 +169,7 @@ grep -REo "\{\{[^{}]+\}\}" agents commands skills schemas drivers-skeleton mcp-s
 
 | 判据 | 来源 | 命中例子 |
 |------|------|---------|
-| 上传物里出现注册条目的**专有值** | 递归 `<PRIVATE_ROOT>/projects/*.yaml`（+ legacy `project.yaml`）的 `identity.code` / `displayName` / `aliases[]` / `packageRoot` / `codeRoot` / `db.host` / 三个库名 / 两个账号 / `forbidWriteSchemas[]` | 项目叫 `acme` 则 `acme`、`acme-base`、`acme_order`、`ACME` 均拦（边界只看字母数字，大小写不敏感） |
+| 上传物里出现注册条目的**专有值** | 递归 `<PRIVATE_ROOT>/projects/*.yaml`（+ legacy `project.yaml`）的 `identity.code` / `displayName` / `aliases[]` / `packageRoot` / `codeRoot` / `db.host` / 三个库名 / 只读账号 | 项目叫 `acme` 则 `acme`、`acme-base`、`acme_order`、`ACME` 均拦（边界只看字母数字，大小写不敏感） |
 | 上传物里出现**本机绝对路径** | `PRIVATE_ROOT`、仓库父目录、家目录，两边先做斜杠展平 | `C:\a\b` / `C:/a/b` / 源码字面量里的 `C:\\a\\b` 同判 |
 
 三条会让门禁变成噪声的东西被故意排除：

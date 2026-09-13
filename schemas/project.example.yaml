@@ -7,8 +7,9 @@
 #   example_readonly / <DRIVERS_ROOT>/db-example.py 直接写死在这里，于是只要用户答
 #   "不接"，渲染器就会把这些假值原样写进 projects/<code>.yaml：结构合法、validate 退 0、
 #   连通门禁因"0 个已配置驱动"自动放行——三份机制全都看不出它没被配好（F-7）。
-#   现在：不接 = 整段不写（纯代码模式）；接 = 渲染器按用户给的真值**生成**整段，
-#   禁写清单跟着库名重建。所以下面两段只做人看的字段说明书，不是可被误用的配置。
+#   现在：不接 = 整段不写（纯代码模式）；接 = 渲染器按用户给的真值**生成**整段。
+#   db 段只描述连接与环境映射，没有任何键授予写能力（F-12：writableUser/禁写清单已退役）。
+#   所以下面两段只做人看的字段说明书，不是可被误用的配置。
 # branches 同理（F-8）：旧模板在这里写死了 release-main / staging / develop，
 #   而渲染器只改写 git 里真检出的那几个键 —— 没检出的就继承这三行假值，还因为
 #   schema 把它们列成 required 而能过校验。现在整段也是注释形态：没检出 = 不写。
@@ -42,22 +43,19 @@ build:
   packageCmd: "mvn -q package -DskipTests"
 
 # ────────────────────────────────────────────────────────────────
-# db（可选）：本项目接不接数据库。七个值全要，缺一项 init 在写盘前就退 2（不补默认值）。
-# db.schemas.prod / uat 的值会同时决定禁写清单：driver 侧 ReadOnlyGuard 与
-# agents/bug-dev.md 的 DB 门禁只比对这个列表，清单不命中 = 写保护不存在。
+# db（可选）：本项目接不接数据库。六个值全要，缺一项 init 在写盘前就退 2（不补默认值）。
+# 这一段描述的是**只读通道**：host/port/账号 是连接事实，schemas 是环境名→库名的映射，
+# 没有任何键授予写权限 —— 守卫（guards.select_only_guard / SELECT_only_guard）无条件只拦 SELECT，
+# 且不看库名。要变更数据：产出 SQL 工件交人工执行（skills/driver-contract/SKILL.md §SQL 工件契约）。
 # 不接 = 整段不写（纯代码模式：DB 取证步骤记为缺口，--env 退 36）。需要时才取消注释：
 # db:
 #   host: <内网端点>
 #   port: 5432
 #   schemas:
-#     prod: <生产库名>          # 进禁写清单
-#     uat:  <预发库名>          # 进禁写清单
-#     test: <测试库名>          # 唯一允许写的库
-#   readonlyUser: <只读账号>
-#   writableUser: <可写账号>
-#   forbidWriteSchemas:         # 由 init 按上面三个库名重建，不要手填
-#     - <生产库名>
-#     - <预发库名>
+#     prod: <生产库名>          # --env 解析与 SQL 工件的目标标注都从这里取真库名
+#     uat:  <预发库名>
+#     test: <测试库名>
+#   readonlyUser: <只读账号>     # 唯一凭据：AI 手里没有可写的身份（.secrets 只有 readonly_*）
 
 # ────────────────────────────────────────────────
 # branches（可选）：环境名 → 该环境**真实存在**的分支名。至多 prod / uat / dev 三个键，
@@ -88,8 +86,8 @@ build:
 # 调用通道缺省 script（bash + 退出码 0-5，唯一可做分流的通道）。需要时才取消注释：
 # drivers:
 #   bizdb:
-#     desc: "业务主库：DB 取证与写保护都走它"
-#     role: database           # 声明“SQL 从这里出口”，全项目最多一个（多个 → validate 退 2）
+#     desc: "业务主库：DB 取证走它（只读，写数据请出 SQL 工件）"
+#     role: database           # 声明“SQL 从这里出口”（无条件只读），全项目最多一个（多个 → validate 退 2）
 #     impl: "<DRIVERS_ROOT>/<code>/db-query.py"
 #     healthCheck: "<DRIVERS_ROOT>/<code>/db-query.py --project <code> --health"
 #   trace:
@@ -99,7 +97,7 @@ build:
 #     config:
 #       indexPattern: <app-logs-*>       # 自由格式：driver 自己的额外参数
 #     writes:                            # 不写这一段 = 只读源，对它提任何修改动作一律拒
-#       - action: message_send           # 封闭词表：sql_write / message_send / status_change /
+#       - action: message_send           # 封闭词表：message_send / status_change /
 #         gate: confirm                  #   file_upload / config_change / other（other 必须带 userPhrase）
 #         note: "把排查结论作为评论发到工单上"   # 给用户看确认文案时用的具体描述
 #     kind: mcp            # 只换取数通道；上面两行仍是本地脚本，连通判定不交给 MCP

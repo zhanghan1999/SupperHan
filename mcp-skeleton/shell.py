@@ -99,8 +99,9 @@ SERVER_NAME = DEFAULT_SERVER
 # unlimited in count, so a table like {"log_search": "logs"} silently made "there
 # exists a source called logs" part of the L1 contract - the tool just never matched
 # anything on projects that named their log channel differently. Only `database` has
-# machine semantics (it is the channel the write guard binds), so the named-tool
-# surface collapses to that one plus the generic `query`.
+# machine semantics (it is the one channel whose SQL is checked for write side effects
+# at all - every other slot is read-only by its own absent `writes` section), so the
+# named-tool surface collapses to that one plus the generic `query`.
 ROLE_OF_TOOL = {
     "db_query": DB_ROLE,
     "query": None,          # generic: any whitelisted slot
@@ -184,7 +185,9 @@ def dispatch(project: str, source: str, params: dict | None = None,
                    "分派规则是配置，不是模型判断",
         )
 
-    guard = ReadOnlyGuard(binding.forbid_write_schemas)
+    # 无参构造 = 无条件只读。旧形态把 L2 的禁写清单灌进来比对，而清单为空 /
+    # 库名层级错配（database 名 vs PG schema 名）时它一条都不拦；退役原因见 guards.py。
+    guard = ReadOnlyGuard()
     ctx = {
         "project": binding.project,
         "slot": binding.slot,

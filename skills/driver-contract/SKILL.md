@@ -265,24 +265,60 @@ exit code ↔ JSON-RPC error code 对照（表本体在 `mcp-skeleton/supperh_co
   拒连/超时 → **exit 3**（不可达）。两者混成一个“连不上”，用户就会去查网络而问题其实在登录态
 - **失败要说清对象**：detail 里带 `host:port` 与错误原文 —— 上层靠它向用户索取可连接环境，不靠猜
 
-## 守卫契约（SELECT-only）
+## 守卫契约（无条件只读）
 
-`base_driver.py` 的 `SELECT_only_guard(sql_text, target_schema, forbid_writes)`：
+两条通道各一份实现，判据必须逐字相同（`tests/mcp-manifest.test.mjs` 锁住关键词表与消息标记）：
 
-- 扫 SQL 里的写关键字：`INSERT` / `UPDATE` / `DELETE` / `DROP` / `ALTER` / `TRUNCATE` / `CREATE` / `GRANT` / `REVOKE` / `MERGE` / `REPLACE` / `CALL` / `EXEC` / `EXECUTE`
-- 忽略策略：剥离 `--` 单行注释、`/* */` 块注释、字符串常量（单双引号）、`$$ ... $$` 常量
-- 命中写关键字 **且** `target_schema` 命中 `{{PROJECT.db.forbidWriteSchemas[]}}` → 抛 `DB_GATE_DENY`，exit 2
-- 命中写关键字 **且** 目标 schema 允许写 → 放行；driver 需要自行使用 `writableUser` 连接
-- 只有读关键字 → 一律放行；使用 `readonlyUser` 连接
-- **`forbid_writes` 为空时的真实行为**：一条都不拦（实现事实，不是设计意图）。所以清单必须来自已接入的 `db` 段 —— 未接入数据库时根本不该存在带 `role: database` 的槽位；“清单缺失 = 拒绝”由 agent 侧客户端守卫兜住（见 `skills/data-fetch/SKILL.md` guard 段），不得拿本守卫的空清单当“无限制”用。
+| 通道 | 实现 | 失败形态 |
+|---|---|---|
+| script（bash + 退出码） | `drivers-skeleton/base_driver.py` 的 `SELECT_only_guard(sql)` | `emit_error` 吐 envelope + `SystemExit` |
+| mcp | `mcp-skeleton/supperh_contract/guards.py` 的 `select_only_guard(sql)` | 抛 `ContractViolation` → exit 2 |
+
+判据三条，逐条都是硬的：
+
+1. **写关键词命中即写**：`INSERT` / `UPDATE` / `DELETE` / `DROP` / `ALTER` / `TRUNCATE` / `CREATE` / `GRANT` / `REVOKE` / `MERGE` / `REPLACE` / `CALL` / `EXEC` / `EXECUTE`。剥离噪声后才扫：`--` 单行注释、`/* */` 块注释、字符串常量（单双引号）、`$$ ... $$` 常量 —— 所以 `select 'insert into fake' as txt` 是读，`with x as (delete from t returning *) select ...` 是写。
+2. **关键词盖不到的副作用形态按写处理**（`detect_side_effect`）：序列与会话函数 `nextval` `setval` `txid_current` `pg_sleep` `pg_advisory_lock` `pg_terminate_backend` `pg_cancel_backend` `pg_reload_conf`；大对象与跨库调用 `lo_import` `lo_export` `lo_put` `lo_truncate` `dblink` `dblink_exec`；以及 `SELECT ... INTO` —— 它是 CTAS 的别名，读起来像读。这一条补的是旧判据最糟的盲区：三条语句都以 `select` 开头、都以 SELECT 返回结果、全都改了库。
+3. **未知即拒**：空语句、只有注释的语句 —— 证明不出只读就是拒。旧实现的否定分支什么都不做，“没配”于是被读成“无限制”。
+
+- **不比对库名**。`SELECT_only_guard` / `select_only_guard` 的后两个形参（`target_schema`、`forbid_writes`）是已退役机制的**兼容位**，保留只为让存量 adapter 的 `guard.check(sql, schema)` 不至于 `TypeError`，不参与判定。退役理由（`mcp-skeleton/README.md` 有完整版）：清单为空不拦、传空串不拦、以及 database 名与 PG schema 名层级错配 —— 清单里是 `appdb`，adapter 传的是 `app_dw`（jdbc URL 的 `currentSchema`），两个命名空间的字符串永不相等，配置越正确门禁越空转。
+- 命中即 `DB_GATE_DENY`，exit 2：**不弹确认、不改写 SQL、不换 schema、不重试、不“用户同意了就这样发”**。
+- 连上之后先跑 `guard.begin_statements()`（`BEGIN READ ONLY` + `SET TRANSACTION READ ONLY`）：客户端守卫可能被绕过（有人自己拼了连接串），服务端这一道绕不过。
+- **凭据侧的配套事实**：L2 契约里已不存在写账号（`db.writableUser` 退役），`.secrets` 只有 `readonly_*`。所以“AI 手里没有一个能执行写的身份”是物理落点，守卫只是把同一件事在语句层再说一遍。
+
+### 判据换了形状，别再拿它当“语句意图识别器”
+
+旧判据问的是“这句话是不是想写库”——那是一道没有完备解的题（上面第 2 条的三个形态就是它的反例）。新判据问的是“这条通道有没有出口”——恒定可审计、不随 SQL 方言演进。写数据的合法产物因此不在本契约里，见下一节。
 - **非库动作的写门禁也在 driver 侧跑一次**：槽位登记的 `writes[]`（`action` + `gate: confirm|deny`）是唯一授权来源。收到未声明的动作、或声明为 `deny` 的动作 → 退 2 并在 `error` 里点名原因（`WRITE_NOT_DECLARED:` / `WRITE_GATE_DENY:` 前缀，与 `DB_GATE_DENY:` 同一形态的消息标记，不是新退出码）。为何不信调用方已拦：driver 的入参可以不经过 agent 客户端（人手敲、别的工具调、测试跑），只装在客户端的门禁不是一道边界。**一期契约只标准化读路径**：写动作的**请求形态**由 driver 自定（怎么触发要写进 `desc` / `config`，让调用方看得到），但**门禁形态**是统一的（未声明 → 拒、`deny` → 拒、`confirm` → 先把完整载荷给用户看）。
 
 **双重防御**：这一守卫在 agent 客户端也跑一次，不完全信任 driver。即使 driver 忘了实现守卫，agent 侧也会拦下。
 
+## SQL 工件契约（写数据的唯一合法产物）
+
+数据库通道不执行写。确实需要变更数据时，你的产物是一份**交人工执行的 SQL 工件**，落在
+`{{TASKS_ROOT}}/<task_id>/sql/`，文件名 `NNNN-<slug>.sql`（四位序号 + 短横线小写 slug，序号即建议执行顺序）。
+
+工件必须含六段，缺任意一段视为未产出（宁可回报缺口，也不交半截文件）：
+
+| # | 段 | 内容 | 为什么必须有 |
+|---|---|---|---|
+| 1 | 目标标注 | 注释块写清：环境名（prod/uat/test）→ `db.schemas.<env>` 的真库名、表名、预计影响行数 | 执行人靠这一行核对“我连的是不是这个库”；库名从 L2 取，不靠记忆也不靠猜测 |
+| 2 | 前置校验 | 变更**前**该跑的只读 SELECT，各附预期返回值（如 `-- expect: 1 row, status = 0`） | 让执行人先证明前提仍成立；隔了一夜前提可能就没了 |
+| 3 | 变更语句 | 真正的 DML/DDL，包在 `BEGIN;` 里，**故意不写 `COMMIT;`** | 看完第 4 段才该决定提交还是回滚；写了 COMMIT 就是把工件当成命令交付 |
+| 4 | 回滚 | 紧随其后的 `ROLLBACK;`，以及（真要提交才需要的）一份反向 SQL | 反悔的成本必须写在同一个文件里，事后想不起来补 |
+| 5 | 证据链 | 为什么需要这次变更：`task_id`、命中的代码位置 `path:line`、取证用的只读 SQL 与其结果摘要 | 三个月后读到它的人要能复核判断，而不是只能选择信或不信 |
+| 6 | 禁用项 | 显式一行：`-- 本文件不得由 AI 或脚本自动执行；不得进 CI；不得贴进任何 driver 的入参` | 工件的价值在于它是“建议”。一旦能被自动跑，它就直接变回命令，本节契约随之作废 |
+
+配套规则：
+
+- **产出即终判**：工件写完就到此为止。本次 DB 侧结论是 `partial` + `code: DB_WRITE_OUT_OF_SCOPE` —— 这不是失败，也不是“等会儿自己偷偷跑”，是能力边界。
+- `DB_WRITE_OUT_OF_SCOPE` 与 `DB_UNREACHABLE` 必须分开报：前者是“契约不授予写”，后者是“连不上”。混起来会让人去查网络，而问题从来不在网络。
+- 未接入数据库（解析器输出里没有 `db` 段）→ 连工件也写不出：第 1 段的库名没有出处。记为缺口 `DB_GATE_SKIPPED_NO_DB`，**不猜库名、不拿别的项目的库名凑**。
+- 工件里只放 SQL 与注释：不放账号名、不放连接串、不放 `*.local.json` 里的任何凭据。执行人本来就自己有连接方式。
+
 ## 幂等与重试
 
 - **读操作**（SELECT / GET 类）默认幂等，可在 agent 侧配置重试
-- **写操作**（INSERT / UPDATE 类）**必须**幂等（例：带 `WHERE id=? AND version=?` 或 upsert 语义）；否则 agent 侧不会重试，直接失败
+- **写数据不在本契约的能力范围内**（见 §SQL 工件契约）：driver 不执行写，也就没有“写操作要不要幂等”这一问。非库源的写动作（发消息、改状态、传文件）仍**必须**幂等 —— 那条约束没变，只是数据库这一路退出了它的适用范围
 - driver **不主动重试**；重试策略由 agent 侧统一决定，避免"N 层重试相乘"
 - 超时：`--timeout` 秒数到达时 driver **必须**在 1s 内 exit（3 或 5，看具体原因）；不能 hung
 

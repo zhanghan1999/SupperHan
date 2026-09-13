@@ -7,9 +7,10 @@
 //      写成 codeRoot 相对的 `src/main/java/**` 对 demo-base/demo-biz 这种布局永远匹配不到 Controller
 //      → 学习数据永远空 → G0 永远出局，快路径一行都测不到。
 //   ③ “用户改则以用户为准”必须真能落地，且写 branches 不得串台到 db.schemas（两处都有 prod/uat/test）。
-//   ④ 接了库就必须把禁写清单跟着 db.schemas 的实际值重建（F-7）：模板已不再携带 example_* 假值，
-//      接 = 渲染器按用户给的真值生成整段；不接 = 整段不写。留着 example_* 就是“门禁存在但一条不命中”，
-//      driver 的 ReadOnlyGuard 与 bug-dev 的 DB 门禁形同虚设。
+//   ④ 接了库就必须按 db.schemas 的实际值生成整段（F-7）：模板已不再携带 example_* 假值，
+//      接 = 渲染器按用户给的真值生成整段；不接 = 整段不写。留着 example_* 就是“假凭据读起来像真的”。
+//      F-12 之后这一段还多一条锁：init 不得落盘 writableUser / forbidWriteSchemas——守卫无条件只读、
+//      不再比库名，那两份留在盘上就是“清单存在但一条不命中”的旧缺陷形状。
 //   ⑤ “不接外部源”是合法答案而不是错误：漏答字段不得回落成任何假值，也不得静默写出半截 db 段。
 //   ⑥ 同样适用于 branches（F-8）：未检出的分支名不写（盘上缺席 = “未登记”），
 //      而不是沿用模板里的 release-main / staging / develop —— 那会被 --env 诊断基线当现场读出去。
@@ -192,7 +193,7 @@ test('落盘的 yaml：模块 pattern 各自带前缀，写 branches 不串台�
     'branches.prod': 'release/2.0', 'branches.uat': 'staging-2',
     'db.host': 'db.internal', 'db.port': '5432',
     'db.schemas.prod': 'demo_prod', 'db.schemas.uat': 'demo_uat', 'db.schemas.test': 'demo_test',
-    'db.readonlyUser': 'ro_user', 'db.writableUser': 'rw_user',
+    'db.readonlyUser': 'ro_user',
   };
   const plan = applyStructuralOverrides(scanProject(repo), values);
   const text = renderConfig(fs.readFileSync(EXAMPLE, 'utf8'), plan, values);
@@ -210,8 +211,10 @@ test('落盘的 yaml：模块 pattern 各自带前缀，写 branches 不串台�
   assert.ok(!/^  dev:/m.test(valueText(text)), 'branches 块里不得残留模板的 dev 行');
   assert.equal(doc.db.schemas.prod, 'demo_prod', 'db.schemas.prod 不得被分支写入覆盖（同名键）');
   assert.equal(doc.db.schemas.uat, 'demo_uat');
-  // 写保护清单必须跟着实际库名走：假值会造出“门禁存在但一条不命中”的假绿灯
-  assert.deepEqual(doc.db.forbidWriteSchemas, ['demo_prod', 'demo_uat']);
+  // F-12：禁写清单与写账号一起从契约退役。init 若还落这两个键，落盘结果自己就过不了
+  // validate（退役键 → 退 2），所以这里断言的是「根本没写」，不是「写得对」。
+  assert.equal(doc.db.forbidWriteSchemas, undefined, '禁写清单已退役：守卫不看库名，这个键没有读者');
+  assert.equal(doc.db.writableUser, undefined, '写账号已退役：数据库通道无条件只读');
   assert.ok(!/example_(prod|uat|readonly)/.test(valueText(text)), '模板假库名不得出现在落盘的值里');
   assert.equal(doc.codeRoot.replace(/\\/g, '/').toLowerCase(), repo.replace(/\\/g, '/').toLowerCase());
   assert.equal(doc.identity.workspaces.length, 1);
@@ -226,7 +229,7 @@ test('落盘的 yaml：模块 pattern 各自带前缀，写 branches 不串台�
 const FULL_DB = {
   'db.host': 'db.internal', 'db.port': '5432',
   'db.schemas.prod': 'demo_prod', 'db.schemas.uat': 'demo_uat', 'db.schemas.test': 'demo_test',
-  'db.readonlyUser': "ro'u", 'db.writableUser': 'rw_user',
+  'db.readonlyUser': "ro'u",
 };
 
 test('不接任何外部源：db / drivers 两段整体从落盘文本里消失（纯代码模式）', (t) => {
@@ -252,7 +255,7 @@ test('接了库与日志驱动：整段按真值生成，反斜杠路径与带�
   const values = {
     packageRoot: 'com.a', modules: ['demo-base', 'demo-biz'], connect: ['database', 'logs'],
     ...FULL_DB,
-    'drivers.database.desc': '业务主库，取证与写保护都走它',
+    'drivers.database.desc': '业务主库，DB 取证走它（无条件只读）',
     'drivers.database.impl': 'C:\\work\\supper-Han-private\\drivers\\demo\\db.py',
     'drivers.database.healthCheck': 'C:\\work\\supper-Han-private\\drivers\\demo\\db.py --health',
     'drivers.logs.desc': '日志检索：按 trace_id 找回一次请求的全部日志',
@@ -260,12 +263,14 @@ test('接了库与日志驱动：整段按真值生成，反斜杠路径与带�
     'drivers.logs.healthCheck': '{{DRIVERS_ROOT}}/demo/logs.py --health',
     'drivers.logs.config': { indexPattern: 'demo-logs-*' },
   };
-  const { doc } = render(repo, values);
+  const { doc, text } = render(repo, values);
   assert.equal(doc.db.host, 'db.internal');
   assert.equal(doc.db.port, 5432);
   assert.deepEqual(doc.db.schemas, { prod: 'demo_prod', uat: 'demo_uat', test: 'demo_test' });
   assert.equal(doc.db.readonlyUser, "ro'u", "单引号账号必须原样回读（写进去的是 '' 转义）");
-  assert.deepEqual(doc.db.forbidWriteSchemas, ['demo_prod', 'demo_uat'], '禁写清单跟着真库名重建');
+  assert.equal(doc.db.forbidWriteSchemas, undefined, '退役键不得由 init 落盘（旧形态在这里重建清单）');
+  assert.ok(!/writableUser|forbidWriteSchemas/.test(valueText(text)),
+    '落盘文本里连键名都不该出现：留着就是给下一轮改动当「已有判据」的幻觉');
   assert.deepEqual(Object.keys(doc.drivers), ['database', 'logs'], '没选的槽位不得被凭空造出来');
   assert.equal(doc.drivers.database.impl,
     'C:\\work\\supper-Han-private\\drivers\\demo\\db.py', 'Windows 反斜杠路径不得被双引号转义吞掉');
@@ -307,8 +312,8 @@ test('接一半 = 意图不明，写盘前就退 2：不补默认值也不留假
   assert.equal(partial.ok, false);
   assert.equal(partial.dbConfigured, true, '给了任意 db.* 值 = 隐式声明要接库');
   assert.deepEqual(partial.dbMissing,
-    ['db.port', 'db.schemas.prod', 'db.schemas.uat', 'db.schemas.test', 'db.readonlyUser', 'db.writableUser'],
-    '缺项得逐项点名递给调用方，不能只说“不完整”');
+    ['db.port', 'db.schemas.prod', 'db.schemas.uat', 'db.schemas.test', 'db.readonlyUser'],
+    '缺项得逐项点名递给调用方，不能只说“不完整”（第六项曾是 db.writableUser，随写能力退役）');
 
   const bogus = planConnections({ connect: ['1crm'] });
   assert.equal(bogus.ok, false);

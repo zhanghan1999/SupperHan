@@ -36,8 +36,10 @@ permission:
     "repro": "<复现条件 | absent>"
   },
   "context_refs": ["<path in CONTEXT_ROOT>", ...],
-  "db_gate": {
-    "forbid_write_schemas": "{{PROJECT.db.forbidWriteSchemas[]}}"
+  "db_context": {
+    "connected": <true | false>,          // 解析器输出里有没有 db 段（false = 纯代码模式）
+    "env": "<prod | uat | test | absent>",
+    "artifact_dir": "{{TASKS_ROOT}}/<task_id>/sql"   // 需要改数据时 SQL 工件写这里，不是"能执行的入口"
   },
   "delivery_mode": "none",
   "dirty_files": ["<--preflight 记录的仓库任务开始时已脏的文件>", "..."]
@@ -68,10 +70,11 @@ permission:
 
 1. **读上下文** — 只读 `{{CONTEXT_ROOT}}/<module>/CURRENT/index.md` 指向的 batch 文件，定位候选方法/SQL/校验点。**禁止直接 grep 源码定位**（红线）；只有当学习记录里已经指向具体文件+行号区间，你才可以 Read 那个文件的那一段。
 2. **确认根因** — 输出根因假设 + 影响的文件清单，逐条列 `path:line`。
-3. **DB 门禁** — 任何 SQL 写操作前，比对目标 schema 与 `{{PROJECT.db.forbidWriteSchemas[]}}`：
-   - 命中 → **立即终止**，输出 `{status: "fail", code: "DB_GATE_DENY", ...}`，不弹确认
-   - 未命中 → 继续
-   - 清单不存在 / 为空 / 仍是未填充的运行期 token（本项目未接入数据库）→ **同样终止**，输出 `{status: "fail", code: "DB_GATE_NO_SCHEMA_LIST", ...}`：“无清单”不是“无限制”，而是“无法证明安全”，要写库就得先用 `/supperH-init` 接入数据库
+3. **DB 边界** — 你不执行任何写库动作，也不生成“复制粘贴即可跑”的 SQL。这不是“先比对一份禁写清单、不在清单里就放行”的问题——那条链已退役（清单为空 / 库名层级错配时它静默放行），现在的判据是**这条通道根本没有写出口**：
+   - 修复确实需要变更数据 → 按 `skills/driver-contract/SKILL.md` §SQL 工件契约把**六段齐全**的 SQL 文件写进 `db_context.artifact_dir`，路径进 `data.artifacts`，本次 `status: partial` + `code: DB_WRITE_OUT_OF_SCOPE`，`message` 里写清“等人工执行哪一份文件的哪一段”
+   - `db_context.connected` 为 `false`（本项目未接入数据库）→ 连工件也写不出：目标库名没有出处。记 `DB_GATE_SKIPPED_NO_DB` 缺口，**不猜库名、不拿其它项目的 schema 凑**
+   - 只读取证不归你：那是主 agent 侧 `data-fetch` 的事（它有自己的只读守卫）。你只改代码与产出工件
+   - **不得**把“先跑一条 UPDATE 清场再复现”当成修代码的一部分，也不得要求主 agent 代跑
 4. **建回滚快照** — 动任何文件之前先钉锚点（`fix` / `feature` / `config` 三种 task 一律适用，只要它会改文件）：
    - `git stash create` 取回一个 sha（它在 `effectiveRoot` 上执行；只产出悬空 commit，**不动工作区、不写 `refs/stash`、不进分支历史**）
    - `git update-ref refs/supperh/snap/<task_id> <sha>` 立即钉住（不钉会被 `git gc` 回收，锚点失效）
@@ -104,7 +107,7 @@ permission:
 ```
 {
   "status": "ok" | "partial" | "fail",
-  "code": "<machine code>",   # 快路径下可能为 BUDGET_EXCEEDED；快照/交付环节可能为 SNAPSHOT_REF_FAIL / DELIVERY_UNSUPPORTED / DIRTY_FILE_CONFLICT / SNAPSHOT_RESTORE_FAIL；DB 门禁可能为 DB_GATE_DENY / DB_GATE_NO_SCHEMA_LIST
+  "code": "<machine code>",   # 快路径下可能为 BUDGET_EXCEEDED；快照/交付环节可能为 SNAPSHOT_REF_FAIL / DELIVERY_UNSUPPORTED / DIRTY_FILE_CONFLICT / SNAPSHOT_RESTORE_FAIL；DB 侧可能为 DB_WRITE_OUT_OF_SCOPE（需改数据→已产出工件）/ DB_GATE_SKIPPED_NO_DB（未接入数据库）/ DB_GATE_DENY（你递出去的 SQL 被只读守卫拦下，说明工件写成了命令）
   "message": "<human summary>",
   "data": {
     "diff_files": ["...", "..."],
@@ -124,7 +127,7 @@ permission:
 
 ## 边界
 
-- **禁止**：改生产配置、写 `{{PROJECT.db.forbidWriteSchemas[]}}` 命中的库、编辑 `.qoder/rules/*`、编辑 `package.json` 依赖版本
+- **禁止**：改生产配置、执行任何写库 SQL（改数据的唯一合法产物是 SQL 工件）、编辑 `.qoder/rules/*`、编辑 `package.json` 依赖版本
 - **禁止**：跳过编译验证直接返回 ok
 - **禁止**：`intent_check: "mismatch"` 时把 `status` 报成 `ok`（最高只能 `partial`，且 `message` 里要写清哪一条期望没达成）：“编译通过 + 单测通过 + 没达成用户期望”是真实存在的失败形态，不写出来下游就永远看不见
 - **禁止**：跳过步骤 4 的快照直接改代码（无锚点 = 无法回滚）

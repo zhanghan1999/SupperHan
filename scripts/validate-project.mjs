@@ -223,6 +223,8 @@ function checkDriverChannels(data) {
 // 跨字段语义（action ↔ gate ↔ role ↔ db 段），而本仓库的极简校验器没有 if/then/allOf。
 // 这里每一条都是 fail-closed：宁可退 2 让人来补声明，也不允许“看着配好了其实写保护
 // 从未生效”——那是 F-7 / F-8 反复出现过的同一类形态。
+// 数据库通道自本档起无条件只读：守卫不看名单也不看库名（mcp-skeleton/supperh_contract/
+// guards.py: select_only_guard），所以它上面不存在“哪类写动作可以开一个门槛”这件事。
 export function checkWriteDeclarations(data) {
   const errors = [], warnings = [];
   const drivers = data?.drivers;
@@ -238,17 +240,21 @@ export function checkWriteDeclarations(data) {
     if (!cfg || typeof cfg !== 'object') continue;
     const isDb = role?.slot === slot;
     const writes = Array.isArray(cfg.writes) ? cfg.writes : null;
+    if (isDb) {
+      // 数据库通道无条件只读：唯一能落在它上面的动作（sql_write）已随能力一起退役，
+      // 于是 writes 段在这里没有合法内容。留着它只会让人以为“补个 gate: deny 就够了”——
+      // 真正拦着它的是守卫本身；而那份声明会被下一个读 writes 的地方当成“这个源有写能力，
+      // 只是暂时禁着”，能力边界又变回一句承诺。
+      if (writes) {
+        errors.push(`drivers.${slot}.writes 出现在数据库通道（role: database）上：该通道无条件只读，改数据不再是它能执行的动作（改由 SQL 工件交人工执行），整段删掉`);
+      }
+      continue;
+    }
     if (!writes) continue;                                  // 整段不写 = 只读源（缺席即语义，合法）
     const seen = new Set();
     for (const [i, w] of writes.entries()) {
       if (!w || typeof w !== 'object') continue;             // 类型错已由 schema 报
       const at = `drivers.${slot}.writes[${i}]`;
-      if (w.action === 'sql_write' && !isDb) {
-        errors.push(`${at}.action=sql_write 但该槽位不是数据库通道（role: database）：禁写清单只对数据库通道比对，这样声明等于把写保护开给一个没人拦的通道。要么给它补 role: database（全项目最多一个），要么改动作类别`);
-      }
-      if (isDb && w.action && w.action !== 'sql_write' && w.action !== 'other') {
-        errors.push(`${at}.action=${w.action} 对数据库通道无意义（它只能发 SQL）：要么该动作属于另一个源，要么这个槽位不该带 role: database`);
-      }
       if (w.action === 'other' && !(typeof w.userPhrase === 'string' && w.userPhrase.trim())) {
         errors.push(`${at}: action=other 必须带 userPhrase（用户原话）。归类是问出来的，不记原话就下次还会靠模型现场猜一次，而猜中的那次看不出来`);
       }
@@ -262,26 +268,40 @@ export function checkWriteDeclarations(data) {
   return { errors, warnings };
 }
 
-// 写保护清单必须真盖住生产/预发库。schema 只能校 forbidWriteSchemas 非空，管不了它装的是不是
-// 真存在的库名：模板值 example_prod/example_uat 与用户改后的 db.schemas.* 脱钩时，清单依旧合法、
-// 依旧“非空”，但 driver 的 ReadOnlyGuard 与 bug-dev 的 DB 门禁一次也不会命中（写错库不报错）。
-function checkWriteGuard(data) {
+// 退役键的显式迁移说明。schema 的 additionalProperties: false 已经拒了它们，但它只能说
+// 'unknown field'，看不出该删谁、改成什么。而这三处残留读起来都像“还在生效”：writableUser
+// 像是有个写账号可连，forbidWriteSchemas 像是写保护还在，sql_write 像是一种可登记的动作。
+// 判据换了就得让这些字符串从盘上消失，否则下一轮改动还会拿它们当依据——一份没人读的配置
+// 比没有配置更危险，因为它会让人以为已经有东西在拦（F-7 的同源教训）。
+const RETIRED_DB_KEYS = ['writableUser', 'forbidWriteSchemas'];
+function checkRetiredWriteKeys(data) {
   const errors = [];
+  const MIGRATE = '改数据请产出 SQL 工件交人工执行（skills/driver-contract/SKILL.md §SQL 工件契约）';
   const db = data?.db;
-  if (!db || typeof db !== 'object') return errors;
-  const list = (Array.isArray(db.forbidWriteSchemas) ? db.forbidWriteSchemas : []).map(String);
-  for (const k of ['prod', 'uat']) {
-    const name = db.schemas?.[k];
-    if (typeof name === 'string' && name && !list.includes(name)) {
-      errors.push(`db.forbidWriteSchemas 未包含 db.schemas.${k}='${name}'：写保护对该库形同虚设（driver ReadOnlyGuard / bug-dev DB 门禁都拦不住），请补进清单`);
+  if (db && typeof db === 'object') {
+    for (const k of RETIRED_DB_KEYS) {
+      if (k in db) {
+        errors.push(`db.${k} 已从 L1 契约退役：数据库通道无条件只读，写账号没有驱动会去连、禁写名单没有守卫会去比。删掉这一项；${MIGRATE}`);
+      }
+    }
+  }
+  const drivers = data?.drivers;
+  if (drivers && typeof drivers === 'object') {
+    for (const [slot, cfg] of Object.entries(drivers)) {
+      const ws = Array.isArray(cfg?.writes) ? cfg.writes : [];
+      ws.forEach((w, i) => {
+        if (w?.action === 'sql_write') {
+          errors.push(`drivers.${slot}.writes[${i}].action=sql_write 已从动作词表退役：改数据不再是驱动能执行的动作。删掉该条目；${MIGRATE}`);
+        }
+      });
     }
   }
   return errors;
 }
 
 // 模板假值残留检测（F-7 的校验侧）。为什么只查 db / drivers 两棵子树：
-// 这两段里的值会被当真凭据、真库名、真驱动路径拿去用（driver 连库、ReadOnlyGuard 比库名、
-// bug-dev 的 DB 门禁），所以“看着像配好了其实一个都没填”是安全缺陷。
+// 这两段里的值会被当真凭据、真库名、真驱动路径拿去用（driver 连库、--env 解析环境名、
+// SQL 工件标注目标库），所以“看着像配好了其实一个都没填”是安全缺陷。
 // codeRoot/packageRoot 里的 EXAMPLE 路径不会造成同类伤害（解析器匹配不上就是匹配不上），
 // 不在本规则范围内——把一切形似占位符的字符串都当错误，只会让人把真库名改个写法绕过检查。
 const RESIDUE_RE = /(^|[^0-9a-z])example([-_.$]|$)/i;
@@ -301,25 +321,25 @@ function checkTemplateResidue(data) {
     collectStrings(data?.[section], section, hits);
     for (const h of hits) {
       errors.push(`${h.at} 仍是模板假值 '${h.value}'：不接这个外部源就把整段（db / drivers）删掉，接了就填真值。` +
-        `留着 example_* 等于骗过写保护与连通门禁：假库名永远不会命中 forbidWriteSchemas，假驱动路径只会“没配”而不是“配错了”`);
+        `留着 example_* 等于骗过连通门禁与取证：假库名会让 SQL 工件写给一个不存在的库，假驱动路径只会“没配”而不是“配错了”`);
     }
   }
   return errors;
 }
 
 // db 段与数据库角色槽位必须彼此成立（绑定靠 role，不再靠键名，F-10）。两个方向严重程度不同：
-//   有数据库通道没 db 段 = 错误。ReadOnlyGuard 拿不到 forbidWriteSchemas 清单，而空清单是一条都不拦（
-//   mcp-skeleton/supperh_contract/guards.py: select_only_guard），等于把写保护默认关掉；
-//   有 db 段没数据库通道 = 警告。库信息是事实（环境名、禁写清单都在），只是暂时没通道去读它。
+//   有数据库通道没 db 段 = 错误。守卫无条件生效，不缺它的判据；缺的是连接与映射：
+//   没有 host/port/账号就连不上，没有 schemas 则 --env 与 SQL 工件的目标标注都无从解析；
+//   有 db 段没数据库通道 = 警告。库信息是事实（环境名→库名映射都在），只是暂时没通道去读它。
 function checkDbDriverCoherence(data) {
   const errors = [], warnings = [];
   const hasDb = !!(data?.db && typeof data.db === 'object');
   const role = dbRoleSlot(data);
   if (role && !hasDb) {
-    errors.push(`drivers.${role.slot}（role: database）已登记但项目没有 db 段：ReadOnlyGuard 与 bug-dev 的 DB 门禁拿不到 forbidWriteSchemas 清单，而空清单 = 任何库都不拦（写保护默认失效）。要么补 db，要么删掉该 role 声明`);
+    errors.push(`drivers.${role.slot}（role: database）已登记但项目没有 db 段：这条 SQL 通道没有 host/port/账号可连，也没有 schemas 做环境名→库名映射（--env 与 SQL 工件的目标标注都要从这里取）。要么补 db，要么删掉该 role 声明`);
   }
   if (hasDb && !role) {
-    warnings.push('项目登记了 db 但没有 role: database 的槽位：没有任何通道能连上它，DB 取数与 DB 门禁在运行期不可用（不阻断；纯代码模式可以接受）');
+    warnings.push('项目登记了 db 但没有 role: database 的槽位：没有任何通道能连上它，DB 取数在运行期不可用（不阻断；纯代码模式可以接受）');
   }
   return { errors, warnings };
 }
@@ -340,7 +360,7 @@ export function checkDocument(data, schema, meta = {}) {
   const chan = checkDriverChannels(data);
   errors.push(...chan.errors);
   warnings.push(...chan.warnings);
-  errors.push(...checkWriteGuard(data));
+  errors.push(...checkRetiredWriteKeys(data));
   errors.push(...checkTemplateResidue(data));
   const writeDecl = checkWriteDeclarations(data);
   errors.push(...writeDecl.errors);

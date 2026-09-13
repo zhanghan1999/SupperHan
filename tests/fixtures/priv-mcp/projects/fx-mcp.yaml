@@ -36,5 +36,5 @@ drivers:
     impl: "efficiency-example.py"
     healthCheck: "efficiency-example.py --health"
 
-db:
-  forbidWriteSchemas: [public]
+# 原有一份 db.forbidWriteSchemas: [public]，随该键从 L1 契约退役而删除：
+# 数据库通道现在无条件只读，夹具不再需要携带禁写名单。

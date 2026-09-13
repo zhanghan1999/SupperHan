@@ -435,17 +435,49 @@ def detect_write(sql: str) -> str | None:
     return None
 
 
-def SELECT_only_guard(sql: str, target_schema: str, forbid_writes: Iterable[str]) -> None:
+# 与 mcp-skeleton/supperh_contract/guards.py 同名常量保持一致（两条通道拒同一批语句）。
+_SIDE_EFFECT_FN_RE = re.compile(
+    r"\b(nextval|setval|txid_current|pg_sleep|pg_advisory_lock|pg_terminate_backend|"
+    r"pg_cancel_backend|pg_reload_conf|dblink_exec|dblink|lo_import|lo_export|lo_put|"
+    r"lo_truncate)\s*\(",
+    re.IGNORECASE,
+)
+
+_SELECT_INTO_RE = re.compile(r"\bselect\b[\s\S]*?\binto\b", re.IGNORECASE)
+
+
+def detect_side_effect(sql: str) -> str | None:
+    """写关键词之外的副作用形态（与 supperh_contract.guards.detect_side_effect 同步）。"""
+    clean = strip_sql_noise(sql)
+    m = _SIDE_EFFECT_FN_RE.search(clean)
+    if m:
+        return m.group(1).upper()
+    if _SELECT_INTO_RE.search(clean):
+        return "SELECT_INTO"
+    return None
+
+
+def SELECT_only_guard(sql: str, target_schema: str = "", forbid_writes: Iterable[str] = ()) -> None:
     """
-    Raise SystemExit(EXIT_BAD_ARGS) if this SQL is a write AND
-    `target_schema` is in the forbid list.
+    Raise SystemExit(EXIT_BAD_ARGS) unless the statement is provably read-only.
+
+    与 mcp-skeleton/supperh_contract/guards.py 的 select_only_guard 同判据、同消息标记：
+    两条通道必须拒同一批语句（tests/mcp-manifest.test.mjs 锁这条对称）。
+    `target_schema` / `forbid_writes` 是已退役机制（db.forbidWriteSchemas、db.writableUser）
+    的兼容形参，**不参与判定**：旧写法先比库名是否命中黑名单、命中才看关键词，于是清单为空、
+    schema 名为空、以及 database 名与 PG schema 名层级错配（'appdb' vs 'app_dw'）三种情形全部
+    静默放行。未知即拒：空语句 / 仅注释一律拒。
     """
-    forbid = {str(s).strip().lower() for s in (forbid_writes or [])}
-    if str(target_schema).strip().lower() in forbid:
-        kw = detect_write(sql)
-        if kw is not None:
-            emit_error(EXIT_BAD_ARGS,
-                       "DB_GATE_DENY: write keyword " + kw + " against forbidden schema " + str(target_schema))
+    raw = str(sql or "")
+    if not strip_sql_noise(raw).strip():
+        emit_error(EXIT_BAD_ARGS,
+                   "DB_GATE_DENY: unjudgeable statement —— 空语句或仅含注释，无法证明它是只读的（未知即拒）")
+    kw = detect_write(raw) or detect_side_effect(raw)
+    if kw is not None:
+        emit_error(EXIT_BAD_ARGS,
+                   "DB_GATE_DENY: write side effect " + kw
+                   + " —— 数据库通道无条件只读；需要变更数据请产出 SQL 工件交人工执行"
+                     "（见 skills/driver-contract/SKILL.md §SQL 工件契约）")
 
 
 # ---------- Base class ----------

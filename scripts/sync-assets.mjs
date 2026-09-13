@@ -328,9 +328,9 @@ const FACT_FIELDS = [
   ['codeRoot', (d) => d?.codeRoot],
   ['db.host', (d) => d?.db?.host],
   ['db.readonlyUser', (d) => d?.db?.readonlyUser],
-  ['db.writableUser', (d) => d?.db?.writableUser],
   ['db.schemas.*', (d) => Object.values(d?.db?.schemas ?? {})],
-  ['db.forbidWriteSchemas[]', (d) => d?.db?.forbidWriteSchemas],
+  // writableUser / forbidWriteSchemas 两项随之消失：不是放宽扫描，而是这两个键在契约里已不存在，
+  // 真出现在盘上会被 validate 退 2 拦下，轮不到纯度门禁来兜。
 ];
 // 形态上就像示例/占位符的值不参与比对（它们本来就是要公开的模板文字）。
 // 按**段**判定：`com.example.proj` 里有一段 example → 跳过；`com.acme.corp` 一段都不通用 → 参与比对。

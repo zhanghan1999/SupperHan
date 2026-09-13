@@ -59,7 +59,7 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --scan --cwd "<你的工作区绝�
 
 **2.2 只对被选中的东西采字段**
 
-- 选了接库 → 采集 `dbFieldsIfConnected` 七项：`db.host`、`db.port`、`db.schemas.test`、`db.schemas.uat`、`db.schemas.prod`、`db.readonlyUser`、`db.writableUser`。**七项全要**：缺任意一项，落盘阶段以退出码 2（`connection-choices-incomplete`）拦下并逐项点名缺什么 —— 脚本不补默认值，因为没答上来的字段若沿用模板文本就会伪装成真凭据。
+- 选了接库 → 采集 `dbFieldsIfConnected` 六项：`db.host`、`db.port`、`db.schemas.test`、`db.schemas.uat`、`db.schemas.prod`、`db.readonlyUser`。**六项全要**：缺任意一项，落盘阶段以退出码 2（`connection-choices-incomplete`）拦下并逐项点名缺什么 —— 脚本不补默认值，因为没答上来的字段若沿用模板文本就会伪装成真凭据。少问的那一项是 `db.writableUser`：它不是“这次先不填”，是**数据库通道无条件只读**，一个写账号问题从此没有合法答案（要变更数据请产出 SQL 工件，见 `skills/driver-contract/SKILL.md` §SQL 工件契约）。
 - 用户主动要在这次一并登记某个源（少见）→ 每个源采 `desc` / `impl` / `healthCheck` 三项（`driverFieldsIfConnected`），**槽位名由用户自己起**（判据见 `connectNaming.pattern`：字母开头、可含数字/下划线/连字符、长度 ≤ 40）。`desc` 不可省：L1 不再知道任何槽位名，那句话是以后判定“这个源是干什么的”的唯一线索。`healthCheck` 必须真说协议（见 `schemas/project.example.yaml` 注释）：拿 `ping`/裸 TCP 当判据等于没判据。
 - 一个都不接 → **不问任何 `db.*` / `drivers.*` 字段**，直接进步骤 3。
 
@@ -67,9 +67,9 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --scan --cwd "<你的工作区绝�
 
 规则：
 
-- **落盘形态由接入决定**：`--values` 里给 `connect: [<槽位名>...]`（或直接给若干 `db.*` 值 = 隐式声明要接库）。接了的段由脚本按真值**整段生成**；不接的段**整段不写**（不是写空值、不是留 `example_*`）。`db.schemas.prod` / `db.schemas.uat` 同时决定禁写清单：脚本按刚落盘的库名重建 `forbidWriteSchemas`。事后手改 `db.schemas.*` 与清单脱钩、或把没接的假值留在盘上，`node scripts/validate-project.mjs` 以退出码 2 拦下。
+- **落盘形态由接入决定**：`--values` 里给 `connect: [<槽位名>...]`（或直接给若干 `db.*` 值 = 隐式声明要接库）。接了的段由脚本按真值**整段生成**；不接的段**整段不写**（不是写空值、不是留 `example_*`）。`db.schemas.*` 三个库名只做两件事：`--env` 的环境名→库名映射、SQL 工件第 1 段的目标标注 —— 它们不再决定拦不拦，拦是守卫无条件做的事（不看库名）。把没接的假值留在盘上、或旧条目里还带着已退役的 `db.writableUser` / `db.forbidWriteSchemas`，`node scripts/validate-project.mjs` 以退出码 2 拦下并点名怎么删。
 - **`connect` 不是一张名单**：任意合法标识符都收（`crm`、`jjstools` 这种用户自己起的名完全合法）；不合 `connectNaming.pattern` 的（带空格、以数字或符号开头、超长）退 2 并点名，不被静默忽略。**`role: database` 全项目最多一个**：给了 `db.*` 又声明了若干槽位却没给其中任何一个标 `role: database` → 退 2 问回来（“哪个通道发 SQL”不能靠猜名字）。
-- **纯代码模式的后果要在进下一步前告知用户**（一句话说清，不要渲染成失败）：`/supperH-bug` 的 DB 取证与写保护步骤无数据可用；`resolve-project.mjs --env <环境>` 会以 **36** 退出（环境标签只对“从某个库取回的数据”成立，代码侧永远相对 HEAD）；步骤 3 的菜单来源因此只能选 `code`。告知里顺带一句：想补上任何一个源，跑 `/supperH-driver`，不必重跑本命令。
+- **纯代码模式的后果要在进下一步前告知用户**（一句话说清，不要渲染成失败）：`/supperH-bug` 的 DB 取证步骤无数据可用（连 SQL 工件也写不出：目标库名没有出处）；`resolve-project.mjs --env <环境>` 会以 **36** 退出（环境标签只对“从某个库取回的数据”成立，代码侧永远相对 HEAD）；步骤 3 的菜单来源因此只能选 `code`。告知里顺带一句：想补上任何一个源，跑 `/supperH-driver`，不必重跑本命令。
 - 收集到的值写入一个临时 JSON（`{"connect":[...],"db.host":...,"db.port":...}`），供下一步 `--values` 使用。**不要把值 echo 到聊天正文**，只说“已采集 N 个字段；本次接入：<列出的槽位名> / 未接入任何外部源”。
 - 连通门禁只对**已登记的驱动**求值：一个驱动都没配时门禁没有可探对象，会放行但附一句 `gateNote` 说明“本次是未接入，不是接入后全部可达”。
 

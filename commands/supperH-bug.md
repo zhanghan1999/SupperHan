@@ -246,7 +246,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 - **F4 `bug-dev`** — 输入增带 `path: "fast"`、`diff_budget: { lines: fastPath.budget.maxDiffLines, files: fastPath.budget.maxFiles }`（脚本返回的字段名是 `maxDiffLines/maxFiles`，`bug-dev` 吃的是 `lines/files`，**由你映射**）、`anchor: anchorResolved`、`intent`（同步骤 6：快路径不省它，`intent_check` 的降级规则也一模一样）。
   - `content_gaps` 非空 → **升格完整路径**（快路径不做 supplement）。
   - 实际 diff 超 budget → **升格完整路径**。
-- **F5 `bug-tester`** — 输入 `{modules: [module], test_scope: "unit", db_gate: {...}}`。**绝不可跳。**
+- **F5 `bug-tester`** — 输入 `{modules: [module], test_scope: "unit", db_context: {...}}`。**绝不可跳。**
   - `COMPILE_FAIL` / `FAIL_TESTS` → 回滚 F4 改动 → 报失败（**不在快路径重试**）。
 - **F6 终判** — 按步骤 8 的格式 + `fast_path` 段。
 
@@ -262,15 +262,17 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 一次会话内升格 ≥ 3 次 → 终判额外输出：该模块学习完整度不足，建议集中跑一次 `/supperH-learn --mode update`。
 
-## 步骤 2 · DB 门禁预判
+## 步骤 2 · DB 边界预判（这一步只有一句话：这条通道没有写出口）
 
 先看步骤 0/1.5 解析器返回体里有没有 `db` 字段（`db` 缺失或为 `null` = 本项目**未接入数据库**，即纯代码模式）：
 
 - **无 `db` 段** → 本步骤无数据可判。**不要猜库名、不要拿其它项目的 schema 凑**：把“DB 取证”记为明确缺口写入终判（`DB_GATE_SKIPPED_NO_DB`：未接入数据库，本次只有代码侧结论），并告知可用 `/supperH-init` 补接。用户若坚持“要看库里实际数据”，这是 36（环境无源可采）而不是失败。
-- 有 `db` 段时：
-  - 若症状暗示需要读写 DB → 明确目标 schema
-  - 命中 `{{PROJECT.db.forbidWriteSchemas[]}}` → 终止 + 报告 `DB_GATE_DENY`
-  - 允许读写 `{{PROJECT.db.schemas.test}}`（写需 `{{PROJECT.db.writableUser}}`；只读可用 `{{PROJECT.db.readonlyUser}}`）
+- 有 `db` 段时（下面三条对 `bug-dev` / `bug-tester` / `bug-test-writer` 同一口径，派发时把 `db_context` 一起下发）：
+  - 取数（只读 SQL）→ 正常走 `data-fetch`；语句证明不出只读就是 `DB_GATE_DENY`，不弹确认也不改写。
+  - 需要**变更数据**（含“先清一批脏数据再复现”这种）→ 你不执行。按 `skills/driver-contract/SKILL.md` §SQL 工件契约把六段齐全的 SQL 文件写到 `{{TASKS_ROOT}}/<task_id>/sql/`，终判该项记 `partial` + `DB_WRITE_OUT_OF_SCOPE`，并在报告里把文件路径与执行顺序原样交给用户。
+  - 库名从 `{{PROJECT.db.schemas.prod}}` / `{{PROJECT.db.schemas.uat}}` / `{{PROJECT.db.schemas.test}}` 里按环境取，写进工件第 1 段（目标标注）。三个环境的库名在这里**只是标注信息**，不决定拦不拦 —— 拦是不分环境的。
+
+> 旧实现在这里比对一份禁写清单，判“目标 schema 命中 → 终止、未命中 → 放行”，并写着“`db.schemas.test` 允许读写（需 `writableUser`）”。该机制已从 L1 契约退役：清单为空、传空串、database 名与 PG schema 名层级错配（清单装 `appdb`，adapter 传 `app_dw`）三种情形全都静默放行，而 `.secrets` 里本来就只有 `readonly_*` 一份凭据 —— 也就是说这条链从来没有第二个出口。现在判据是“这条通道有没有写出口”，答案恒为没有。
 - **DB 之外的写动作不在本步骤判**：本次若要变更任何其它注册源（发消息 / 改记录状态 / 上传文件 / 改远端配置），门禁在该槽位登记的 `writes[]`：整段缺席 = 只读源，一律拒；`gate: deny` = 拒且不提供“要不要试试”；`gate: confirm` = 先把完整外发载荷给用户看、拿到明确同意才发（口径唯一定义在 `skills/data-fetch/SKILL.md` §guard）。这三条都由 L2 声明决定，**不由你对“这个动作危不危险”的印象决定，也不由“用户没反对”决定**。
 
 ## 步骤 3 · 学习模块新鲜度检查
@@ -304,7 +306,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 ## 步骤 6 · 修复执行
 
-- 派 `bug-dev` 输入：`{task, module, target, symptom, intent, context_refs, db_gate}`
+- 派 `bug-dev` 输入：`{task, module, target, symptom, intent, context_refs, db_context}`
 - bug-dev 返回 `status: fail` → 走步骤 8 的失败降级，**不重试**、不换 agent
 - 返回 `data.intent_check: "mismatch"` → 本次终判 `status` 最高只能写 `partial`，并把那句话原样列进 `遗留问题`；`"absent"` 表示上游没做复述，记进 `遗留问题` 但不降级
 
@@ -317,7 +319,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 ## 步骤 7b · 编译 + 单测验证
 
-- 派 `bug-tester` 输入：`{modules: [module], test_scope: "unit", db_gate: {...}}`
+- 派 `bug-tester` 输入：`{modules: [module], test_scope: "unit", db_context: {...}}`
 - tester 返回 `code: DB_UNREACHABLE` → 不阻断（诚实记录），但要求人工补跑
 - `code: FAIL_TESTS` / `COMPILE_FAIL` → 回滚 bug-dev 改动 → 报失败
 

@@ -9,7 +9,7 @@ belong to the *script* channel; if an adapter ever needs them it must shell out 
 `node scripts/resolve-project.mjs --project <code> --json`, not re-parse them.
 
 What it does read: identity.code, drivers.<slot>.kind / .mcp.{server,sources,
-healthTool}, db.forbidWriteSchemas - none of which is a path.
+healthTool} - none of which is a path.
 
 Why this docstring is a raw string (and why L1 *.py sources must carry no
 double-brace tokens at all): `node scripts/sync-assets.mjs` bakes those tokens into the artefact, so
@@ -108,7 +108,6 @@ class Binding:
     project: str
     health_tool: str | None = None
     slot_config: dict = field(default_factory=dict)
-    forbid_write_schemas: list = field(default_factory=list)
     role: str | None = None
 
     def as_meta(self) -> dict:
@@ -195,8 +194,9 @@ def source_binding(cfg: dict, code: str, source: str, server: str = DEFAULT_SERV
     slot = hits[0]
     sc = drivers_of(cfg).get(slot) or {}
     mcp = sc.get("mcp") or {}
-    db = cfg.get("db") or {}
-    forbid = db.get("forbidWriteSchemas") if isinstance(db, dict) else None
+    # 这里以前会读 db.forbidWriteSchemas 塞进 Binding，供 ReadOnlyGuard 比库名。该机制已退役：
+    # 数据库通道现在是**无条件只读**（判据在 guards.select_only_guard），没有名单需要跨层传递，
+    # 也就不需要把 L2 的库名带进绑定对象。
     return Binding(
         slot=slot,
         source=source,
@@ -204,7 +204,6 @@ def source_binding(cfg: dict, code: str, source: str, server: str = DEFAULT_SERV
         project=str(code),
         health_tool=(str(mcp["healthTool"]) if mcp.get("healthTool") else None),
         slot_config=(sc.get("config") if isinstance(sc.get("config"), dict) else {}),
-        forbid_write_schemas=[str(x) for x in (forbid or [])],
         role=slot_role(slot, sc),
     )
 

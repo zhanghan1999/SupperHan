@@ -93,11 +93,13 @@ node "{{TOOL_ROOT}}/scripts/driver-registry.mjs" list --project <code> --probe
 
 ## 步骤 3 · 写能力归类（这个决定不归你）
 
-源只要**会改动对面的数据**（发消息、改记录状态、上传文件、执行写 SQL），就必须登记成 `writes` 条目；**没提写动作就一条都不写**——整段缺席的读法是"只读源"，不是"没限制"。
+源只要**会改动对面的状态**（发消息、改记录状态、上传文件、改远端配置），就必须登记成 `writes` 条目；**没提写动作就一条都不写**——整段缺席的读法是"只读源"，不是"没限制"。数据库通道不属于这一问：它无条件只读，`writes` 段出现在它上面会被退 2 拦下。
 
 动作类别只能用封闭词表（真相在 `schemas/project.schema.yaml` 的 `definitions.writeAction`）：
 
-`sql_write` · `message_send` · `status_change` · `file_upload` · `config_change` · `other`
+`message_send` · `status_change` · `file_upload` · `config_change` · `other`
+
+（原第六类 `sql_write` 已退役：那不是一个拼写换了，是一项能力被撤走 —— 改数据不再是驱动能执行的动作，产物改为交人工执行的 SQL 工件。）
 
 门槛 `gate` 只有两个值，**由用户定，不由你判断**：
 
@@ -106,8 +108,8 @@ node "{{TOOL_ROOT}}/scripts/driver-registry.mjs" list --project <code> --probe
 
 规则：
 
-- `sql_write` 只能落在带 `role: database` 的槽位（全项目最多一个）。给非库通道声明 `sql_write` 会被退 2 拦下——那等于把写保护开给一个没人拦的通道。
-- 六类都不太像 → 用 `other`，且**必须问用户归类**，同时把用户这次的原话记进 `userPhrase`（脚本会硬拦缺 `userPhrase` 的 `other`）。
+- 带 `role: database` 的槽位**不登记 `writes` 段**（登记即退 2）。它是唯一一条被无条件只读守卫看着的通道：任何写 SQL 一律 `DB_GATE_DENY`，没有“给某个动作开个 confirm 门槛”这回事。用户若说“这个库我要能改数据”，你要解释的是 §SQL 工件契约（产出 SQL 交人工执行），不是在这里加一条声明。
+- 五类都不太像 → 用 `other`，且**必须问用户归类**，同时把用户这次的原话记进 `userPhrase`（脚本会硬拦缺 `userPhrase` 的 `other`）。
 - **学习闭环**：问之前先查 `list` 输出里的 `writes[].userPhrase`。用户这次的表述与某条已有 `userPhrase` 语义一致时，**复用那次归类并明确说出来**（"上次你把类似动作归为 `message_send`，这次按同一归类登记，对吗？"），而不是重新猜一遍。复用也要用户点头。
 - 一个动作在同一槽位只能有一个门槛；出现两条同名 action 会被退 2 拦下（两份声明 = 未决）。
 

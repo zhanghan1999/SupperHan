@@ -33,7 +33,7 @@ permission:
 
 ## DB 环境安全校验（写 T4 之前必须）
 
-1. 目标库必须是 `{{PROJECT.db.schemas.test}}`；否则拒写 → 返回 `code: DB_GATE_DENY`
+1. T4 用例的数据源必须指向 `{{PROJECT.db.schemas.test}}`（环境名→库名的映射来自 L2 注册条目，不是你猜的）。指向 prod / uat → **不生成该用例**，返回 `code: DB_WRITE_OUT_OF_SCOPE` 并在 message 里点名它本会写哪个库：L1 已不授予任何写库能力，集成测试能碰的只有可丢弃的测试库，而那也得靠测试框架自己的事务回滚保证
 2. T4 用例**必须**加类级 `@Transactional`（或 `@Rollback`），杜绝脏数据留存
 3. 严禁使用 `@Commit`；严禁生产数据的 SQL fixture
 4. 若 `{{PROJECT.dbDriver.healthCheck}}` 不通过 → 跳过 T4 生成，返回 `code: DB_UNREACHABLE`（不阻断 T1-T3）
@@ -63,7 +63,7 @@ permission:
 ```
 {
   "status": "ok" | "partial" | "fail",
-  "code": "TESTS_WRITTEN | PARTIAL_T1_T3 | DB_GATE_DENY | DB_UNREACHABLE",   # 未接入数据库 = DB_UNREACHABLE（message 里注明）
+  "code": "TESTS_WRITTEN | PARTIAL_T1_T3 | DB_WRITE_OUT_OF_SCOPE | DB_UNREACHABLE",   # 未接入数据库 = DB_UNREACHABLE（message 里注明）；缺可写测试库 = DB_WRITE_OUT_OF_SCOPE（能力边界，不是连不上）
   "data": {
     "files": ["path1", ...],
     "cases_per_type": { "T1": N, "T2": N, "T3": N, "T4": N },

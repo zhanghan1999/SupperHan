@@ -5,6 +5,11 @@
 > **全量代码在 [`dev`](https://github.com/zhanghan1999/SupperHan/tree/dev) 分支** —— 本分支（`master`）只有说明文件，
 > 树上没有 `scripts/` `agents/` `commands/` `skills/` `schemas/` 等实现目录；文中出现的路径与退出码一律到 `dev` 核对。
 > 变更记录见 [CHANGELOG.md](./CHANGELOG.md)：一节 = 一个 tag，首个版本 `v0.1.0`。
+>
+> **新版指向**：本文件与 `docs/` 是 `v0.1.0` 期快照。`v0.1.0` 之后的两项变更
+> （数据库通道收口为无条件只读、子代理与技能标识符加 `supperH-` 命名空间前缀）落在现行开发线
+> [`dev20260913`](https://github.com/zhanghan1999/SupperHan/tree/dev20260913) —— 那里的资产名、数量与退出码才是当前事实；
+> 本文件里出现的旧资产名（不带 `supperH-` 前缀的那些）在那条线上已退役，照旧名派单会派不到。
 
 一份**与具体项目无关**的 Agent / Command / Skill 定义集合，可在多个 Java 项目上直接复用。真实项目事实（内网域名、库名、路径、分支名等）全部落在同级**私有根** `../supper-Han-private/`，不进入本仓库。
 
@@ -65,9 +70,11 @@ node scripts/setup.mjs --check           # 只体检不写入
 |------|------|------|
 | `master` | **只有说明文件**：本 `README.md` + `CHANGELOG.md` + `docs/` + 两份 IDE 适配说明 | 落地页；clone 下来先读懂再决定拉哪条 |
 | `dev` | 全量 L1 资产（`agents/` `commands/` `skills/` `scripts/` `schemas/` `mcp-skeleton/` `drivers-skeleton/` `tests/` `.qoder/`） | **实际使用就 checkout 这条**；`npm install` + `node scripts/setup.mjs` 的完整链路只在它身上成立 |
+| `dev20260913` | 同上（`dev` 的后继开发线），含 `v0.1.0` 之后的最新变更 | **要最新能力就 checkout 这条**；本 README 与 `docs/` 到那条线上才是当前版本 |
 
 ```bash
 git clone -b dev https://github.com/zhanghan1999/SupperHan.git
+# 要 v0.1.0 之后的最新能力（DB 通道只读收口 + 资产命名空间前缀）：clone 后 git checkout dev20260913
 ```
 
 两条分支的历史**互不相干**（各自孤儿提交）：说明文件与代码分头演进，也让 `master` 的 diff 保持"只有文档"这一可读承诺。

@@ -687,6 +687,58 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 `tests/agent-permissions.test.mjs` 的 dist 一致性用例会红）与**IDE 需重启一次**（资产清单在启动时扫，
 改名前会话里派到的还是旧名字）。
 
+### 10.19 清场重配："回到未注册"必须有一个入口（F-14）
+
+**改了什么**：`scripts/init-project.mjs` 新增第三种模式 `--reinit`（默认只出计划，`--purge` 才执行，
+`--purge --confirm <code>` 才允许带走学习数据），退出码新增 **23** / **24**；
+`scripts/resolve-project.mjs` 把 `paths.contextRoot` / `paths.tasksRoot` 的解析抽成导出的
+`resolveRootPaths()`，`buildBinding` 与清场共用同一个答案；新测试 `tests/init-reinit.test.mjs`（6 条，全部走真实命令行）。
+
+**需求原话是"init 能不能重新初始化项目"，所以先给拆开的那一半答案**：`--write` 并不是不能重跑。实测盘上
+条目里已退役的四个键（`db.writableUser` / `db.forbidWriteSchemas` / `writes[].action=sql_write` / `vpnPreCheck`）
+与旧资产名引用都是 **0 处**，`schemaVersion` 也与当前 schema 一致 —— 那些是 F-12/F-13 随迁移一起改齐的。
+`--write` 真正**没有**的是"撤掉已注册这个状态"：它按模板重渲染自己生成的那些段，但撤不掉条目本身、
+撤不掉 `menus/<code>.yaml`、更不会碰已经建起来的 `context/<code>`。于是"我想回到没注册的样子重来一遍"
+这句话在系统里一个入口都没有，而它能想到的最接近的做法是手工删私有根 —— 那恰好绕开了本仓为注册写入建的全部纪律。
+
+**三条硬规矩（"撤销"这个词的本分）**：
+
+| 规矩 | 实现 | 为什么不这样就会坏 |
+|---|---|---|
+| 不删任何东西 | 一律 `rename` 进 `<私有根>/_retired/<UTC 戳>/<code>/`，保留它在私有根内的相对层级，并写 `manifest.json`（逐条 `from`/`to` + `restore` 一句话）| 隔离区就在私有根内，`rename` 不跨卷（不存在 `EXDEV` 那种半路失败）；搬完还能拿 manifest 机械退回原位，不靠任何人的记忆 |
+| 学习数据非空要显式确认 | `context/`、`tasks/`（含条目自定义的位置与默认布局空壳）里有文件时，缺 `--confirm <code>` 直接退 **23**，且**一个文件都不动** | 学习成果只能由 `/supperH-learn` 重出来，代价与"撤个配置"完全不成比例。`--force` 不适用（它是写模式的降级旗标），所以这道门没有绕过路径 |
+| 只动本命令生成过的东西 | 注册条目 + init 自留 sidecar（`<code>.yaml.bak`）+ 菜单配置 + `context`/`tasks` 目录。驱动文件、`project.yaml` legacy、同前缀的手工备份一律**不搬**，全部进 `notTouched` 报告 | 驱动属 `/supperH-driver`（槽位名与个数归用户），legacy 属 `migrate-registry.mjs`。"只按自己认识的模式看盘"恰恰是最容易漏事的那种实现 —— 不说，"清场清干净了"就是假话 |
+
+**一处单点复用（这条是本功能真正的技术含量）**：清场要知道"这个项目的学习目录到底在哪"，而这个答案在
+`buildBinding` 里 —— 条目可以写 `paths.contextRoot` 覆写默认布局，还要展开 `{{PRIVATE_ROOT}}` /
+`{{PROJECT.identity.code}}`。如果清场自己再推一遍，就会出**两边都不报错**的错：条目声明了自定义路径，
+清场却按默认布局 `<私有根>/context/<code>` 去搬 —— 真数据留在自定义位置没搬走（下次解析照样读到它），
+而默认位置上若躺着别的项目的数据，会被一起搬走。所以抽出 `resolveRootPaths()` 共用，并额外导出
+`contextRootSource` / `tasksRootSource`（`entry` | `default`）：清场报告得说清这个路径的出处，用户才知道
+该去改条目还是接受现状。同时指到私有根外的路径一律只报告不搬（那是条目作者显式指定的位置，越界删数据不归本命令）。
+
+**退出码**（新增两个，与写模式同一套姿态：不确定就停，不降级）：
+
+| 码 | 含义 |
+|---|---|
+| **23** | 学习目录里有文件而未给 `--confirm <code>`。不可绕过（`--force` 在清场模式下直接退 2）|
+| **24** | 搬完解析器仍命中同一个 code（= 盘上还有第二个条目指向这个目录）。manifest 已落盘，可按它回滚 |
+
+另外三处分流不是新码但值得写下来：`--cwd` 与 `--code` 同时给却不一致 → 2（`code-mismatch`，撤错项目比不撤更糟糕）；
+`--confirm` 给了错码 → 2（`confirm-mismatch`）；解析器本来就没命中 → **0 + `noop: true`**，并把"读不了的条目文件"
+与"确实没注册"分开报（`unparseableEntries[]`）—— 否则一个 YAML 写坏的条目会伪装成"干净"。
+
+**实测**（临时私有根，全部走 `spawnSync` 真实命令行）：计划模式跑完后整棵私有根逐文件字节比对一字不差；
+撤一场后 `projects/<code>.yaml`、`menus/<code>.yaml`、两个目录全从原地消失且逐条能在隔离区读到；
+退 23 那一次比对同样一字不差；二次清场是 `noop` 且不产生第二个隔离区；清完再跑 `--write` 的 `existed` 为
+`false`（真的是首次注册），解析器重新命中同一个 code。**自定义路径那条用例是本轮唯一一次抓到实现比注释更诚实的地方**：
+第一条写完时门禁只算 `context`/`tasks` 两个 kind，用例证明默认布局那个空壳会被留在盘上，遂补
+`context-default` / `tasks-default` 两个 kind 并把它们同样算进学习数据（否则"条目改了路径"就是绕过 23 的后门）。
+
+**代价**：私有根多了一个顶层目录 `_retired/`。它不进 `PRIVATE_SUBS`（骨架清单），所以 `bootstrap` / `setup`
+不会去建它也不会有人清它 —— 这是刻意的：一个自动回收"历史撤销物"的机制，本质就是延迟删除，而这条功能存在的
+理由正是不做延迟删除。要清理由由用户自己负责。
+
 ---
 ## 11. 一期范围与二期规划
 
@@ -708,6 +760,8 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 - **双通道取数（二期已落地部分）**：L1 带 MCP 壳 server（`mcp-skeleton/shell.py` + 共享契约包 `supperh_contract/`）。注册表只有一条 `supperh-drivers`（插件相对路径 + 零凭据），项目 adapter 由壳运行期 `importlib` **查找**装载 —— 加项目不改注册表也不改 IDE 配置，"项目配了但 server 没注册"这类漂移结构性消失。通道分类只有两条（`script` / `mcp`）；官方 server 与自研 adapter 属配置选型，不进入 L2 枚举。守卫唯一化：L1 发 `supperh_contract` Python 包，adapter 一律 import，不复制守卫。`kind`/`fallback`/`mcp` 三个字段入 schema；原门禁槽位 `vpnPreCheck` 已删（执行前预检实测无效，理由与实测数据见 §10.8），schema 保留键、validate 只发废弃警告；`healthCheck` 一律是本地脚本且必须协议级；`kind` 由 `/supperH-init` 注册期探测机械写定（探不过→回写 `kind: script`；`fallback: none` 只报 blocked 不悄悄翻写），会话内只读不重探。MCP 取数工具只绑 4 个只读/测试类子 agent，主 agent 与命令入口一律不绑。
 
 - **外部数据源可选化（本轮，见 §10.12）**：`schemas/project.schema.yaml` 顶层 `required` 去 `db`/`drivers`；`init-project.mjs` 新增 `planConnections`/`applyConnectionChoices`（不接 = 整段不写，接 = 整段生成，接一半 = 写盘前退 2 `connection-choices-incomplete`）；`validate-project.mjs` 新增 `checkTemplateResidue`（`example_*` 残留 → 2）与 `checkDbDriverCoherence`（有驱动无库 = 错、有库无驱动 = 警告）；`resolve-project.mjs --env` 在无 `db` 段时退 **36**（36 的触发条件扩展，**码集不变**）。`schemas/project.example.yaml` 的 db/drivers 两段改为注释形态的字段说明书（模板不再携带可被误用的假值），`/supperH-init` 步骤 2 改为一次多选接入清单。**端到端实证顺带抓出一个只在真实 CLI 路径才触发的缺陷**：`initWrite` 里 `cfgText` 被误写成 `const`，`decideChannels` 回写 `kind` 时抛 TypeError → `--write` 每次退 1，而当时全绿的都是渲染层用例。已修，并补 2 条 `spawnSync` 真实 CLI 用例（纯代码模式退 0 且落盘无 db/drivers；接一半退 2 且不落盘）—— **落盘类行为一律要有走命令行的用例，只测渲染层等于没测**。
+
+- **清场重配（本轮，见 §10.19）**：`init-project.mjs` 新增第三种模式 —— `--reinit`（只读计划）/ `--purge`（执行）/ `--confirm <code>`（允许带走学习数据），退出码新增 **23** / **24**；撤销一律 `rename` 进 `<私有根>/_retired/<戳>/<code>/` 并写 `manifest.json`，不删任何东西；`resolve-project.mjs` 把 `paths.contextRoot` / `paths.tasksRoot` 的解析抽成导出的 `resolveRootPaths()`，`buildBinding` 与清场共用同一个答案。新测试 `tests/init-reinit.test.mjs`（6 条，全走真实 CLI）—— 其中两条抓到真缺陷：`--confirm` 给错值被降级成“还没确认”（参数错误必须先于需确认），以及默认布局空壳未算进学习数据（“条目改路径”就是绕过 23 的后门）。
 
 - **L1 纯度门禁（本轮，对外发布前的补欠）**：`sync-assets.mjs` 新增 `checkL1Purity()`，`--check` 与写模式（构建 dist 前）都是**退 5 硬阻断**。判据两条：上传物里不得出现注册条目的专有值（`identity.code` / `displayName` / `aliases[]` / `packageRoot` / `codeRoot` / `db.host` / 三个库名 / 只读账号），也不得出现本机三个绝对路径（私有根 / 仓库父目录 / 家目录）。三个设计决定：① **值从 L2 运行期取，不写硬黑名单**——把公司名抄进 deny 列表等于把它再公开一遍；② 比对按**段**过滤示例形态（`example_*` / `demo_*` / `<占位符>`），否则模板自身天天误报；③ 不把模块名/分支名当事实（`order` / `dev` 这类高复用词淹没信号），环境词（prod/uat/dev）也**不列进过滤表**——列了会连带屏蔽掉 `<code>_prod` 这种真库名。为什么现在才做：文档与红线一直写着“sync 的敏感字扫描会拦下”，而这条扫描从未存在；失去机械判据后，真实项目短码、真实包根、真实工作区路径成片躺在 `tests/` 夹具与 `mcp-skeleton/README.md` 示例里（手工才找得到，因此对外发布前的全量人工扫描是必须的一道）。同时 `main()` 加了 `import.meta.url` 守卫——无守卫的入口脚本被测试 import 时会重烤 dist 并 `process.exit`。
 **一期不做**：

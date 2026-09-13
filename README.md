@@ -77,7 +77,7 @@ git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
 |------|---------|------|
 | `/supperH-setup` | `commands/supperH-setup.md` | **一键适配**：探测 Qoder / OpenCode → 拷 dist 到对应加载目录 → 打印下一步 |
 | `/supperH-bootstrap` | `commands/supperH-bootstrap.md` | 新用户引导：**只**初始化私有根骨架（五个子目录 + `prefs.md`，幂等）+ 处置 legacy 单文件。不写任何注册条目、不跑 sync——条目由 `/supperH-init` 扫描后产生 |
-| `/supperH-init` | `commands/supperH-init.md` | 工作区级注册：扫描仓库预填结构字段 → 外部源**由用户多选**（全不选 = 纯代码模式，`db`/`drivers` 两段整段不写）→ 落 `projects/<code>.yaml` + `menus/<code>.yaml`；连通门禁 + driver 通道（`kind`）探测在此机械写定 |
+| `/supperH-init` | `commands/supperH-init.md` | 工作区级注册：扫描仓库预填结构字段 → 外部源**由用户多选**（全不选 = 纯代码模式，`db`/`drivers` 两段整段不写）→ 落 `projects/<code>.yaml` + `menus/<code>.yaml`；连通门禁 + driver 通道（`kind`）探测在此机械写定。要“回到未注册重来一遍”则用 `--reinit`（只读计划）/ `--purge`（执行）：撤销 = 搬进 `_retired/` 隔离区不删，学习数据非空时必须有 `--confirm <code>`（否则退 23）|
 | `/supperH-bug` | `commands/supperH-bug.md` | Bug 全流程主入口：解析→DB 门禁→学习模块检查→派 subagent 修复→验证→终判 |
 | `/supperH-learn` | `commands/supperH-learn.md` | 学习入口：代码学习 / 菜单学习 / 流程学习 |
 | `/supperH-driver` | `commands/supperH-driver.md` | 数据源登记的唯一入口：槽位名由用户定（L1 不写死固定四种源）→ 描述充分性门禁 → 分流（驱动已有就直接登记 / 否则派 `supperH-driver-author`（驱动编写） 先写）→ 写能力归类（`writes` + `confirm`/`deny` 由用户定）→ `driver-registry.mjs` 落盘 |
@@ -99,7 +99,7 @@ git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
 | `node scripts/validate-project.mjs` | 校验注册表里**全部** `projects/<code>.yaml` 结构与 schemaVersion（含 identity.code 缺失、code 重复等静默失效项）；可加 `--project <code>` / `--file <path>` / `--json` | `npm run validate` |
 | `node scripts/resolve-project.mjs --cwd <路径>` | **运行期唯一门禁**：项目身份解析 + 快路径准入 + I0 意图复述 + G5 回灌 + `--preflight` 本地事实（退出码即分流，见 `docs/architecture.md` §10） | —（agent 直调，不带别名） |
 | `node scripts/bootstrap.mjs` | CLI 版引导（等价于 `/supperH-bootstrap`，不依赖 IDE）：只建骨架；`--check` 报就绪状态，`--migrate` 才处置 legacy 单文件 | `npm run bootstrap` |
-| `node scripts/init-project.mjs` | 工作区级注册：预填结构字段落 `projects/<code>.yaml`（`/supperH-init` 的引擎）。接不接外部源由 `connect` / `db.*` 决定：接了整段生成、没接整段不写 | `npm run init-project` |
+| `node scripts/init-project.mjs` | 工作区级注册：预填结构字段落 `projects/<code>.yaml`（`/supperH-init` 的引擎）。接不接外部源由 `connect` / `db.*` 决定：接了整段生成、没接整段不写。第三种模式 `--reinit --cwd\|--code`：清场重配，列/撤 init 生成过的注册物（`--purge` 才搬，进 `_retired/`；学习数据非空退 **23**，需 `--confirm <code>`）| `npm run init-project` |
 | `node scripts/driver-registry.mjs` | 登记条目的唯一写入路径：`list` / `add` / `update` / `remove` / `health`。文本手术不 round-trip（注释是字段读法载体）、写前差分过 schema、探活不过不落盘（`--force` 才降级）、删条目要 `--yes` | —（`/supperH-driver` 直调） |
 | `node scripts/migrate-registry.mjs` | legacy 单文件 `project.yaml` → 注册表模型迁移 | `npm run migrate-registry` |
 | `node scripts/detect-ide.mjs` | 探测本机 IDE（输出 JSON） | `npm run detect-ide` |
@@ -139,6 +139,7 @@ supper-Han-java/
 ├── drivers/               用户自开发的内网驱动（含 <code>/adapter.py）
 ├── tasks/                 任务态数据
 ├── logs/                  运行期记账（fastpath-*.jsonl、壳 server 诊断；首次写入时自建）
+├── _retired/              清场重配（/supperH-init --reinit --purge）搬走的旧注册物 + manifest.json；不进骨架清单，也不会有人自动清它
 ├── project.yaml           legacy 单文件条目（注册表模型之前的形态；仍可读，bootstrap 会提示迁移）
 └── context/<project>/<module>/gen-*/    学习数据（CURRENT 原子切换）
 ```

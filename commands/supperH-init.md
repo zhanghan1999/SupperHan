@@ -1,5 +1,5 @@
 ---
-description: 当用户在一个尚未注册的工作区里首次要跑 /supperH-bug 或 /supperH-learn，或解析器返回 exit 10（本目录未注册）时，推荐用本命令。它扫描当前工作区自动预填结构字段（build.tool / packageRoot / modules / branches / codeRoot / code），只向用户询问无法扫描的私密连接（DB host/port/user 等），**不摆外部源名单**（有几个源、各自叫什么全由用户定，本命令只问“现在要不要先接一个”，日常加源走 /supperH-driver），并首次强制采集菜单学习来源（database | code，缺省以退出码 22 拦截、不可 --force 绕过），跑 driver --health 做“至少一个连通才落盘”门禁，最后写 projects/<code>.yaml + menus/<code>.yaml 并验证解析器命中。若私有根本身还不存在（第一次 clone、连 supper-Han-private 目录都没有），应改用 /supperH-bootstrap。
+description: 当用户在一个尚未注册的工作区里首次要跑 /supperH-bug 或 /supperH-learn，或解析器返回 exit 10（本目录未注册）时，推荐用本命令。它扫描当前工作区自动预填结构字段（build.tool / packageRoot / modules / branches / codeRoot / code），只向用户询问无法扫描的私密连接（DB host/port/user 等），**不摆外部源名单**（有几个源、各自叫什么全由用户定，本命令只问“现在要不要先接一个”，日常加源走 /supperH-driver），并首次强制采集菜单学习来源（database | code，缺省以退出码 22 拦截、不可 --force 绕过），跑 driver --health 做“至少一个连通才落盘”门禁，最后写 projects/<code>.yaml + menus/<code>.yaml 并验证解析器命中。若私有根本身还不存在（第一次 clone、连 supper-Han-private 目录都没有），应改用 /supperH-bootstrap。用户要的若是“撤掉已注册这个状态、回到未注册重来一遍”（而不是把配置重刷一遍），走本命令的 `--reinit`：默认只出只读计划，`--purge` 才执行，撤销 = 把 init 生成过的东西搬进 `_retired/` 隔离区（不删，可照 manifest.json 回滚）；学习数据非空时必须有 `--confirm <code>`，否则退出码 23。
 mode: primary
 permission:
   edit: allow
@@ -136,6 +136,35 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<工作区绝对路径>"
 - 回报必须带上 `connections.mode`（落盘 JSON 里的字段）：`code-only` 就说“本项目未接入任何外部源（纯代码模式）：DB 取证不可用、`--env` 会退 36，以后想接跑一次 `/supperH-driver` 即可（只补库信息则重跑本命令）”；`connected` 就列出 `declared` 里的槽位。**不得把未接入说成已就绪，也不得把它说成失败**（`gateNote` 就是用来区分这两件事的）。
 - 非 0 → 说明注册异常，贴 message，不谎报成功。
 
+## 附：清场重配（`--reinit`）——回到“未注册”再走一遍
+
+用户说“重新初始化项目”时，先分清他要的是哪一件事，两件事命令不同、后果不同：
+
+| 他要的 | 用哪个 | 为什么不能混 |
+|---|---|---|
+| 按当前模板/契约把条目重刷一遍（注册状态与学习数据都留着） | `--write`（步骤 4） | 它只覆盖自己生成的那些段，旧文件自动转 `.bak` |
+| 撤掉“已注册”这个状态，回到未注册重来一遍 | `--reinit`（本节） | `--write` 撤不掉条目本身、撤不掉 `menus/<code>.yaml`；硬套只会留下半新半旧 |
+
+**第一步永远是只读计划**（一个字节都不动），且必须先向用户复述、拿到同意，才允许执行：
+
+```
+node "{{TOOL_ROOT}}/scripts/init-project.mjs" --reinit --cwd "<工作区绝对路径>"
+```
+
+工作区已经被删走 / 搬家时按条目名撤：把 `--cwd "<路径>"` 换成 `--code <项目短码>`。计划 JSON 里 `items[]` 逐项给 `kind` / `path` / `exists` / `files`（目录里还有几个文件）/ `willMove`；`notTouched[]` 是**看到了但故意不搬**的东西（驱动文件、迁移前的 legacy 条目、同短码前缀的手工备份、被条目自定义到私有根外的路径）。复述时两个数必须念：`movableCount`（要搬几项）与 `learningFiles`（会带走几个学习/产物文件）。
+
+**执行**（撤 = 搬进隔离区，不是删除）：
+
+```
+node "{{TOOL_ROOT}}/scripts/init-project.mjs" --reinit --cwd "<工作区绝对路径>" --purge
+```
+
+- 全部搬进 `<PRIVATE_ROOT>/_retired/<UTC 戳>/<code>/`，保留它在私有根内的相对层级，并写 `manifest.json`（逐条 `from`/`to`）。要反悔就照它把每条 `to` 移回 `from`（先确认 `from` 位置仍为空）。
+- `learningFiles > 0` 时缺 `--confirm` 以 **23** 拦下，且**一个文件都不动**：学习成果只能由 `/supperH-learn` 重出来，不能跟着一次清场顺手没了。必须先把 `learning[]` 的目录与文件数告知用户、拿到明确同意，才允许重跑加 `--confirm <code>`。`--force` 绕不过它 —— 那是写模式的降级旗标，本模式不认，传了直接退 2。
+- 退 **24** = 搬完了但解析器仍命中同一个 code（盘上还有第二个条目指向这个目录）。按 `manifest.json` 回滚，别接着重跑注册。
+
+撤成功后，回到本文步骤 1 当首次注册重跑即可（`--write` 返回的 `existed` 会是 `false`，那是“真的是首次”的证据，不是你的推断）。
+
 ## 边界
 
 - **禁止**覆盖已有 `projects/<code>.yaml` 而不留 `.bak`（脚本已自动备份，不得绕过脚本手改）。
@@ -145,4 +174,6 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<工作区绝对路径>"
 - **禁止**把菜单表名/列名 dump 到聊天正文（只回显“已采集菜单来源”）。
 - **禁止**替用户改 `kind` / `fallback`，也禁止拿 `channelDecisions` 的结论去作任何分流判断（MCP 无退出码）——回写只由脚本自己完成，本命令只转述结果。
 - 结构字段（code/packageRoot/modules/branches）扫描值是**候选**，用户改则以用户为准：`--values` 里的 `code` / `packageRoot` / `modules` / `branches.*` 由脚本回写覆盖（`modules` 用逗号分隔字符串或数组），用户提供的分支不算“猜的”（`branchesDetected` 同步转 true）。**禁止**把未覆盖的未检出默认值当成事实向用户复述。
-- 本命令只新增/更新注册表条目，**不改** L1 产物（sync 与本项目无关）。
+- **禁止**把 `--reinit --purge` 当删除用：它只做 `rename` 进 `_retired/`，且必须先跑过只读计划、把 `movableCount` 与 `learningFiles` 念给用户；`learningFiles > 0` 时未拿到用户明确同意，**禁止**加 `--confirm <code>`。
+- 清场只撤本命令自己生成过的注册物；`notTouched[]` 里点名的驱动文件 / legacy 条目 / 手工备份**不搬也不删**，要撤由用户决定并自己动手。
+- 本命令只新增/更新/撤销注册表条目，**不改** L1 产物（sync 与本项目无关）。

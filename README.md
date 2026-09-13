@@ -125,7 +125,7 @@ supper-Han-java/
 │                          bootstrap / init-project / driver-registry / migrate-registry
 ├── .qoder/rules/          项目无关红线（零占位符，clone 即生效）
 ├── .githooks/             降级式 pre-commit
-├── docs/                  架构文档 + 占位符清单
+├── docs/                  架构文档 + 占位符清单 + 页面档案模型设计（F-15，未实现）
 ├── dist/                  构建产物（.gitignore）
 └── package.json
 ```

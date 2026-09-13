@@ -1,5 +1,7 @@
 # supperH 占位符清单（唯一真相源）
 
+> **本分支说明**：`master` 只放说明文件，本分支树上**没有** `scripts/` `agents/` `commands/` `skills/` `schemas/` 等实现目录 —— 文中出现的路径、退出码与判据请到 [`dev`](https://github.com/zhanghan1999/SupperHan/tree/dev) 分支核对。变更记录见 [CHANGELOG.md](../CHANGELOG.md)。
+
 本文件列出 L1 仓库里所有**合法**的占位符。sync 阶段 `substitute()` 会按此表把 `{{...}}` 展开为真实值；未列入本表的 `{{...}}` 若在扫描中命中 → **exit 3 阻断**。
 
 > 本文件放在 `docs/`，不在 `sync-assets.mjs` 的 `COPY_DIRS` 里，因此不会被替换扫描 —— 你可以放心在下面写原始 `{{...}}` 字面量作为示例。

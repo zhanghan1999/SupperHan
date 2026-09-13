@@ -1,5 +1,7 @@
 # supperH 架构：三层分离
 
+> **本分支说明**：`master` 只放说明文件，本分支树上**没有** `scripts/` `agents/` `commands/` `skills/` `schemas/` 等实现目录 —— 文中出现的路径、退出码与判据请到 [`dev`](https://github.com/zhanghan1999/SupperHan/tree/dev) 分支核对。变更记录见 [CHANGELOG.md](../CHANGELOG.md)。
+
 ## 0. 一句话摘要
 
 **L1 通用行为层**（本仓库）+ **L2 项目契约层**（`supper-Han-private/projects/<code>.yaml`）+ **L3 个人习惯层**（`supper-Han-private/prefs.md`）；三层各管各的变化频率，互相不污染。运行时另有一道**确定性门禁**：判定不交给 LLM，交给脚本退出码（见 §10）。

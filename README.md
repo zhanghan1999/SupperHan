@@ -2,6 +2,10 @@
 
 **通用 Java 项目多 Agent 工作流工具仓库（L1 层）**
 
+> **全量代码在 [`dev`](https://github.com/zhanghan1999/SupperHan/tree/dev) 分支** —— 本分支（`master`）只有说明文件，
+> 树上没有 `scripts/` `agents/` `commands/` `skills/` `schemas/` 等实现目录；文中出现的路径与退出码一律到 `dev` 核对。
+> 变更记录见 [CHANGELOG.md](./CHANGELOG.md)：一节 = 一个 tag，首个版本 `v0.1.0`。
+
 一份**与具体项目无关**的 Agent / Command / Skill 定义集合，可在多个 Java 项目上直接复用。真实项目事实（内网域名、库名、路径、分支名等）全部落在同级**私有根** `../supper-Han-private/`，不进入本仓库。
 
 ---
@@ -10,8 +14,8 @@
 
 ```bash
 # 1. 克隆本仓库到任意位置
-git clone https://github.com/zhanghan1999/supper-Han-java-.git
-cd supper-Han-java
+git clone https://github.com/zhanghan1999/SupperHan.git
+cd SupperHan
 
 # 2. 装依赖（脚本自身要 import yaml 包，这一步没有 node 直调等价物）
 npm install
@@ -59,11 +63,11 @@ node scripts/setup.mjs --check           # 只体检不写入
 
 | 分支 | 内容 | 用途 |
 |------|------|------|
-| `master` | **只有说明文件**：本 `README.md` + `docs/` + 两份 IDE 适配说明 | 落地页；clone 下来先读懂再决定拉哪条 |
+| `master` | **只有说明文件**：本 `README.md` + `CHANGELOG.md` + `docs/` + 两份 IDE 适配说明 | 落地页；clone 下来先读懂再决定拉哪条 |
 | `dev` | 全量 L1 资产（`agents/` `commands/` `skills/` `scripts/` `schemas/` `mcp-skeleton/` `drivers-skeleton/` `tests/` `.qoder/`） | **实际使用就 checkout 这条**；`npm install` + `node scripts/setup.mjs` 的完整链路只在它身上成立 |
 
 ```bash
-git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
+git clone -b dev https://github.com/zhanghan1999/SupperHan.git
 ```
 
 两条分支的历史**互不相干**（各自孤儿提交）：说明文件与代码分头演进，也让 `master` 的 diff 保持"只有文档"这一可读承诺。

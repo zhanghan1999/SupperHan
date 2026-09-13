@@ -1,5 +1,5 @@
 ---
-description: 数据源登记的唯一入口。当用户要给本项目新增 / 修改 / 删除 / 查看一个外部数据源（注册表 drivers.<槽位>）时用本命令。槽位名由用户定（L1 不再有固定四种源），登记时必须带人话描述 desc，能改动源那一侧数据的动作必须显式声明 writes（confirm = 先把要发出去的载荷给用户看、拿到明确同意再执行；deny = 直接拒、不提供询问）。流程：解析项目 → list 看现状 → 描述充分性门禁（说不清"从哪里进去"就问回来，不许先写个含糊描述占位）→ 分流（实现已存在就直接登记 / 否则派 driver-author 先写驱动）→ 写能力归类（action=other 时问用户归类并记原话）→ driver-registry.mjs 落盘（探活不通退 20，不在盘上留一个取不到数的源）→ validate 复核。只想注册项目本体（code / 模块 / 构建 / 菜单来源）请改用 /supperH-init。
+description: 数据源登记的唯一入口。当用户要给本项目新增 / 修改 / 删除 / 查看一个外部数据源（注册表 drivers.<槽位>）时用本命令。槽位名由用户定（L1 不再有固定四种源），登记时必须带人话描述 desc，能改动源那一侧数据的动作必须显式声明 writes（confirm = 先把要发出去的载荷给用户看、拿到明确同意再执行；deny = 直接拒、不提供询问）。流程：解析项目 → list 看现状 → 描述充分性门禁（说不清"从哪里进去"就问回来，不许先写个含糊描述占位）→ 分流（实现已存在就直接登记 / 否则派 supperH-driver-author（驱动编写） 先写驱动）→ 写能力归类（action=other 时问用户归类并记原话）→ driver-registry.mjs 落盘（探活不通退 20，不在盘上留一个取不到数的源）→ validate 复核。只想注册项目本体（code / 模块 / 构建 / 菜单来源）请改用 /supperH-init。
 mode: primary
 permission:
   edit: allow                # 仅用于写临时 --values JSON；projects/<code>.yaml 只能由 driver-registry.mjs 改
@@ -68,13 +68,13 @@ node "{{TOOL_ROOT}}/scripts/driver-registry.mjs" list --project <code> --probe
 看 `list` 的结论与 `impl` 指向的文件：
 
 - **驱动已经存在**（用户或早先的会话已经放好实现，`present=true`）→ 直接进步骤 3。
-- **驱动不存在** → 先征得同意，再派子 agent。它是全仓库**两个**拿到 `external_directory: allow` 的 subagent 之一（另一个是 `prelearn-writer`），能往你打开的工作区**之外**写文件（只能写 `<PRIVATE_ROOT>/drivers/`）。所以派之前必须说清一句：
+- **驱动不存在** → 先征得同意，再派子 agent。它是全仓库**两个**拿到 `external_directory: allow` 的 subagent 之一（另一个是 `supperH-prelearn-writer`（预学习落笔）），能往你打开的工作区**之外**写文件（只能写 `<PRIVATE_ROOT>/drivers/`）。所以派之前必须说清一句：
 
-  > “需要写一个驱动脚本到 `<PRIVATE_ROOT>/drivers/<槽位名>.py`（在当前工作区之外，IDE 默认不允许）。可以派 `driver-author` 去做吗？”
+  > “需要写一个驱动脚本到 `<PRIVATE_ROOT>/drivers/<槽位名>.py`（在当前工作区之外，IDE 默认不允许）。可以派 `supperH-driver-author` 去做吗？”
 
   **用户没点头就不派**，也不把“用户没反对”读成“同意”。“先问一下”是决定权，不是官僚手续：一旦放它进去写盘，那些文件就落在 git 管辖之外，事后没人能回滚它们。
 
-  拿到同意后派它（定义见 `agents/driver-author.md`），输入：
+  拿到同意后派它（定义见 `agents/supperH-driver-author.md`），输入：
 
   ```
   { code, slot, desc, entryHint, writesAsk, privateRoot }
@@ -84,7 +84,7 @@ node "{{TOOL_ROOT}}/scripts/driver-registry.mjs" list --project <code> --probe
   - `entryHint` = 用户给的接入点（地址/表/接口/索引名）
   - `writesAsk` = 用户提到的写动作（没有就写"只读"）
 
-  它返回 `{ status, data: { implPath, healthCmd, sources }, reason }`（契约见 `agents/driver-author.md` §输出契约）。**只接受它写进 `<PRIVATE_ROOT>/drivers/` 的产物**；处置按 `status`：
+  它返回 `{ status, data: { implPath, healthCmd, sources }, reason }`（契约见 `agents/supperH-driver-author.md` §输出契约）。**只接受它写进 `<PRIVATE_ROOT>/drivers/` 的产物**；处置按 `status`：
 
   - `ok` → 拿 `data.healthCmd` 与 `data.sources` 进步骤 3
   - `partial` → 驱动已写好，但探活退 4（服务在场、只缺凭据）。把它报的缺口原样转述，**由用户决定**是先补凭据还是先登记
@@ -172,7 +172,7 @@ node "{{TOOL_ROOT}}/scripts/driver-registry.mjs" health --project <code> --slot 
 
 ## 边界
 
-- **禁止**未经用户当次同意就派 `driver-author`（它是第二个拿到跨 workspace 写权限的子 agent，写出去的东西在 git 管辖之外）。
+- **禁止**未经用户当次同意就派 `supperH-driver-author`（它是第二个拿到跨 workspace 写权限的子 agent，写出去的东西在 git 管辖之外）。
 - **禁止**手工编辑 `projects/<code>.yaml`（包括"就改一个字段"）。所有写入都走 `driver-registry.mjs`：它会先备份、先在内存里过一遍 schema 与跨字段规则、探活不过不落盘。手改会绕过这三件事。
 - **禁止**把任何具体产品名 / 公司系统名 / 项目私有表名写进 L1 产物（本命令、`agents/`、`skills/`、`scripts/`、`.qoder/rules/`）。它们只能出现在 `<PRIVATE_ROOT>` 里。举例也用 `<某个内部系统>` 这种尖括号占位。
 - **禁止**替用户决定 `gate`（confirm 还是 deny），也禁止把"用户没反对"读成"用户同意"。

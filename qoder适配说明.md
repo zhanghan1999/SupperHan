@@ -129,7 +129,7 @@ node scripts\detect-ide.mjs | Select-String '"mcp"' -Context 0,6
 #    mcp.qoder.registered: true → 壳已注册；false + reason → 按 reason 修（通常是该重跑 node scripts/sync-assets.mjs）
 ```
 
-> 两条硬约束：MCP 工具**没有退出码**，所以不得拿它的结果做分流判断；取数工具只绑在子 agent 上，主入口与命令不绑。细节见 `skills/driver-contract/SKILL.md` §调用通道与 `.qoder/rules/10-redlines.md` R3.5。
+> 两条硬约束：MCP 工具**没有退出码**，所以不得拿它的结果做分流判断；取数工具只绑在子 agent 上，主入口与命令不绑。细节见 `skills/supperH-driver-contract/SKILL.md` §调用通道与 `.qoder/rules/10-redlines.md` R3.5。
 
 ---
 
@@ -138,6 +138,9 @@ node scripts\detect-ide.mjs | Select-String '"mcp"' -Context 0,6
 Qoder 是 **全局优先、项目可覆盖** 的模型：
 
 - 全局装的插件对所有项目生效（默认就是你要的"跨项目公用"）。
+- 反过来说要当心**同名遮蔽**：agent / skill 名落在 IDE 的**全局命名空间**，另一个 enabled 插件导出同名文件时，
+  谁被加载取决于加载顺序且**不报错**。本插件 `agents/` `skills/` 的标识符因此一律带 `supperH-` 前缀
+  （实案与门禁见 `docs/architecture.md` §10.18），且 `node scripts/sync-assets.mjs --check` 会替你盯着（exit 7）。
 - 若某个项目想用**不同的命令/规则**，可在**该项目根**放一个 `.qoder/` 目录承载项目级定义；它会与全局插件叠加。绝大多数场景不需要——因为"哪个项目"这件事是靠注册表 `projects/<code>.yaml` 的 `codeRoot` + `identity.code` 区分的，而不是靠给每个项目装一份插件。
 
 > 换项目时你**不需要重装插件**，只需要在**新工作区**跑一次 `/supperH-init`（它按当前 cwd 扫描并落一份 `projects/<code>.yaml`，多项目就是多份条目，互不覆盖）。旧的单文件 `project.yaml` 已被注册表取代，多项目不再靠改同一个文件切换。

@@ -7,7 +7,7 @@
 
 ## R1 数据与代码安全
 
-- **禁止执行任何写库 SQL**：数据库通道在 L1 契约里是**无条件只读源**，判据是语句本身有没有写副作用（含 `SELECT setval(...)` / `SELECT ... INTO` 这类以读形态出现的写），**与目标库是哪个无关**。要变更数据 → 按 `skills/driver-contract/SKILL.md` §SQL 工件契约产出六段齐全的 SQL 文件交人工执行，你不跑它，也不找人代跑。"用户明确同意"不是例外：同意改变的是工件内容，不是执行者。
+- **禁止执行任何写库 SQL**：数据库通道在 L1 契约里是**无条件只读源**，判据是语句本身有没有写副作用（含 `SELECT setval(...)` / `SELECT ... INTO` 这类以读形态出现的写），**与目标库是哪个无关**。要变更数据 → 按 `skills/supperH-driver-contract/SKILL.md` §SQL 工件契约产出六段齐全的 SQL 文件交人工执行，你不跑它，也不找人代跑。"用户明确同意"不是例外：同意改变的是工件内容，不是执行者。
 - **只读判据也含"判不出来"**：空语句、只有注释的语句证明不出只读 → 一律拒（未知即拒）。旧实现在这里什么都不做，于是"没配"被读成"无限制"，那是本条要消灭的形态。
 - **未接入数据库 = 缺口，不是无限制**：解析器输出里没有 `db` 段（纯代码模式）时，DB 取证与 SQL 工件都写不出（目标库名没有出处），记 `DB_GATE_SKIPPED_NO_DB` 并告知可用 `/supperH-init` 补接。数据库通道（解析器输出的 `dbDriver`，按 `role: database` 解出）缺席时**不得另开通道去连库**，也不得以"项目里带了 jdbc 配置"为由自己拼一个连接。
 - **禁止跳过新鲜度体检就 git add**：跑本仓库的 `node scripts/sync-assets.mjs --check`（在仓库根目录执行；人工别名 `npm run sync:check`），残留占位符进入 dist 会导致运行时行为不可预测。
@@ -17,10 +17,10 @@
 
 ## R2 权限边界
 
-- **禁止 `prelearn-writer` / `driver-author` 之外的任何 agent 使用 `external_directory: allow`**。这是最小放开面原则。每多一个例外必须同时做到三件事：① 在本条里指名道姓；② 写死它只能碰私有根的**哪一个子目录**（`prelearn-writer` → 学习数据目录、`driver-author` → 驱动目录）；③ 在 `tests/agent-permissions.test.mjs` 的名单里登记（该测试扫 frontmatter，名单外出现 allow 即红）。只改文案不改名单过不去。
+- **禁止 `supperH-prelearn-writer`（预学习落笔） / `supperH-driver-author`（驱动编写） 之外的任何 agent 使用 `external_directory: allow`**。这是最小放开面原则。每多一个例外必须同时做到三件事：① 在本条里指名道姓；② 写死它只能碰私有根的**哪一个子目录**（`supperH-prelearn-writer` → 学习数据目录、`supperH-driver-author` → 驱动目录）；③ 在 `tests/agent-permissions.test.mjs` 的名单里登记（该测试扫 frontmatter，名单外出现 allow 即红）。只改文案不改名单过不去。
 - **禁止把边界判据写成含分支的条件式**：一个放开面 agent 只能有**一个**路径前缀（路径必须以该前缀开头 + 匹配固定形状），不得“模式 A 用前缀甲、模式 B 用前缀乙”——那等于把边界交给模型先判分支再判边界，判错分支就写错地方。往已有 agent 上拼第二职责而理由是“少要一个权限”，**一律拒**：`external_directory` 是布尔开关而不是目录白名单，拿到 allow 的那一刻它覆盖整个私有根，“只能写某子目录”从来只是提示词里的自检；拼职责不会缩小硬面，只会把不含分支的判据讲糊。
 - **禁止 agent 通过 `bash` 里的 `echo`、`tee`、`cat >`、`sed -i` 绕过工具层权限拦截**去做被 `edit: deny` 禁掉的写操作。
-- **禁止主 agent 直接读源码定位问题**：代码定位由学习模块（prelearn）+ 学习记录（`CONTEXT_ROOT/<module>/`）提供。若学习记录不完整 → 派 prelearn-analyzer 定向补学，不允许越级。
+- **禁止主 agent 直接读源码定位问题**：代码定位由学习模块（supperH-prelearn）+ 学习记录（`CONTEXT_ROOT/<module>/`）提供。若学习记录不完整 → 派 supperH-prelearn-analyzer（预学习读码） 定向补学，不允许越级。
 - **`git` 命令只限白名单**（适用于所有 agent；主入口根本不碰 git，只调解析器）：只读类 `status` / `diff` / `log` / `blame` / `rev-parse` / `show`；快照类 `stash create`、`update-ref refs/supperh/snap/*`、`checkout <sha> -- <path>`（只跟具体改过的文件）；仅当运行期 `git.deliveryMode: local-commit` 时的 `add` + `commit`。**永不允许**：`push`、`reset`、`clean`、`checkout .`（及整树切换）、`stash push` / `stash drop`（及任何其它 `stash` 子命令）、`rebase`、`gc`、`commit --amend`、`--no-verify`，以及对 `refs/supperh/snap/` 之外任何 ref 的 `update-ref`。理由：`stash create` 是这里唯一**不动工作区、不写 `refs/stash`、不进分支历史**的快照形态；`stash push` 会静默改用户的工作区与 stash 栈，`reset`/`clean`/整树 `checkout` 会拿掉用户手改的内容 —— 那些都不需要 agent 的修复动作就能造成不可逆损失。
 
 ## R3 流程纪律
@@ -37,21 +37,21 @@ L1 产物**项目无关**：sync 只烤 `TOOL_ROOT / PRIVATE_ROOT / DRIVERS_ROOT
 - **禁止主 agent 用 LLM 判断"这个 bug 能不能走快路径"**：快路径准入（锚点类型与唯一性、学习数据就绪、完整度等级、新鲜度（G4a 仓库级 + G4b batch 级交集）、否决词表、影响半径 G5）只能来自同一个解析器的**退出码**（0 准入；30–37 属正常分流信号；**40 不属此列**，它是“问用户一次”的停机信号，故意放在 30–37 连续段之外）。理由：误判成本高度不对称 —— 漏杀的代价是线上回归且当场不可见，误杀的代价只是多花几十秒。**尤其禁止自行判断"这次提交跟这个 batch 无关"**：无关与否由脚本拿 `git diff` 与该 batch 的 `sources` 求交集得出，无从判定时一律按过期出局。
 - **禁止用文字自行判定 I0（意图复述）**：“我听懂了”不得由主 agent 自陈，必须把三槽位 + 逐字引用片段交同一个解析器（`--intent-json` 或 `--intent-report`）由 `verifyIntent` 判（40 = 内容欠定义 → 一次性补问用户；36 = 结构不可用 → 修调用姿势而不是去问用户）。它只验“引用逐字出自原话 + 期望/实际两格真区分 + 症状句被引到”，**拦不住“原话里确实有这句、但说的不是这件事”** —— 那一半靠把复述回显给用户，两道缺一道都不算闭合。它是**两条路径共有**的义务：不进快路径时仍要拿空锚点（`--anchor ""`）跑一次把 I0 求值出来。
 - **禁止拿 MCP 工具的结果做分流**：MCP 调用没有退出码，且 server 起不来时工具**从列表静默消失**（无错误码、无 stderr）——拿它判断等于把"错被吞"写进流程。`drivers.<slot>.kind` 由 `/supperH-init` 注册期探测机械写死（探测不过就回写成 `script`），会话内**只读已定的 kind、不重探**（重探 = 每会话多一个 30s 超时面）。`kind: mcp` 只换取数通道，门禁槽位（`vpnPreCheck`）在 schema 层就被拒。
-- **禁止用文字自行判定 G5**：影响半径窄与否不得靠主 agent 读 `bug-analyzer` 回报的措辞得出结论，必须把回报原文回灌解析器（`--impact-json` 或 `--impact-report`）由 `verifyImpactReport` 的退出码定（0 窄→继续；37 宽或 lite 护栏被破→升格；36 回报不可用→升格）。脚本只验回报形状，G5 因此永久弱于 G1–G4。
+- **禁止用文字自行判定 G5**：影响半径窄与否不得靠主 agent 读 `supperH-bug-analyzer`（代码分析） 回报的措辞得出结论，必须把回报原文回灌解析器（`--impact-json` 或 `--impact-report`）由 `verifyImpactReport` 的退出码定（0 窄→继续；37 宽或 lite 护栏被破→升格；36 回报不可用→升格）。脚本只验回报形状，G5 因此永久弱于 G1–G4。
 - **禁止把退出码 0 与"没跑成门禁"混为一谈**：锚点门禁 `exit 0` 必须同时满足 `fastPath.eligible === true`、`fastPath.anchorResolved` 非空、`fastPath.intent.ok === true`；G5 回灌模式 `exit 0` 必须满足 `impact.narrow === true`。`--anchor`/`--text`/`--module`/`--intent-*`/`--impact-*`/`--scope` 不成对、或脚本内部异常，一律由脚本返回 **36（门禁未求值）** 落完整路径 —— “没校过”永远不等于“校过了且通过”。主 agent 不得因为"只是少个参数"而自行补参重试或当作通过。
 - **禁止跳过步骤 0 门禁**：`/supperH-bug`、`/supperH-learn` 进入步骤 1 之前**必须**先成功运行解析器（退出 0）。非 0 一律立即停止并原样输出打回语。
-- **窄 bash 白名单**：`/supperH-bug`、`/supperH-learn` 虽 `bash: allow`，其**唯一**允许的 bash 脚本就是那一条 `node "<TOOL_ROOT>/scripts/resolve-project.mjs" ...`，可按不同参数多次调用：步骤 0 不带参、新鲜度取数带 `--module`、I0 + 门禁判定带 `--anchor` + `--text` + `--intent-json`/`--intent-report`（反查来的锚点再加 `--anchor-source lookup`）、诊断基线带 `--env`、G5 验收再带 `--impact-json`/`--impact-report`（可叠 `--scope`）、改动动手前带 `--preflight`。**白名单只圈到“这一个脚本文件”**，不圈子命令：除上述已文档化的旗标外不得自造参数。其它任何编译/DB/网络命令（**包括跑 driver**）仍必须派子 agent——快路径 F1.4 的 traceId/ticketNo 反查因此走 `bug-analyzer(mode=lookup)` 而非主 agent 直接跑脚本；`--preflight` 也只集**本地事实**（脏文件/快照 ref/槽位名单），绝不在执行前做网络预检（§10.8）。
-- **MCP 取数工具只绑子 agent**：壳 server `supperh-drivers` 只允许出现在子 agent frontmatter 的 `mcpServers` 里（现绑 `bug-analyzer` / `bug-tester` / `bug-test-writer` / `prelearn-analyzer`），**主 agent 与命令入口一律不绑**。这与上一条是同一条精神的两个面：取数动作必须发生在被约束的下游，主入口只消费结构化结果。
-- **跨私有根的只读取数下沉到脚本**：子 agent 与主入口均不得为了读 `CONTEXT_ROOT/` 下的 `index.md` 而要求放开 `external_directory`；需要这份数据时走解析器返回的 `freshness` / `fastPath` 字段，或派 `prelearn-analyzer`。目的是把最小放开面钉在**结构上最少**而不是钉在某个数字上。已有两个例外的共同特征：“写入落在私有根”，且都不能下沉为脚本（学习落地与写驱动都是探索型判断，不是确定性计算）——拿不到这个特征就不得新增例外。
+- **窄 bash 白名单**：`/supperH-bug`、`/supperH-learn` 虽 `bash: allow`，其**唯一**允许的 bash 脚本就是那一条 `node "<TOOL_ROOT>/scripts/resolve-project.mjs" ...`，可按不同参数多次调用：步骤 0 不带参、新鲜度取数带 `--module`、I0 + 门禁判定带 `--anchor` + `--text` + `--intent-json`/`--intent-report`（反查来的锚点再加 `--anchor-source lookup`）、诊断基线带 `--env`、G5 验收再带 `--impact-json`/`--impact-report`（可叠 `--scope`）、改动动手前带 `--preflight`。**白名单只圈到“这一个脚本文件”**，不圈子命令：除上述已文档化的旗标外不得自造参数。其它任何编译/DB/网络命令（**包括跑 driver**）仍必须派子 agent——快路径 F1.4 的 traceId/ticketNo 反查因此走 `supperH-bug-analyzer(mode=lookup)` 而非主 agent 直接跑脚本；`--preflight` 也只集**本地事实**（脏文件/快照 ref/槽位名单），绝不在执行前做网络预检（§10.8）。
+- **MCP 取数工具只绑子 agent**：壳 server `supperh-drivers` 只允许出现在子 agent frontmatter 的 `mcpServers` 里（现绑 `supperH-bug-analyzer` / `supperH-bug-tester`（测试执行） / `supperH-bug-test-writer`（测试编写） / `supperH-prelearn-analyzer`），**主 agent 与命令入口一律不绑**。这与上一条是同一条精神的两个面：取数动作必须发生在被约束的下游，主入口只消费结构化结果。
+- **跨私有根的只读取数下沉到脚本**：子 agent 与主入口均不得为了读 `CONTEXT_ROOT/` 下的 `index.md` 而要求放开 `external_directory`；需要这份数据时走解析器返回的 `freshness` / `fastPath` 字段，或派 `supperH-prelearn-analyzer`。目的是把最小放开面钉在**结构上最少**而不是钉在某个数字上。已有两个例外的共同特征：“写入落在私有根”，且都不能下沉为脚本（学习落地与写驱动都是探索型判断，不是确定性计算）——拿不到这个特征就不得新增例外。
 - **禁止不传 `--project <code>` 就调用 driver/子 agent**：拿到解析结果后，所有下游调用必须显式携带该 code 与解析返回的 `contextRoot`，杜绝多项目下串包。
 
 ## R4 学习数据完整性
 
-- **禁止 prelearn-writer 在 copy-on-write 生成新代目录之前修改 CURRENT 指向**。原子切换顺序：写入新代 → 校验通过 → 原子 rename 更新 CURRENT。
+- **禁止 supperH-prelearn-writer 在 copy-on-write 生成新代目录之前修改 CURRENT 指向**。原子切换顺序：写入新代 → 校验通过 → 原子 rename 更新 CURRENT。
 - **禁止在同一 module 下并存两个未 GC 的 gen-* 目录超过 24 小时**。GC 策略见 `20-workflow.md`。
-- **禁止手写 batch-*.md 内容绕开 analyzer**：所有学习记录必须由 prelearn-analyzer 生成结构化输出后交 writer 落地。
+- **禁止手写 batch-*.md 内容绕开 analyzer**：所有学习记录必须由 supperH-prelearn-analyzer 生成结构化输出后交 writer 落地。
 - **禁止把空 / 不合法的 `sources` 当成"该 batch 无源码依赖"**：`index.md` 反查表的 `sources` 列必须是该 batch 调用链可达文件**全集**（含 Controller 自身），repo-relative POSIX 路径、`;` 分隔；追不全、或路径含 `;`/`|` 等破坏表格的字面，一律写 `-`。G4b 对 `-` 与非法形态 **fail-closed** 判过期（35）——写成空集等于给门禁开后门，把误杀换成了漏杀。
-- **禁止给 `index.md` 加列而不升 `schema` 代际**：反查表列集合是机器契约，`scripts/fastpath-gate.mjs` 的 `REQUIRED_COLS` / `INDEX_SCHEMA` 必须与 `prelearn` skill 的「index.md 规范格式」节同步；代际不符或缺列一律 32 出局，绝不"尽力解析"。
+- **禁止给 `index.md` 加列而不升 `schema` 代际**：反查表列集合是机器契约，`scripts/fastpath-gate.mjs` 的 `REQUIRED_COLS` / `INDEX_SCHEMA` 必须与 `supperH-prelearn`（预学习统筹） skill 的「index.md 规范格式」节同步；代际不符或缺列一律 32 出局，绝不"尽力解析"。
 
 ## R5 派发协议
 

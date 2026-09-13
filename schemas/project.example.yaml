@@ -46,7 +46,7 @@ build:
 # db（可选）：本项目接不接数据库。六个值全要，缺一项 init 在写盘前就退 2（不补默认值）。
 # 这一段描述的是**只读通道**：host/port/账号 是连接事实，schemas 是环境名→库名的映射，
 # 没有任何键授予写权限 —— 守卫（guards.select_only_guard / SELECT_only_guard）无条件只拦 SELECT，
-# 且不看库名。要变更数据：产出 SQL 工件交人工执行（skills/driver-contract/SKILL.md §SQL 工件契约）。
+# 且不看库名。要变更数据：产出 SQL 工件交人工执行（skills/supperH-driver-contract/SKILL.md §SQL 工件契约）。
 # 不接 = 整段不写（纯代码模式：DB 取证步骤记为缺口，--env 退 36）。需要时才取消注释：
 # db:
 #   host: <内网端点>

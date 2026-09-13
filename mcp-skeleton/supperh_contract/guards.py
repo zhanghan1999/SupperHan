@@ -10,7 +10,7 @@ agreement is pinned by tests/mcp-manifest.test.mjs.
 判据的形状（2026-09 改动，别改回去）：判定对象是**自己有没有出口**，不是**语句想不想写**。
 数据库通道在 L1 契约里是只读源——`db.writableUser` 与 `db.forbidWriteSchemas` 已从
 schemas/project.schema.yaml 退役，需要变更数据时唯一合法产物是一份 SQL 工件
-（skills/driver-contract/SKILL.md §SQL 工件契约），由人执行。理由：从文本判定"这条语句会不会
+（skills/supperH-driver-contract/SKILL.md §SQL 工件契约），由人执行。理由：从文本判定"这条语句会不会
 改数据"不可完备（`SELECT setval(...)` 改序列、`SELECT ... INTO` 在 PG 里建表、藏在函数里的
 UPDATE 都不含写关键词），而"这条通道没有执行写的出口"是恒定、可静态审计、不随 SQL 语法演化的。
 """
@@ -147,7 +147,7 @@ def select_only_guard(sql: str, target_schema: str = "", forbid_writes: Iterable
             EXIT_BAD_ARGS,
             "DB_GATE_DENY: write side effect " + kw
             + " —— 数据库通道无条件只读；需要变更数据请产出 SQL 工件交人工执行"
-            "（见 skills/driver-contract/SKILL.md §SQL 工件契约）",
+            "（见 skills/supperH-driver-contract/SKILL.md §SQL 工件契约）",
         )
 
 

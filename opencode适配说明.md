@@ -19,6 +19,8 @@ OpenCode 的命令定义只从**固定目录**加载，且分两个作用域：
 
 > 注意目录名：工具仓库源码是复数 `agents/commands/skills`，安装时映射成**单数** `agent/command/skill`。
 > 实测 1.18.21 的可执行文件里同时存在 `agent/` 与 `agents/`、`command/` 与 `commands/`、`skill/<name>/SKILL.md` 与 `skills/<name>/SKILL.md` 两组路径常量 —— **单复数都吃**，所以映射成单数是安全的（这条结论来自二进制字符串扫描，不是官网描述；升级版本后若命令不出现，先按下面§排障核对目录）。
+> **名字空间**：`agent/` 与 `skill/` 是**全局共享**目录——别的插件往里放同名文件就会顶掉我们的，OpenCode 不报错。
+> 所以三条通道的标识符一律带 `supperH-` 前缀（实案与门禁见 `docs/architecture.md` §10.18）；你自建的 subagent 也照这条起名。
 
 ---
 
@@ -132,7 +134,7 @@ node "<工具仓库路径>\scripts\init-project.mjs" --write --cwd "<你的项�
 node "<工具仓库路径>\scripts\detect-ide.mjs"   # 看 mcp.opencode.registered / reason
 ```
 
-> 两条硬约束：MCP 工具**没有退出码**，不得拿它的结果做分流判断；取数工具只绑在子 agent 上（`mcpServers` 写在 agent frontmatter），主入口与命令不绑。细节见 `skills/driver-contract/SKILL.md` §调用通道与 `.qoder/rules/10-redlines.md` R3.5。
+> 两条硬约束：MCP 工具**没有退出码**，不得拿它的结果做分流判断；取数工具只绑在子 agent 上（`mcpServers` 写在 agent frontmatter），主入口与命令不绑。细节见 `skills/supperH-driver-contract/SKILL.md` §调用通道与 `.qoder/rules/10-redlines.md` R3.5。
 
 ---
 

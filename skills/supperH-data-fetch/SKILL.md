@@ -1,9 +1,9 @@
 ---
-name: data-fetch
-description: supperH 统一数据获取协议 skill。定义"从注册数据源取结构化数据 → 过滤 → 归一化输出"的四段流水线，被所有需要从注册源取数的 agent 与命令共同引用（数据库只是其中一种源）。
+name: supperH-data-fetch
+description: supperH-data-fetch（取数协议）— 统一数据获取协议 skill。定义"从注册数据源取结构化数据 → 过滤 → 归一化输出"的四段流水线，被所有需要从注册源取数的 agent 与命令共同引用（数据库只是其中一种源）。
 ---
 
-# skill: data-fetch
+# skill: supperH-data-fetch · 取数协议
 
 ## 前置自检（硬性）
 
@@ -24,7 +24,7 @@ L1 里唯一被赋予机器语义的是 `role: database`（全项目最多一个
 | 数据库通道（能发 SQL 的那个） | 解析器输出里的 `dbDriver` 别名（按 `role: database` 解出来；未接入时为 `null`） | 否（纯代码模式可以一个源都没有）；但**有 `db` 段却没这个通道 = 写保护没有可绑的出口**，一律拒写 |
 | 其它任意源 | `drivers.<槽位名>`，槽位名从解析器返回的 `drivers` 键集合里取，用途看各槽位的 `desc` | 否 |
 
-每个槽位的值是 `{desc, impl, healthCheck, config?, role?, writes?, kind?, fallback?, mcp?}`；`impl` 指向可执行脚本（Python/Shell/Node 皆可），`healthCheck` 是**协议级**探活命令（真连一次后端，不是 ping/端口探测），`kind` 决定取数走哪条通道（缺省 `script`）。通道的完整形状与 exit code ↔ JSON-RPC error code 对照见 `skills/driver-contract/SKILL.md` §调用通道。
+每个槽位的值是 `{desc, impl, healthCheck, config?, role?, writes?, kind?, fallback?, mcp?}`；`impl` 指向可执行脚本（Python/Shell/Node 皆可），`healthCheck` 是**协议级**探活命令（真连一次后端，不是 ping/端口探测），`kind` 决定取数走哪条通道（缺省 `script`）。通道的完整形状与 exit code ↔ JSON-RPC error code 对照见 `skills/supperH-driver-contract/SKILL.md` §调用通道。
 
 ## 四段流水线
 
@@ -37,20 +37,20 @@ L1 里唯一被赋予机器语义的是 `role: database`（全项目最多一个
 
 - 输入：`source` = 槽位名（从注册表 `drivers` 的**实际键集合**里来，不是从本 skill 的清单里来） + 可选 `source.name`（同一槽位下多数据源，如 `<库槽位>.test / <库槽位>.prod`）
 - 输出：绝对路径的 impl 脚本 + **`channel`**（`script` | `mcp`）。channel 直接取解析器返回体里 `drivers.<槽位名>.kind` 的值（缺省 `script`）—— **不在产物里写死、不拼占位符**（通道是注册期探测结论，属 L2 运行期数据）
-- `channel` 是登记期已定的结论：**不得在本段重新探测、不得因为"看起来 MCP 工具不在列表里"自己改判**（kind 由登记期的机械探测写死——`/supperH-init --write` 或 `/supperH-driver` 的 add/update，两者共用同一个 `decideChannels`，见 `driver-contract` §调用通道）
+- `channel` 是登记期已定的结论：**不得在本段重新探测、不得因为"看起来 MCP 工具不在列表里"自己改判**（kind 由登记期的机械探测写死——`/supperH-init --write` 或 `/supperH-driver` 的 add/update，两者共用同一个 `decideChannels`，见 `supperH-driver-contract` §调用通道）
 - 未注册 → 抛 `SOURCE_NOT_REGISTERED`；**禁止降级到"随便找个能跑的先顶着"**
 
 ### 2. guard（守卫，硬性）
 
-- **DB 门禁 = 只读判定，不看库名**：本次取数落在**数据库通道**（`dbDriver` 指向的槽位）时，只允许发出能被证明只读的 SQL。命中写关键词或副作用形态（完整清单见 `driver-contract` §守卫契约）→ 抛 `DB_GATE_DENY`；不弹确认、不改写 SQL、不换 schema、不重试。**判据与“它写到哪个库”无关** —— 旧写法先比 `forbidWriteSchemas` 清单再决定要不要看语句，清单为空 / 传空串 / 库名层级错配三种情形都静默放行，那是本契约已收口的缺陷。
+- **DB 门禁 = 只读判定，不看库名**：本次取数落在**数据库通道**（`dbDriver` 指向的槽位）时，只允许发出能被证明只读的 SQL。命中写关键词或副作用形态（完整清单见 `supperH-driver-contract` §守卫契约）→ 抛 `DB_GATE_DENY`；不弹确认、不改写 SQL、不换 schema、不重试。**判据与“它写到哪个库”无关** —— 旧写法先比 `forbidWriteSchemas` 清单再决定要不要看语句，清单为空 / 传空串 / 库名层级错配三种情形都静默放行，那是本契约已收口的缺陷。
 - **未知即拒**：空语句、只有注释的语句证明不出只读 → 同样 `DB_GATE_DENY`。没有“判不出来就算读”这一档。
-- **要变更数据不是本 skill 的事**：四段流水线的正常产物是行集，不是变更。需要改数据时按 `driver-contract` §SQL 工件契约产出交人工执行的 SQL 文件，本次 DB 侧结论记 `partial` + `DB_WRITE_OUT_OF_SCOPE`（与 `DB_UNREACHABLE` 分开：一个是“不授予”，一个是“连不上”）。
+- **要变更数据不是本 skill 的事**：四段流水线的正常产物是行集，不是变更。需要改数据时按 `supperH-driver-contract` §SQL 工件契约产出交人工执行的 SQL 文件，本次 DB 侧结论记 `partial` + `DB_WRITE_OUT_OF_SCOPE`（与 `DB_UNREACHABLE` 分开：一个是“不授予”，一个是“连不上”）。
 - **非库槽位的写动作门禁（与 DB 门禁叠加，不互替）**：上面两条只管数据库通道。其它源（发消息、改记录状态、上传文件、改远端配置）受各槽位自己的 `writes` 段约束，判据全部来自 L2 声明而不是模型对“这个动作危不危险”的印象：
   - 该槽位未声明 `writes` 段 → **只读源**，任何写动作直接拒（exit 2 + `error` 写 `WRITE_NOT_DECLARED:` 前缀，形态同 `DB_GATE_DENY`，不是新退出码）。“没列出来”等于“没授权”，不等于“没限制”。
   - 动作在其 `writes[].action` 里且 `gate: deny` → 直接拒，**不提供“要不要试试”的选项**；用户口头坚持（“我就要发”）不是绕道，要改的是声明而不是绕过它。
   - `gate: confirm` → 把**要发出去的完整载荷**（哪个源、哪条记录、什么内容）先给用户看，拿到明确同意才执行。“用户没反对”永远不等于“用户同意”。
   - 要做的动作不在词表里也不是用户登记过的 `other` → 停下问用户归类（归类结果由 `/supperH-driver` 写回 L2），**不得自己挑一个最接近的类别执行**。
-- **本 skill 的四段流水线默认只读**：`invoke` 段的正常产物是行集，不是变更。写动作只能出现在显式登记过 `writes` 的槽位上，且总走 `bug-dev` / 命令层的写门禁，不在取数链路里顺手发起。
+- **本 skill 的四段流水线默认只读**：`invoke` 段的正常产物是行集，不是变更。写动作只能出现在显式登记过 `writes` 的槽位上，且总走 `supperH-bug-dev` / 命令层的写门禁，不在取数链路里顺手发起。
 - **无执行前预检**：不在“跑 driver 之前”做任何网络/VPN 状态判断，也不得再引入预检槽位（原 `vpnPreCheck` 已删）。原因：零信任网关对 VPN 网段的**任意端口**都本地代答 accept，而内网主机常滤掉 ICMP —— 所以 ping / 网卡名 / 裸 TCP connect 三类“预检”都会在全断的情况下报绿灯（实测数：假端口 connect 均 0.02s 内“OPEN”，对它们发 HTTP 则 `RemoteDisconnected`；真端口 `401` 用 0.28s）。证据只来自本次调用自返的退出码。
 - **连不上怎么办（exit 3 / 4）**：停止该源取数，把**目标端点 + 错误原文**交给用户，要求提供可连接环境（“请在能访问 `<host>:<port>` 的网络里重试” / “请重新登录刷新凭据”）。你**不猜 VPN 是否已连、不自动重试、不换网络再跑**，更不得把“拿不到数据”写成“没有数据”。
 
@@ -125,7 +125,7 @@ driver（script 分支：stdout；mcp 分支：`content[0].text`）**必须**输
 }
 ```
 
-Exit code 语义（**协议契约，不可改**；mcp 分支用同一套语义，只换了载体 —— 对照表唯一定义在 `driver-contract` §调用通道与 `mcp-skeleton/supperh_contract/codes.py`，本处不复写以免漂移）：
+Exit code 语义（**协议契约，不可改**；mcp 分支用同一套语义，只换了载体 —— 对照表唯一定义在 `supperH-driver-contract` §调用通道与 `mcp-skeleton/supperh_contract/codes.py`，本处不复写以免漂移）：
 
 | code | 含义 | 调用方处理 |
 |------|------|-----------|
@@ -173,7 +173,7 @@ Exit code 语义（**协议契约，不可改**；mcp 分支用同一套语义�
 
 ## anchor-lookup（快路径 F1.4：traceId / ticketNo → route）
 
-`/supperH-bug` 抽到的锚点不含代码位置时，由 `bug-analyzer(mode=lookup)` 经本协议反查接口路由。这是一个**只读、单结果**的特化调用。
+`/supperH-bug` 抽到的锚点不含代码位置时，由 `supperH-bug-analyzer(mode=lookup)` 经本协议反查接口路由。这是一个**只读、单结果**的特化调用。
 
 **用哪个槽位反查，本 skill 不指名**（F-11：槽位名归用户，L1 没有也不该有「日志源」这个名字）。判据：
 

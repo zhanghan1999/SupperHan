@@ -1,9 +1,9 @@
 ---
-name: prelearn
-description: supperH 预学习统筹 skill。定义分批算法、CURRENT 原子切换、copy-on-write、supplement 内容级补学四项核心不变量。被 /supperH-learn 主入口与 prelearn-analyzer / prelearn-writer 子 agent 共同引用。
+name: supperH-prelearn
+description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。定义分批算法、CURRENT 原子切换、copy-on-write、supplement 内容级补学四项核心不变量。被 /supperH-learn 主入口与 supperH-prelearn-analyzer / supperH-prelearn-writer 子 agent 共同引用。
 ---
 
-# skill: prelearn
+# skill: supperH-prelearn · 预学习统筹
 
 ## 前置自检（硬性）
 
@@ -46,7 +46,7 @@ description: supperH 预学习统筹 skill。定义分批算法、CURRENT 原子
 - 每个 HTTP 入口方法体前面必须写一行：`--- route: <HTTP-METHOD> <path> ---`
 - 例：`--- route: POST /api/v1/order/create ---`
 - supplement 模式定位缺口时**依赖此锚点**；无锚点的方法视为私有方法，不参与 route 反查
-- `index.md` 建立 `route → batch-NN.md` 反查表，供 `bug-analyzer` 快速定位
+- `index.md` 建立 `route → batch-NN.md` 反查表，供 `supperH-bug-analyzer` 快速定位
 
 ### 3. CURRENT 原子切换（copy-on-write）
 
@@ -77,7 +77,7 @@ description: supperH 预学习统筹 skill。定义分批算法、CURRENT 原子
 | `supplement` | `/supperH-bug` 步骤 7a 内部触发 | 单个 `target_method` + `gap_hint` | 新 gen 目录（只有目标 batch 被替换） + CURRENT 原子切换 |
 | `menu` | `/supperH-learn --menu <menu-id>` | 菜单来源配置（`menu` 对象） | 菜单索引 batch（`index.md` frontmatter 带 `kind: menu`）+ CURRENT 原子切换 |
 
-`supplement` 不面向用户直接调用（`/supperH-learn` 一期只暴露 `init|update`）；只由 `bug-dev` 上报 `content_gaps` → 主 agent 派 `prelearn-analyzer(mode=enrich)` → 派 `prelearn-writer(mode=supplement)` 内部串起来。
+`supplement` 不面向用户直接调用（`/supperH-learn` 一期只暴露 `init|update`）；只由 `supperH-bug-dev` 上报 `content_gaps` → 主 agent 派 `supperH-prelearn-analyzer(mode=enrich)` → 派 `supperH-prelearn-writer(mode=supplement)` 内部串起来。
 
 ### 菜单分区约定（保留名 `menu`）
 
@@ -144,7 +144,7 @@ coveredControllers: N
 本列 = 该 batch 所在调用链的**可达文件全集**（同一 batch 内各行的值相同，取该 batch 各方法 `touched_files` 的并集）。
 
 - **形态**：相对代码库根（`EFFECTIVE_ROOT`）的 **POSIX 路径**，`;` 分隔，无空格、无盘符、无 `./` 前缀。与 `git diff --name-only` 的输出同形，否则交集永远为空。
-- **必含 Controller 自身文件**（理由见 `agents/prelearn-analyzer.md` 步骤 3.5）。不为"省字节"剔掉它 —— 剔了等于打开漏杀口子。
+- **必含 Controller 自身文件**（理由见 `agents/supperH-prelearn-analyzer.md` 步骤 3.5）。不为"省字节"剔掉它 —— 剔了等于打开漏杀口子。
 - **追不全时写 `-`（而不是写空、也不是少写几个）**。`-` = "无法安全判定" → G4b **fail-closed 直接 35**。这一条是本列存在的根基：如果"不知道"被当成"无依赖"，整个修复就是把误杀换成漏杀。
 - 路径本身含 `;` 或 `|` 的文件（几乎不会发生）→ 该 batch 写 `-`，走 fail-closed。
 - 拷贝过来的 batch 沿用其原有 `sources`，不重新推演（重推没依据）；它的新鲜度由 G4b 的 diff 交集实测得出，不靠信任旧推断 —— 这正是本列顺手解决的"不可审计"问题。
@@ -178,5 +178,5 @@ coveredControllers: N
 
 ## 与其它 skill 的关系
 
-- 本 skill 只讲**学习与落地**协议；数据**获取**（从已登记的源取结构化数据）见 `driver-contract` skill 与 `data-fetch` skill
+- 本 skill 只讲**学习与落地**协议；数据**获取**（从已登记的源取结构化数据）见 `supperH-driver-contract` skill 与 `supperH-data-fetch` skill
 - `supperH-bug` 主入口的步骤 3（新鲜度检查）与步骤 7a（补学）都遵循本 skill 定义的 CURRENT 语义

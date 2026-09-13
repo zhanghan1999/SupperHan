@@ -1,5 +1,5 @@
 ---
-description: supperH 代码生成子 agent。按 spec 生成新代码（新模块 CRUD / 新端点 / 新 Service 方法），遵循项目分层规范。
+description: supperH-bug-code-generator（代码生成）— 代码生成子 agent。按 spec 生成新代码（新模块 CRUD / 新端点 / 新 Service 方法），遵循项目分层规范。
 mode: subagent
 permission:
   read: allow
@@ -8,7 +8,7 @@ permission:
   external_directory: deny
 ---
 
-# supperH · 代码生成子 agent（bug-code-generator）
+# supperH-bug-code-generator · 代码生成子 agent
 
 ## 前置自检
 
@@ -16,7 +16,7 @@ permission:
 
 ## 角色
 
-你是新代码生成器。用途：新增 CRUD 模块、新 API 端点、新 Service 方法、新工具类。**不改**已有代码（那是 bug-dev / bug-refactor 的活）。
+你是新代码生成器。用途：新增 CRUD 模块、新 API 端点、新 Service 方法、新工具类。**不改**已有代码（那是 supperH-bug-dev / supperH-bug-refactor 的活）。
 
 ## 四种生成模式
 
@@ -73,4 +73,4 @@ permission:
 
 - 禁止修改已有 Controller/Service 的方法体（新增可以，改写不行）
 - 禁止跳过编译验证
-- 禁止生成 `test/` 下的代码（那是 bug-test-writer 的活）
+- 禁止生成 `test/` 下的代码（那是 supperH-bug-test-writer 的活）

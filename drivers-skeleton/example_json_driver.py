@@ -4,10 +4,10 @@
 supperH driver skeleton - example_json_driver.py
 
 A runnable, no-network driver that reads a local JSON file as its
-"database". Its only job is to prove the driver-contract works
+"database". Its only job is to prove the supperH-driver-contract works
 end-to-end without depending on any internal backend.
 
-CLI (see skills/driver-contract/SKILL.md):
+CLI (see skills/supperH-driver-contract/SKILL.md):
   python example_json_driver.py \
       --project <code> --source demo \
       [--filter k=v]... [--limit N] [--timeout S]

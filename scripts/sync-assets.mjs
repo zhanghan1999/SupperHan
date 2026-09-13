@@ -18,7 +18,9 @@
 //      dist/ still matches the sources (exit 4 on stale / missing / orphan files),
 //      that the MCP registration kept its shape (no absolute paths, shell present),
 //      and that no L2 fact / local absolute path leaked into the uploaded text
-//      (exit 5 either way - a leak blocks the build, not just the check)
+//      (exit 5 either way - a leak blocks the build, not just the check),
+//      and that every agent/command/skill identifier carries the supperH- namespace
+//      (exit 7 - same-name assets from another plugin would silently shadow ours)
 //   8. optional install-to-qoder (best-effort; guarded by env var SKIP_QODER_INSTALL=1)
 
 import fs   from 'node:fs';
@@ -27,6 +29,7 @@ import os   from 'node:os';
 import YAML from 'yaml';
 import { pathToFileURL } from 'node:url';
 import { resolvePrivateRoot } from './resolve-private-root.mjs';
+import { NS, ASSET_NAME_RE, LEGACY_NAMES, legacyRe } from './asset-names.mjs';
 
 const TOOL_ROOT_DEFAULT = path.resolve(import.meta.dirname, '..');
 const PLUGIN_NAME = 'supper-Han-java-plugin';
@@ -489,6 +492,84 @@ function printEol(list, tag) {
   console.error(`${tag} run: node scripts/sync-assets.mjs --fix-eol`);
 }
 
+// ---- 撞面门禁：资产标识符必须带命名空间前缀 --------------------------------
+// 起因是实测事故，不是洁癖：agent 名 = agents/<stem>.md 的文件名 stem（frontmatter 里没有
+// name: 字段可依赖），skill 名 = SKILL.md 的 name: + 目录名。这两类标识符在 IDE 侧落在
+// **全局命名空间**里，本机同时 enabled 两个插件（本仓 + 一个历史遗留插件）时，两边导出了
+// 11 个同名 agent + 2 个同名 skill —— 谁被加载由加载顺序决定，且**没有任何报错**。
+// 后果是"测试全绿而保护为零"：红线 R2 的写入锚点与只读守卫写在我们这边的文件里，
+// 运行期实际派发的却是对面那份同名文件。commands 从未撞上，因为文件名一直带 supperH- 前缀。
+// 前缀就是这套资产的名字空间，本门禁保证它是真约束而不是巧合。
+//
+// 四条判据里前两条**不依赖改名映射表**（表只承载历史名）：新增资产忘登记不会被"表里有名字"糊过去。
+//   1. agents/ commands/ 里每个 .md 的 stem、skills/ 里每个目录名都要匹配 ASSET_NAME_RE；
+//   2. skills/<dir>/SKILL.md 的 frontmatter name: 必须等于 <dir>——不相等时加载方按哪个认不确定；
+//   3. 三个目录都不许空（空目录 = 资产被误删，dist 会烤出一个"没有 agent 的插件"，
+//      而 sync 本身一切正常）；
+//   4. 历史裸名不得再出现在运行期加载目录（agents/ commands/ skills/ .qoder/）。这条**用的
+//      就是那张历史表**，因为它判的是"当初改掉的名字有没有回来"；文档/脚本/测试不在内，
+//      它们要保留"旧名 → 新名"这段历史的可读性。
+export function namespaceProblems(toolRoot) {
+  const problems = [];
+  const rel = (p) => p.split(path.sep).join('/');
+
+  for (const d of ['agents', 'commands']) {
+    const dir = path.join(toolRoot, d);
+    const stems = fs.existsSync(dir)
+      ? fs.readdirSync(dir).filter((f) => /\.(md|markdown)$/i.test(f)).map((f) => f.replace(/\.[^.]+$/, ''))
+      : [];
+    if (!stems.length) { problems.push({ kind: 'empty', file: d + '/' }); continue; }
+    for (const s of stems) if (!ASSET_NAME_RE.test(s)) problems.push({ kind: 'prefix', file: `${d}/${s}.md` });
+  }
+
+  const skillsDir = path.join(toolRoot, 'skills');
+  const skillDirs = fs.existsSync(skillsDir)
+    ? fs.readdirSync(skillsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+    : [];
+  if (!skillDirs.length) problems.push({ kind: 'empty', file: 'skills/' });
+  for (const d of skillDirs) {
+    if (!ASSET_NAME_RE.test(d)) problems.push({ kind: 'prefix', file: 'skills/' + d + '/' });
+    const f = path.join(skillsDir, d, 'SKILL.md');
+    if (!fs.existsSync(f)) { problems.push({ kind: 'noskill', file: 'skills/' + d + '/SKILL.md' }); continue; }
+    const fm = readText(f).match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    const nm = fm && fm[1].match(/^name:[ \t]*(.+?)[ \t]*$/m);
+    if (!nm) problems.push({ kind: 'noname', file: 'skills/' + d + '/SKILL.md' });
+    else if (nm[1] !== d) problems.push({ kind: 'mismatch', file: 'skills/' + d + '/SKILL.md', got: nm[1] });
+  }
+
+  const legacyDirs = ['agents', 'commands', 'skills', '.qoder'];
+  for (const d of legacyDirs) {
+    const dir = path.join(toolRoot, d);
+    if (!fs.existsSync(dir)) continue;
+    for (const full of walk(dir)) {
+      if (!TEXT_EXT.has(path.extname(full).toLowerCase())) continue;
+      const names = [];
+      readText(full).split(/\r?\n/).forEach((l, i) => {
+        for (const n of LEGACY_NAMES) {
+          if (legacyRe(n).test(l)) names.push(`:${i + 1} ${n}`);
+        }
+      });
+      if (names.length) problems.push({ kind: 'legacy', file: rel(path.relative(toolRoot, full)), names });
+    }
+  }
+  return problems;
+}
+
+/** 两条阻断路径共用：把 namespaceProblems 的清单打成人话 + 给出修复动作。 */
+function printNamespace(list, tag) {
+  console.error(`${tag} 资产命名空间不合规（撞面风险，全部拦死）：`);
+  for (const p of list) {
+    if (p.kind === 'prefix')   console.error(`  ${p.file}: 标识符必须匹配 ${ASSET_NAME_RE.source}`);
+    else if (p.kind === 'empty')    console.error(`  ${p.file}: 目录里没有资产——上传物被烤成空壳，先确认是不是误删`);
+    else if (p.kind === 'noskill')  console.error(`  ${p.file}: skill 目录缺 SKILL.md`);
+    else if (p.kind === 'noname')   console.error(`  ${p.file}: frontmatter 没有 name: 字段，加载方只能猜`);
+    else if (p.kind === 'mismatch') console.error(`  ${p.file}: name: ${p.got} 与目录名不相等`);
+    else console.error(`  ${p.file}: 出现退役裸名 ${p.names.join(' ')}`);
+  }
+  console.error(`${tag} 根因：agent/skill 名在 IDE 侧是全局命名空间，同名资产的加载顺序不由我们决定。`);
+  console.error(`${tag} 修法：文件名 / 目录名 / SKILL.md 的 name: 三处统一加 ${NS} 前缀，旧裸名不留别名。`);
+}
+
 /** 整条纯度扫描的入口：读注册表 + 列上传物 + 求违规。测试直接拿它断言“真仓库当前干净”。 */
 export function checkL1Purity(toolRoot, info, allow = []) {
   const facts = [];
@@ -643,6 +724,12 @@ function main() {
       printEol(eol, '[sync --check]');
       process.exit(6);
     }
+    const ns = namespaceProblems(info.toolRoot);
+    if (ns.length) {
+      printNamespace(ns, '[sync --check]');
+      console.error('[sync --check] BLOCKING. 这种 dist 装出去，同名资产会被别的插件顶掉且不报错。');
+      process.exit(7);
+    }
     const distDir = path.join(info.toolRoot, 'dist', PLUGIN_NAME);
     // A fresh clone has no dist/ at all (it is git-ignored). That is "not built yet",
     // not "built from stale sources" - only the latter is worth blocking on.
@@ -664,7 +751,7 @@ function main() {
       console.error('[sync --check] BLOCKING. run: node scripts/sync-assets.mjs');
       process.exit(4);
     }
-    console.log('[sync --check] OK: 0 residual placeholders; L1 purity clean; EOL uniform; dist matches sources; mcp registration valid');
+    console.log('[sync --check] OK: 0 residual placeholders; L1 purity clean; EOL uniform; asset namespace clean; dist matches sources; mcp registration valid');
     process.exit(0);
   }
 
@@ -678,6 +765,12 @@ function main() {
   if (eol.length) {
     printEol(eol, '[sync]');
     process.exit(6);
+  }
+  const ns = namespaceProblems(info.toolRoot);
+  if (ns.length) {
+    printNamespace(ns, '[sync]');
+    console.error('[sync] BLOCKING. 先补齐命名空间，再烤 dist。');
+    process.exit(7);
   }
   const distDir = ensureDist(info.toolRoot);
   for (const d of COPY_DIRS) {

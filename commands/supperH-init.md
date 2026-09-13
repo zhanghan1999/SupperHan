@@ -59,7 +59,7 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --scan --cwd "<你的工作区绝�
 
 **2.2 只对被选中的东西采字段**
 
-- 选了接库 → 采集 `dbFieldsIfConnected` 六项：`db.host`、`db.port`、`db.schemas.test`、`db.schemas.uat`、`db.schemas.prod`、`db.readonlyUser`。**六项全要**：缺任意一项，落盘阶段以退出码 2（`connection-choices-incomplete`）拦下并逐项点名缺什么 —— 脚本不补默认值，因为没答上来的字段若沿用模板文本就会伪装成真凭据。少问的那一项是 `db.writableUser`：它不是“这次先不填”，是**数据库通道无条件只读**，一个写账号问题从此没有合法答案（要变更数据请产出 SQL 工件，见 `skills/driver-contract/SKILL.md` §SQL 工件契约）。
+- 选了接库 → 采集 `dbFieldsIfConnected` 六项：`db.host`、`db.port`、`db.schemas.test`、`db.schemas.uat`、`db.schemas.prod`、`db.readonlyUser`。**六项全要**：缺任意一项，落盘阶段以退出码 2（`connection-choices-incomplete`）拦下并逐项点名缺什么 —— 脚本不补默认值，因为没答上来的字段若沿用模板文本就会伪装成真凭据。少问的那一项是 `db.writableUser`：它不是“这次先不填”，是**数据库通道无条件只读**，一个写账号问题从此没有合法答案（要变更数据请产出 SQL 工件，见 `skills/supperH-driver-contract/SKILL.md` §SQL 工件契约）。
 - 用户主动要在这次一并登记某个源（少见）→ 每个源采 `desc` / `impl` / `healthCheck` 三项（`driverFieldsIfConnected`），**槽位名由用户自己起**（判据见 `connectNaming.pattern`：字母开头、可含数字/下划线/连字符、长度 ≤ 40）。`desc` 不可省：L1 不再知道任何槽位名，那句话是以后判定“这个源是干什么的”的唯一线索。`healthCheck` 必须真说协议（见 `schemas/project.example.yaml` 注释）：拿 `ping`/裸 TCP 当判据等于没判据。
 - 一个都不接 → **不问任何 `db.*` / `drivers.*` 字段**，直接进步骤 3。
 

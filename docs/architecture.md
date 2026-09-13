@@ -123,8 +123,8 @@ node scripts/sync-assets.mjs
 | 换菜单来源（database ↔ code） | 只改 `{{PRIVATE_ROOT}}/menus/<code>.yaml` | L1 不动；不必重新注册项目 |
 | 换一个人使用 | 只改 L3（prefs.md） | L1/L2 不动 |
 | 学完新代码 → 学习数据更新 | 只写 `{{CONTEXT_ROOT}}/` | L1 不动 |
-| 加一个新内网数据源 | 在 L2 `drivers.*` 注册 + 在 `{{DRIVERS_ROOT}}/` 写实现 | L1 的 agent 一行不改（因为它们只依赖 `driver-contract`）|
-| 某个源改走 MCP 通道 | 只改 L2 `drivers.<slot>.kind: mcp` + `mcp.sources` 白名单，重跑 `/supperH-init` 探测 | L1 不改；IDE 注册表不改（只有一条壳）；agent 提示词不写通道分支（通道由 `data-fetch` resolve 段机械选定）|
+| 加一个新内网数据源 | 在 L2 `drivers.*` 注册 + 在 `{{DRIVERS_ROOT}}/` 写实现 | L1 的 agent 一行不改（因为它们只依赖 `supperH-driver-contract`）|
+| 某个源改走 MCP 通道 | 只改 L2 `drivers.<slot>.kind: mcp` + `mcp.sources` 白名单，重跑 `/supperH-init` 探测 | L1 不改；IDE 注册表不改（只有一条壳）；agent 提示词不写通道分支（通道由 `supperH-data-fetch` resolve 段机械选定）|
 | 发现 L1 的 agent 里漏了个通用规则 | 提 PR 到本仓库 | L2/L3 不动 |
 | 发现 L1 里出现了具体产品名 | **红线违反** —— 立即改回占位符 + sync 会阻断 | — |
 
@@ -135,21 +135,21 @@ node scripts/sync-assets.mjs
 | 权限 | 默认 | 例外 |
 |------|------|------|
 | `read` | allow | — |
-| `edit` | deny | bug-dev / bug-refactor / bug-code-optimizer / bug-code-generator / bug-mybatis-optimizer / prelearn-writer / supperH-bootstrap |
-| `bash` | deny | bug-tester / bug-analyzer / prelearn-* / bootstrap / setup / supperH-bug 主入口（**仅** `resolve-project.mjs` 这一个脚本，可按不同参数多次调用） |
-| `external_directory` | **deny** | **仅** prelearn-writer（写 `{{CONTEXT_ROOT}}`）+ driver-author（写 `{{DRIVERS_ROOT}}`）+ supperH-bootstrap（建私有根）+ supperH-init（写 `projects/` 与 `menus/` 条目）+ supperH-setup（写 IDE 加载目录）|
-| `mcpServers`（取数工具） | **不绑** | **仅** 4 个只读/测试类子 agent：bug-analyzer / bug-tester / bug-test-writer / prelearn-analyzer（均只绑壳 `supperh-drivers`）|
+| `edit` | deny | supperH-bug-dev / supperH-bug-refactor / supperH-bug-code-optimizer / supperH-bug-code-generator / supperH-bug-mybatis-optimizer / supperH-prelearn-writer / supperH-bootstrap |
+| `bash` | deny | supperH-bug-tester / supperH-bug-analyzer / prelearn-* / bootstrap / setup / supperH-bug 主入口（**仅** `resolve-project.mjs` 这一个脚本，可按不同参数多次调用） |
+| `external_directory` | **deny** | **仅** supperH-prelearn-writer（写 `{{CONTEXT_ROOT}}`）+ supperH-driver-author（写 `{{DRIVERS_ROOT}}`）+ supperH-bootstrap（建私有根）+ supperH-init（写 `projects/` 与 `menus/` 条目）+ supperH-setup（写 IDE 加载目录）|
+| `mcpServers`（取数工具） | **不绑** | **仅** 4 个只读/测试类子 agent：supperH-bug-analyzer / supperH-bug-tester / supperH-bug-test-writer / supperH-prelearn-analyzer（均只绑壳 `supperh-drivers`）|
 
 `external_directory: allow` 是**跨越 workspace 边界**的能力，全仓库只放开 **2 个 subagent + 4 个 command**。这六个的 prompt 里都写死了路径前缀自检（名单同时钉在 `tests/agent-permissions.test.mjs` —— 只改本文不改进代码里的名单，测试会先红）：
 
-- `prelearn-writer`：`filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头 + 匹配 `<known-module>/gen-<ts>/(batch-NN.md | index.md | CURRENT)`；违反报 `WRITE_BOUNDARY_VIOLATION`
-- `driver-author`：`filePath` 必须以 `{{DRIVERS_ROOT}}/` 开头（凭据只额外允许 `.secrets/*.local.json`）；不得碰注册表 YAML、L1 仓库、代码工作区；违反同样报 `WRITE_BOUNDARY_VIOLATION`。不绑壳 server（它是造驱动的，不是用数据的）
+- `supperH-prelearn-writer`：`filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头 + 匹配 `<known-module>/gen-<ts>/(batch-NN.md | index.md | CURRENT)`；违反报 `WRITE_BOUNDARY_VIOLATION`
+- `supperH-driver-author`：`filePath` 必须以 `{{DRIVERS_ROOT}}/` 开头（凭据只额外允许 `.secrets/*.local.json`）；不得碰注册表 YAML、L1 仓库、代码工作区；违反同样报 `WRITE_BOUNDARY_VIOLATION`。不绑壳 server（它是造驱动的，不是用数据的）
 - `supperH-bootstrap`：只允许在 `<TOOL_ROOT>/../supper-Han-private/` 下 mkdir / 写文件；不允许在本仓库内创建私有根
 - `supperH-init`：只允许写私有根下的注册文件（`projects/<code>.yaml` + `menus/<code>.yaml`）与 `context/<code>` `tasks/<code>` 目录骨架；实际写盘动作全部在 `scripts/init-project.mjs --write` 里完成，命令本身不手改 YAML
 - `supperH-driver`：写盘全部经 `scripts/driver-registry.mjs`（先备份 + 先在内存过 schema + 探活不过不落盘）；临时 values JSON 也不得落到私有根之外
 - `supperH-setup`：只允许写 `~/.qoder-cn/plugins/cache/local/supper-Han-java/` + `~/.config/opencode/{agent,command,skill}/` + `<PRIVATE_ROOT>/dist-portable/`；禁止修改用户 IDE 里 supper-Han-java 以外的插件目录
 
-**为什么是两个而不是一个**（曾评估“把写驱动并入 prelearn-writer 以保住数字”并否决）：`external_directory` 是布尔开关而不是目录白名单 —— 拿到 allow 的那一刻它覆盖整个私有根，“只能写 context/”从来只是提示词里的自检。所以并职责**不缩小硬面**，只会把边界判据从“路径必须以某前缀开头”（无分支）退化成“先本次是哪种模式、再查对应前缀”（含分支）—— 那等于把边界交还给模型判断，与本仓库“确定性门禁优于模型判断”相反。真正缩小硬面的做法是默认不携带该 agent（用完再装），代价是命令层多一条“探测 agent 装了没”的脆弱路径；本仓库本来就有 4 个 command 带 allow，“这套工具就是要往私有根写东西”是既定事实，故取“名单显式登记 + 机械测试卡住新增”而非“默认不装”。派 `driver-author` 前必须先征得用户当次同意（写进 `commands/supperH-driver.md` 步骤 2）。
+**为什么是两个而不是一个**（曾评估“把写驱动并入 supperH-prelearn-writer 以保住数字”并否决）：`external_directory` 是布尔开关而不是目录白名单 —— 拿到 allow 的那一刻它覆盖整个私有根，“只能写 context/”从来只是提示词里的自检。所以并职责**不缩小硬面**，只会把边界判据从“路径必须以某前缀开头”（无分支）退化成“先本次是哪种模式、再查对应前缀”（含分支）—— 那等于把边界交还给模型判断，与本仓库“确定性门禁优于模型判断”相反。真正缩小硬面的做法是默认不携带该 agent（用完再装），代价是命令层多一条“探测 agent 装了没”的脆弱路径；本仓库本来就有 4 个 command 带 allow，“这套工具就是要往私有根写东西”是既定事实，故取“名单显式登记 + 机械测试卡住新增”而非“默认不装”。派 `supperH-driver-author` 前必须先征得用户当次同意（写进 `commands/supperH-driver.md` 步骤 2）。
 
 MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在被约束的下游**。R3.5 的窄 bash 白名单已经规定「其它任何编译/DB/网络命令（包括跑 driver）仍必须派子 agent」；若把壳 server 绑到主 agent 或命令入口，等于开一条绕过该约束的外连直道。因此 `supperh-drivers` 只出现在 4 个只读/测试类子 agent 的 frontmatter 里，主入口只消费结构化结果。（门禁、编译、GC、写文件、扫码登录类动作**永不 MCP 化**，理由见 §10.2。）
 
@@ -157,11 +157,11 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 
 | 冲突 | 表现 | 本仓库解法 |
 |------|------|-----------|
-| C1 权限 `external_directory: deny` × 私有根在 workspace 外 | 学习数据写不到私有根；驱动脚本也写不到；IDE 装目录也在 workspace 外 | 只放开 `prelearn-writer` + `driver-author` 两个 subagent 与 `supperH-bootstrap` + `supperH-init` + `supperH-driver` + `supperH-setup` 四个 command；其它保持 deny；六者 prompt 内置路径前缀自检 + `WRITE_BOUNDARY_VIOLATION` 兜底；名单机械锁在 `tests/agent-permissions.test.mjs` |
+| C1 权限 `external_directory: deny` × 私有根在 workspace 外 | 学习数据写不到私有根；驱动脚本也写不到；IDE 装目录也在 workspace 外 | 只放开 `supperH-prelearn-writer` + `supperH-driver-author` 两个 subagent 与 `supperH-bootstrap` + `supperH-init` + `supperH-driver` + `supperH-setup` 四个 command；其它保持 deny；六者 prompt 内置路径前缀自检 + `WRITE_BOUNDARY_VIOLATION` 兜底；名单机械锁在 `tests/agent-permissions.test.mjs` |
 | C2 git worktree × context 位置 | worktree 切分支时 context 该跟着哪个 root？ | context 落 `{{PRIVATE_ROOT}}/context/`，**与 worktree 解耦**；worktree 只影响 `effectiveRoot`（读源码路径），不影响学习数据落地 |
 | C3 权限树无参数级校验 | `bash: allow` 允许任何 shell 命令，防不住 `rm` | sync 阶段的**占位符残留阻断**（进程级），不依赖 prompt；agent preamble 里做二级兜底 |
 | C4 Qoder plugin 禁 `..` 路径 | 私有根 = `<TOOL_ROOT>/../supper-Han-private`，含 `..` | sync 时把 `{{PRIVATE_ROOT}}` 等替换成绝对路径后写入 dist；plugin 里只出现绝对路径，自包含 |
-| C5 门禁要读 `CONTEXT_ROOT/index.md` + `git rev-parse HEAD`，但主 agent 与 `bug-analyzer` 均 `external_directory: deny`、bash 窄白名单 | 若把"能不能走快路径"交给 LLM，等于要求它使用两类自己根本没有的能力做判断 | **不改权限**，把判定下沉进 node 进程（`resolve-project.mjs` 在进程内读私有根 + `execFileSync` 取 HEAD），结果以 JSON 返回、退出码传信号；详见 §10.1 |
+| C5 门禁要读 `CONTEXT_ROOT/index.md` + `git rev-parse HEAD`，但主 agent 与 `supperH-bug-analyzer` 均 `external_directory: deny`、bash 窄白名单 | 若把"能不能走快路径"交给 LLM，等于要求它使用两类自己根本没有的能力做判断 | **不改权限**，把判定下沉进 node 进程（`resolve-project.mjs` 在进程内读私有根 + `execFileSync` 取 HEAD），结果以 JSON 返回、退出码传信号；详见 §10.1 |
 
 ## 7. 学习数据分区结构
 
@@ -182,9 +182,9 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 演进规则：
 
 - 每次重学 → 新代目录（copy-on-write） → 原子切 `CURRENT`（tmp + rename）
-- 保留最近 2 代；N-2 及更早由 **prelearn 惰性 GC**（agent 切 `CURRENT` 时顺手回收 + 24h 后物理删除），**sync 不做任何 GC**（旧版本文档误标；sync 全文只把 `CONTEXT_ROOT` 当 runtime token 处理）
+- 保留最近 2 代；N-2 及更早由 **supperH-prelearn 惰性 GC**（agent 切 `CURRENT` 时顺手回收 + 24h 后物理删除），**sync 不做任何 GC**（旧版本文档误标；sync 全文只把 `CONTEXT_ROOT` 当 runtime token 处理）
 - 保留分区 `menu`：菜单学习（`/supperH-learn --menu`）产物，`index.md` frontmatter 带 `kind: menu`；与业务模块分区共用同一套 CURRENT/gen 不变量
-- 详见 `skills/prelearn/SKILL.md`
+- 详见 `skills/supperH-prelearn/SKILL.md`
 
 ## 8. Skill vs Agent vs Command 的分工
 
@@ -194,9 +194,9 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 | **Agent**（subagent） | 执行体 | 主 agent 通过 `task` 工具派发 | 有；各自 permission 段严格限定 |
 | **Skill** | 协议知识 | 被 command/agent 加载为 prompt 上下文 | 无；纯文档 |
 
-- 一份 skill 通常被多个 agent 引用（`data-fetch` 是所有需要数据的 agent 的公共协议）
+- 一份 skill 通常被多个 agent 引用（`supperH-data-fetch` 是所有需要数据的 agent 的公共协议）
 - 一个 command 只服务一个用户意图（`/supperH-bug` 只服务 bug 全流程）
-- 一个 agent 只承担一个角色（`bug-analyzer` 只分析不改代码）
+- 一个 agent 只承担一个角色（`supperH-bug-analyzer` 只分析不改代码）
 
 ## 9. sync 阶段的两级防御
 
@@ -218,7 +218,7 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 
 ### 10.1 为什么判定必须在脚本里
 
-- **权限事实**：主 agent 与 `bug-analyzer` 是 `external_directory: deny`，bash 只放开一条白名单——它**读不到** `CONTEXT_ROOT/index.md`，也**跑不了** `git rev-parse HEAD`。把“能不能走快路径”交给 LLM，等于要求它用两类自己没有的能力做判断（冲突点 C5）。
+- **权限事实**：主 agent 与 `supperH-bug-analyzer` 是 `external_directory: deny`，bash 只放开一条白名单——它**读不到** `CONTEXT_ROOT/index.md`，也**跑不了** `git rev-parse HEAD`。把“能不能走快路径”交给 LLM，等于要求它用两类自己没有的能力做判断（冲突点 C5）。
 - **成本不对称**：漏杀（该慢走快）= 线上回归且当场不可见；误杀（该快走慢）= 多花几十秒。所以所有不确定路径一律保守出局，而这必须是**代码里写死的保守**，不能是 prompt 里的“请谨慎判断”。
 - **可回归**：退出码能被 `tests/` 锁死；LLM 的一次判断无法固定，也就无法防漂移。
 
@@ -298,7 +298,7 @@ G0 anchorKind → G2 dataReady → G4a fresh(仓库级) → G1 unique → G4b fr
 - **否决词前置求值、但不决定短路顺序**：`vetoHits` 在函数顶部就算好，即使因数据过期先出局，也把真实命中面交给 jsonl——否则“描述里有否决词但因别的原因出局”的样本会被记成否决未命中，词表命中率被系统性低估，日后调参会往松的方向偏。
 - **veto 放最后一道**：G2/G4/G1/G3 的失败原因比“你没传 `--text`”更可行动。但走到这里仍缺 `--text` 时返回 36 而非 0。
 - **I0 排在 veto 之后、G5 之前**：它是唯一一条"判了也不改变分流"的门禁 —— 通过与否都是"继续"，不通过时停下来问人。放这么晚与 veto 后置同理：数据过期、锚点歧义这类原因更可行动，不能让"你没听懂"抢在前面报错。
-- **G5 分两段**：`evaluateFastPath` 只置 `gates.G5_impact = 'pending_agent'`（它没读源码，无法算影响半径）；真正的 G5 判定在第二次调用里由 `verifyImpactReport` 完成——把 `bug-analyzer(lite)` 回报回灌 `--impact-json`。**脚本只能验回报形状（shape），信它的结论但验它的格式，所以 G5 永久弱于 G1–G4。**
+- **G5 分两段**：`evaluateFastPath` 只置 `gates.G5_impact = 'pending_agent'`（它没读源码，无法算影响半径）；真正的 G5 判定在第二次调用里由 `verifyImpactReport` 完成——把 `supperH-bug-analyzer(lite)` 回报回灌 `--impact-json`。**脚本只能验回报形状（shape），信它的结论但验它的格式，所以 G5 永久弱于 G1–G4。**
 
 ### 10.5 阈值与硬上限
 
@@ -345,7 +345,7 @@ G0 anchorKind → G2 dataReady → G4a fresh(仓库级) → G1 unique → G4b fr
 2. **`healthCheck` 必须说真协议**：DB 用配置账号真连一次；HTTP 拿到任意状态行即算服务在场（`401/403` → exit 4，只缺凭据；拒连 / 超时 → exit 3）。禁止 ping / 网卡名 / 裸 connect 当判据。预算：单端点 ≤8s、总 ≤20s、多端点并行、绝不卡死 —— 预算**不能按热连接定**：同一个 HTTPS 端点冷启动首次 TLS 握手经隧道 >3s（拿 3s 做预算会假阻断），预热后只耗 0.2s。HTTP 类可直接用 L1 提供的 `http_health()`（`drivers-skeleton/base_driver.py`）。
 3. **拿不到证据时的义务**：exit 3 / 4 → 停止该源取数，把**目标端点 + 错误原文**交给用户要求可连接环境；不猜 VPN 状态、不自动重试、不换网络再跑，更不得把「拿不到数据」写成「没有数据」。
 
-退场兼容：`drivers` 段是 `additionalProperties: false`，直接删掉 `vpnPreCheck` 键会让已注册项目一夜之间 exit 2 全挂 —— 所以 schema **保留该键**，`node scripts/validate-project.mjs` 对它发**废弃警告（不阻断）**，运行期（init 探测 / data-fetch / driver 骨架）不再引用。与「legacy 单文件 `project.yaml` 仍可用但提示迁移」是同一条不变式。
+退场兼容：`drivers` 段是 `additionalProperties: false`，直接删掉 `vpnPreCheck` 键会让已注册项目一夜之间 exit 2 全挂 —— 所以 schema **保留该键**，`node scripts/validate-project.mjs` 对它发**废弃警告（不阻断）**，运行期（init 探测 / supperH-data-fetch / driver 骨架）不再引用。与「legacy 单文件 `project.yaml` 仍可用但提示迁移」是同一条不变式。
 
 怎么复现：对同一台内网主机分别做 `socket.create_connection()` 与一次 `urllib.request.urlopen()`，拿高位假端口（如 59999）与真实服务端口做对照。两类判据的差异在 0.1s 量级就能看出来：connect 对两者都秒回，HTTP 对前者报错、对后者返回状态行。**注意把实测结果记回本文档时只记方法与时序，不要把内网 IP / 端口号写进 L1**（红线：L1 无内网端点值）。
 
@@ -369,7 +369,7 @@ G0 anchorKind → G2 dataReady → G4a fresh(仓库级) → G1 unique → G4b fr
 - **环境不参与分流**：它不进 G 系列、不改任何退出码语义（除了把自己的非法值报成 36）。原因是环境不是“能不能走快路径”的条件，而是“结论归属于谁”的标签；拿它做分流会造出一个新的隐式门禁。
 - 记账：`diagnoseBaseline` 无效时落一行 `stage=baseline_gate`（否则账本分母缺一块），`anchor_gate` / `impact_gate` 两行都带 `diagnoseEnv`——没这一项就答不了“历史上那些快路径结论是在哪个环境上复核的”。
 
-下游义务（写进契约，不靠自觉）：`evidence[].kind == "data"` 的 `ref` 形状为 `<project>/<source>@<env>#<meta.syncTs>`；**跨环境的值不可互相佐证**（拿 prod 的一行去证 dev 分支上的代码逻辑 = 拿别人的现场证自己的结论）。“uat 与 prod 不一致”是合法结论，但两条证据必须各自带 `env`。取数侧的对应约束见 `skills/data-fetch/SKILL.md` §环境归属，分诊侧见 `skills/incident-triage/SKILL.md` §三条硬要求。
+下游义务（写进契约，不靠自觉）：`evidence[].kind == "data"` 的 `ref` 形状为 `<project>/<source>@<env>#<meta.syncTs>`；**跨环境的值不可互相佐证**（拿 prod 的一行去证 dev 分支上的代码逻辑 = 拿别人的现场证自己的结论）。“uat 与 prod 不一致”是合法结论，但两条证据必须各自带 `env`。取数侧的对应约束见 `skills/supperH-data-fetch/SKILL.md` §环境归属，分诊侧见 `skills/supperH-incident-triage/SKILL.md` §三条硬要求。
 
 ### 10.10 交付方式与回滚快照（git 侧安全模型）
 
@@ -383,7 +383,7 @@ AI 改代码天然比人快，所以**涉及修改的环节必须舍弃快捷性
 | `local-commit` | 当前分支 `git commit`（只含本次 `touched_files`），**不 push**；message 首行带 `task_id` | 给已经信任这套流程、但仍要求本地可 `revert` 的场景 |
 | `push-pr` | **一期拒绝执行**（`DELIVERY_UNSUPPORTED`），按 `none` 保留改动 | 外向 git 写操作不可逆且影响他人，不在任何自动化里放开 |
 
-两个字段（`deliveryMode` / `snapshotTtlDays`）是**运行期输入**，绝不允许烤进 L1 产物：不写 `{{PROJECT.git.deliveryMode}}` 占位符，改由 `resolve-project.mjs --preflight` 读出后随载荷递出，执行者（`bug-dev`）只消费递出来的值。与 `drivers.<slot>.kind` / `fallback` / `mcp` 同纪律（§3.3）。理由有两条：一是省掉"进 `docs/placeholders.md` 登记表 + 改值必须重跑 sync 与重启 IDE"的成本；二是**消除歧义**——"L2 里没写这一段"到底是 `none` 还是"由模型自己看着办"，必须由脚本给一个确定的答案，不能留给 LLM 推断。
+两个字段（`deliveryMode` / `snapshotTtlDays`）是**运行期输入**，绝不允许烤进 L1 产物：不写 `{{PROJECT.git.deliveryMode}}` 占位符，改由 `resolve-project.mjs --preflight` 读出后随载荷递出，执行者（`supperH-bug-dev`）只消费递出来的值。与 `drivers.<slot>.kind` / `fallback` / `mcp` 同纪律（§3.3）。理由有两条：一是省掉"进 `docs/placeholders.md` 登记表 + 改值必须重跑 sync 与重启 IDE"的成本；二是**消除歧义**——"L2 里没写这一段"到底是 `none` 还是"由模型自己看着办"，必须由脚本给一个确定的答案，不能留给 LLM 推断。
 
 #### 快照：`git stash create` + 隐藏 ref
 
@@ -414,14 +414,14 @@ git -C <effectiveRoot> checkout <sha> -- <path>
 
 - `refs/supperh/*` **归本项目独占**。任何清扫只允许遍历 `refs/supperh/snap/` 前缀，逐条 `git update-ref -d <ref>`；不碰该前缀之外的任何 ref，不跑 `git gc`。
 - 留存天数 = L2 `git.snapshotTtlDays`（缺省 7，`0` = 不自动清扫）。过期判定用 `git for-each-ref --format='%(refname)\t%(objectname)\t%(committerdate:unix)' refs/supperh/snap/` 的**提交时间**，不依赖 ref 名里的日期（名字只是 task_id，不是时间）。
-- 清扫落在 `resolve-project.mjs --preflight` 进程内。为什么不交给 `bug-dev`：主 agent 的 bash 是窄白名单（R3.5），而让 `bug-dev` 干就得给它 `update-ref -d`，把权限摊到最不该有删除能力的位置。脚本本来就已获准在 `effectiveRoot` 上跑 git（G4 取数），复用它是最小面。
+- 清扫落在 `resolve-project.mjs --preflight` 进程内。为什么不交给 `supperH-bug-dev`：主 agent 的 bash 是窄白名单（R3.5），而让 `supperH-bug-dev` 干就得给它 `update-ref -d`，把权限摊到最不该有删除能力的位置。脚本本来就已获准在 `effectiveRoot` 上跑 git（G4 取数），复用它是最小面。
 - **失败静默**：清扫失败不改变任何退出码、不阻断任务（残留 ref 只是占点磁盘，不影响正确性）。这与 §10.6 记账失败绝不分流是同一条纪律：卫生动作不许产生决策权。
 
 #### `--preflight` 只出本地事实
 
 `--preflight` 做的**不是**连通性预检——§10.8 已经论证过执行前预检能测到的都不是证据，那条结论对 git 侧同样成立。它只收集本地既成事实：当前分支、`HEAD`、脏文件集合、解析后的 `deliveryMode` 与 TTL、driver 槽位是否声明、快照 ref 清扫结果。**脏文件只记录、不阻断**：一期不做隔离，也没资格阻断用户自己的工作区。它与 `deliveryMode: none` 互相成就——正因为默认不 commit，任务开始时工作区脏不脏就直接决定了"这份 diff 里哪些行是我改的"。
 
-**修复执行阶段**（Plan→Apply→Verify→Deliver/Rollback）只有三处允许停下来问用户（封闭清单，见 `skills/auto-fix`）：脏文件命中本次 plan 的 `touched_files`、快照 ref 恢复失败、口径/分布对照查询取不到数据。其余一律只记录继续。理由很实际：**提问预算是稀缺资源**，掺进无价值的问题，整套机制会因为"太烦"被用户关掉。命令入口层另有三处（步骤 1 模块消歧、步骤 1.6 的 40、步骤 5 的多方案决策，见 §10.11）—— 两份清单各自封闭，合起来才是全流程的提问预算；任何一份想加条目都得先改本文档与红线。
+**修复执行阶段**（Plan→Apply→Verify→Deliver/Rollback）只有三处允许停下来问用户（封闭清单，见 `skills/supperH-auto-fix`）：脏文件命中本次 plan 的 `touched_files`、快照 ref 恢复失败、口径/分布对照查询取不到数据。其余一律只记录继续。理由很实际：**提问预算是稀缺资源**，掺进无价值的问题，整套机制会因为"太烦"被用户关掉。命令入口层另有三处（步骤 1 模块消歧、步骤 1.6 的 40、步骤 5 的多方案决策，见 §10.11）—— 两份清单各自封闭，合起来才是全流程的提问预算；任何一份想加条目都得先改本文档与红线。
 
 ### 10.11 意图复述 I0：唯一一条"判了也不分流"的门禁
 
@@ -441,7 +441,7 @@ G0–G5 全在回答"这个 bug 落在哪段代码"，没有一处在回答"用�
 - **`absent` 是字面量，不是"留空"**：`repro` 经常被用户省略，强制填非空的直接效果是奖励填空，而填出来的那句会被当成"用户确认过的前提"往下传。让它显式登记 `INTENT_ABSENT`（唯一合法写法，同义词不算 —— 判据要能机械复现）比让它被编造好。
 - **回显是 I0 的第二半，不是礼貌动作**：上面五条全部只验"引用逐字出自原话 + 两格真区分 + 症状句被引到"，结构性地拦不住"原话里确实有这句、但说的不是这件事"。那一半只能靠把复述打印回给用户看（`commands/supperH-bug.md` 步骤 1.6 的回显模板）。省掉回显 = 把猜测格式化了一遍就当作已确认。
 - **前置求值、不决定短路顺序**（与 veto 同纪律，§10.6）：`intentVerdict` 在 `evaluateFastPath` 顶部就算完，任何一次早退出的载荷里都带着它。这正是完整路径（空锚点）与 `fastPath.enabled:false`（L2 整体关闭）两种场景下仍能拿到机械判定的原因 —— 这两种情形**读 `fastPath.intent`，不读退出码**。
-- **随单下发**：复述不是"走完就丢"的一次性仪式。`intent` 三槽位要随派发下发给 `bug-analyzer`（`scope.mustAnswer` 写成 expected 与 actual 之差）与 `bug-dev`（动手前把 expected 写成可检验目标，完工时回报 `intent_check`）。不落执行层的意图判据，与没有判据只差一步。
+- **随单下发**：复述不是"走完就丢"的一次性仪式。`intent` 三槽位要随派发下发给 `supperH-bug-analyzer`（`scope.mustAnswer` 写成 expected 与 actual 之差）与 `supperH-bug-dev`（动手前把 expected 写成可检验目标，完工时回报 `intent_check`）。不落执行层的意图判据，与没有判据只差一步。
 
 ### 10.12 外部数据源是用户的选择，不是注册的硬前置
 
@@ -536,7 +536,7 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 | schema | `drivers` 改用 `patternProperties: "^[A-Za-z][A-Za-z0-9_-]{1,39}$"` → `driverSlot`，不列名字 | 形状与动作词表归 L1，名字与个数归 L2 |
 | 语义标记 | `role` 枚举只有一个值 `database` | 唯一有机器语义的槽位属性（写保护绑它），全项目最多一个（validate 拦） |
 | 人话描述 | `desc`：schema **不** required（存量文件不得一夜全灭），登记入口必填 + validate 逐槽位告警 | L1 判“这个源是干什么的”的唯一线索 |
-| 登记入口 | `commands/supperH-driver.md` + `scripts/driver-registry.mjs`（add/update/remove/list：先备份 → 内存过 schema → 探活不过不落盘）；驱动不存在时派 `driver-author` 先写实现 | 与 `/supperH-init` 解耦：init 只问“要不要先接一个”，源可多次添加 |
+| 登记入口 | `commands/supperH-driver.md` + `scripts/driver-registry.mjs`（add/update/remove/list：先备份 → 内存过 schema → 探活不过不落盘）；驱动不存在时派 `supperH-driver-author` 先写实现 | 与 `/supperH-init` 解耦：init 只问“要不要先接一个”，源可多次添加 |
 | 解析器 | 输出派生字段 `dbDriver`（`{slot, kind, impl, healthCheck}` 或 `null`；按 role 解，判定规则单点复用 `validate-project.mjs:dbRoleSlot`）；`preflight.driverSlots` 遍历实际键 | “没库”是值为 `null` 的可机械区分事实，不是一个解不开的 token |
 | 取数面 | MCP 壳工具收缩为 `db_query`（role: database）+ `query`（通用），`ROLE_OF_TOOL` 按 role 判 | 外连工具面与 role 语义一致，不再假设源的种类与数量 |
 
@@ -557,7 +557,7 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 **改了什么**：`db.writableUser` 与 `db.forbidWriteSchemas` 从 L2 契约退役；动作词表删掉 `sql_write`；
 两条通道的守卫改为「无条件只读 + 未知即拒 + 不比对库名」（`guards.select_only_guard` /
 `SELECT_only_guard`，判据逐字相同）。需要变更数据时唯一合法产物是一份交人工执行的 **SQL 工件**
-（六段，规范在 `skills/driver-contract/SKILL.md` §SQL 工件契约）。
+（六段，规范在 `skills/supperH-driver-contract/SKILL.md` §SQL 工件契约）。
 
 **为什么黑名单必须整个换掉**（三条实测事实，不是推演）：
 
@@ -578,7 +578,7 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 
 **代价（写下来，别装作没有）**：
 
-- `bug-tester` 的"需要写 DB 时用测试库自动验证"这条路径永久 `partial`：跑 `build.testCmd` 时测试经应用自己的
+- `supperH-bug-tester` 的"需要写 DB 时用测试库自动验证"这条路径永久 `partial`：跑 `build.testCmd` 时测试经应用自己的
   数据源连库，那条路不经过 L1 守卫。测试侧边界改由用例形态守（T4 类级 `@Transactional` / `@Rollback`）。
 - 写门禁从"运行期可放行"变成"永远不可放行"：改数据必须有人在场。这是本条的设计目的，也是它唯一的用处。
 - 存量 L2 条目里的两个退役键会变成校验错误（`checkRetiredWriteKeys`，exit 2），需人工删一次；init 不再采集
@@ -593,6 +593,100 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
   本机数出来的（`node scripts/validate-project.mjs` 会对“有 db 段但没有库通道”报警告），本仓不把这个
   数写进契约：它是 L2 事实，写进 L1 就会过期。
 
+### 10.18 资产标识符必须带命名空间前缀：11 个 subagent + 5 个 skill 全量改名（F-13）
+
+**改了什么**：`agents/` 11 个文件与 `skills/` 5 个目录整体加 `supperH-` 前缀（`bug-dev` → `supperH-bug-dev`），
+44 个文件 234 行引用同步改写（`git mv` 保留历史，16 条 rename 记录）；新增唯一真相表 `scripts/asset-names.mjs`
+（旧名映射 + 中文角色名 `ROLE_CN` + 标题单点 `headingFor()`）；`sync-assets.mjs` 新增撞面门禁
+`namespaceProblems()`，`--check` 与写模式都以 **exit 7** 阻断；新测试 `tests/asset-naming.test.mjs`（8 条）。
+旧裸名**不留别名**，一次性切断。每个资产的 `description` 与正文 H1 现在都写成 `标识符（中文角色名）`，
+派单侧（`commands/` + `.qoder/rules/` + `README.md`）首次提到某个资产时也必须带这个括号。
+
+**为什么这是安全缺陷而不是命名洁癖**（四条实测事实，不是假想风险）：
+
+| 事实 | 后果 |
+|---|---|
+| agent 名 = `agents/<stem>.md` 的文件名 stem，frontmatter 里**没有** `name:` 可依赖 | 名字由文件系统决定，改名表与门禁只能以文件名为准 |
+| skill 名 = `SKILL.md` 的 `name:` **加上**目录名，两者与 agent 名同落 IDE 的**全局命名空间** | 一台机器上两个 enabled 插件导出同名资产时，谁被加载取决于加载顺序 |
+| 本机当时同时 enabled 本插件与一个历史遗留插件，两边 **11 个 agent + 2 个 skill 逐字同名** | 撞面不是概率风险，是既成事实 |
+| 撞面**不产生任何报错**，那次会话实际派发的全是对面那份文件 | 刚收口的数据库只读守卫（§10.17）与红线 R2 的写入锚点，锁在**没被加载**的文件上 |
+
+最刺人的是最后一行：`node --test` 全绿、dist 烤得整整齐齐，而运行期保护为零。根因是**两套真相源**——
+测试读的是仓库工作副本，IDE 加载的是插件安装目录，两边同名不同物时没有任何一层会发现。
+commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前缀：同仓内的反证比任何外部论据都硬。
+**前缀就是这套资产的名字空间**，本条做的事是把它从巧合变成约束。
+
+**名录（旧裸名 → 新标识符 → 中文角色名）**：这张表由 `scripts/asset-names.mjs` 与 16 个资产的
+`description` 现场生成，与 `tests/asset-naming.test.mjs` 的"集合相等"判据同源，不会各说各话。
+
+| 类型 | 旧裸名 | 新标识符 | 中文角色名 | 自我声明首句 |
+|---|---|---|---|---|
+| subagent | `bug-analyzer` | `supperH-bug-analyzer` | 代码分析 | 多维度代码分析子 agent |
+| subagent | `bug-code-generator` | `supperH-bug-code-generator` | 代码生成 | 代码生成子 agent |
+| subagent | `bug-code-optimizer` | `supperH-bug-code-optimizer` | 代码优化 | 代码优化子 agent |
+| subagent | `bug-dev` | `supperH-bug-dev` | 开发 | 通用开发子 agent |
+| subagent | `bug-mybatis-optimizer` | `supperH-bug-mybatis-optimizer` | Mapper 优化 | MyBatis Mapper 优化子 agent |
+| subagent | `bug-refactor` | `supperH-bug-refactor` | 重构 | 结构性重构子 agent |
+| subagent | `bug-test-writer` | `supperH-bug-test-writer` | 测试编写 | 测试编写子 agent |
+| subagent | `bug-tester` | `supperH-bug-tester` | 测试执行 | 通用测试子 agent |
+| subagent | `driver-author` | `supperH-driver-author` | 驱动编写 | 驱动编写子 agent（探索型） |
+| subagent | `prelearn-analyzer` | `supperH-prelearn-analyzer` | 预学习读码 | 预学习-深度学习子 agent |
+| subagent | `prelearn-writer` | `supperH-prelearn-writer` | 预学习落笔 | 预学习-上下文落地子 agent |
+| skill | `auto-fix` | `supperH-auto-fix` | 修复协议 | 修复协议骨架 skill |
+| skill | `data-fetch` | `supperH-data-fetch` | 取数协议 | 统一数据获取协议 skill |
+| skill | `driver-contract` | `supperH-driver-contract` | 驱动契约 | 驱动契约 skill |
+| skill | `incident-triage` | `supperH-incident-triage` | 现象分诊 | 现象分诊协议 |
+| skill | `prelearn` | `supperH-prelearn` | 预学习统筹 | 预学习统筹 skill |
+
+**三条设计决定**：
+
+- **只加前缀，不重排语义**：`bug-analyzer` → `supperH-bug-analyzer`，而不是 `supperH-analyzer`。
+  `bug-` / `prelearn-` 这段承载"属于哪条工作流"的信息，去掉它等于在改名之外顺手做一次重命名——
+  一次提交里混两种变化，回归就无法逐条核对（本轮改动面已有 44 个文件，不需要再加一种自由度）。
+- **不留别名、不留软链**：留旧名等于把撞面本身留着——遮蔽本插件的那份文件用的正是旧名。
+  两条清理路径实测都够硬：OpenCode 侧按 `supperh-installed.json` **清单式**删除自己放的文件
+  （改过名的副本会被清掉，用户自有文件不动），Qoder 侧整目录重建（`rm` + copy）。
+- **标识符只用 ASCII，角色名只进文案**：中文名要穿 `sync → dist → 插件缓存 → IDE 全局目录` 四段链路，
+  任何一段对非 ASCII 文件名的处理不一致，失败方式都是"静默解析不到"——正是本次要治的那个病。
+  所以"开发 / 重构 / 取数协议"这类角色名只出现在 `description`、正文 H1 与派单文案里，不进文件名。
+
+**角色名怎么起**（需求方当场补的另一半：重命名只解决撞面，"这名字到底干什么"是同一个改名的另一半）：
+判据是"一句话说清它干什么、且与邻居不重叠"，不是翻译标识符。`supperH-bug-tester` 叫"测试执行"而
+`supperH-bug-test-writer` 叫"测试编写"——起反了两个人都会派错。角色名里不掺 `·` 之类的额外分隔符：
+它会直接拼进标题（`# <标识符> · <角色>子 agent`），一个标题里两个中点就分不清哪段是角色了。
+
+**机械锁（四条，全部验过会红）**：
+
+| 锁 | 判据 |
+|---|---|
+| `sync-assets.mjs` → `namespaceProblems()` → **exit 7** | 四条：① `agents/` `commands/` 每个 `.md` 的 stem 与 `skills/` 每个目录名匹配 `^supperH-[a-z0-9][a-z0-9-]*$`；② `skills/<dir>/SKILL.md` 的 `name:` 必须等于 `<dir>`（`mismatch`），缺 `name:` 也算红（`noname`）；③ 三个资产目录都不许空（`empty`——空目录会把 dist 烤成"没有 agent 的插件"而 sync 自己一切正常）；④ `LEGACY_NAMES` 不得再出现在运行期加载目录 `agents/ commands/ skills/ .qoder/`（`legacy`） |
+| `tests/asset-naming.test.mjs` 集合相等 | 目录里的资产集合 == `AGENT_IDS` / `SKILL_IDS`：新增资产忘登记就红。**前两条判据不查改名表**，所以"表里没名字"不是放行理由——门禁判形态，登记表只承载历史与角色名 |
+| 同上，角色名两条 | 每个资产 `description:` 以 `<标识符>（<角色>）` 开头且正文 H1 == `headingFor(id)`；派单侧文件非路径形提及某资产时必须 spelled out 一次角色名（围栏代码块与 `skills/x/SKILL.md` 这类路径形除外——往路径里插中文括号会把路径写坏） |
+| 同上，门禁自证 | 临时目录里造四种坏法（裸名文件 / `name:` 与目录不符 / 缺 `name:` / 资产目录清空），逐个断言真会红。只测"当前是干净的"等于没测门禁 |
+
+边界正则是这套锁里唯一真出过缺陷的地方：裸名匹配写作
+`(^|[^A-Za-z0-9_-])<name>(?![A-Za-z0-9_-])`，**尾组必须是前瞻**。
+写成消耗型 `($|[^A-Za-z0-9_-])` 时，`a bug-dev bug-tester b` 这种紧邻的两处引用会吃掉中间那个分隔符，
+而全局正则从上次结尾继续扫 —— 实测漏改第二处。前瞻不消耗字符，所以 `supperH-data-fetch` 内部的
+`data-fetch` 也不会被二次命中（前一个字符是 `-`，在排除类里），改名与门禁因此能共用同一个正则。
+
+**代价（写下来，别装作没有）**：
+
+- 提示词里每个资产名多 8 个字符（`supperH-`），派单成本随之上升。这是撞面的对价：静默失效的代价
+  不可能用更短的名字来付。
+- 一次性切断意味着**用户手放在 IDE 全局目录里的旧名副本**（若有）不会自动消失；重跑一次
+  `/supperH-setup` 即清。留着也不会再被顶掉，因为同名资产已经不存在了——它变成死文件，不是风险。
+- 改名表、本文件与 `tests/` 是**允许**出现退役裸名的三处（它们判的就是"旧名有没有回来"），
+  所以 `legacy` 判据的扫描面刻意只覆盖四个运行期加载目录。把文档也扫进去，只会逼人写黑话绕开正则。
+- 私有根（L2）在 git 与门禁之外，本轮实测只剩 1 处旧名（注册条目 `projects/<code>.yaml` 注释里的
+  `skills/driver-contract/SKILL.md` 路径），已随本条改齐；`tasks/*.jsonl` 记账不记资产名，无需回溯。
+
+**回归面怎么核算**：改名是纯文本面变化，机器位（`subagent_type`、`--agent`、frontmatter 引用）实测
+0 处硬编码，所以受影响面 = 全仓引用面 = 234 行改写 + 16 条 rename，逐条在同一个 commit 里可读。
+真正需要盯的是两个"看不见会坏"的地方：**dist 是旧产物**（改名后必须重烤，否则加载目录里仍是旧名，
+`tests/agent-permissions.test.mjs` 的 dist 一致性用例会红）与**IDE 需重启一次**（资产清单在启动时扫，
+改名前会话里派到的还是旧名字）。
+
 ---
 ## 11. 一期范围与二期规划
 
@@ -604,12 +698,13 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 - sync + validate + bootstrap 脚本
 - `.qoder/rules/` 四份零配置红线
 - 6 个命令：一期主流程 `/supperH-bug`、`/supperH-learn`、`/supperH-bootstrap`，注册链路 `/supperH-init`（落 `projects/<code>.yaml` + 探活门禁 + `kind` 探测）、数据源登记链路 `/supperH-driver`（槽位名归用户，走 `driver-registry.mjs`）与安装链路 `/supperH-setup`
-- 11 个 subagent（8 个 bug-* + 2 个 prelearn-* + 1 个 driver-author 驱动写作）
-- 5 个 skill（prelearn / data-fetch / auto-fix 协议骨架 / driver-contract / incident-triage 现象分诊）
+- 11 个 subagent（`supperH-bug-*` 8 个 + `supperH-prelearn-*` 2 个 + `supperH-driver-author`（驱动编写）1 个）
+- 5 个 skill（预学习统筹 / 取数协议 / 修复协议骨架 / 驱动契约 / 现象分诊）
+- **资产命名空间（F-13）**：三条通道（commands / agents / skills）的标识符一律 `supperH-` 前缀，中文角色名进 `description` 与派单文案；唯一真相表 `scripts/asset-names.mjs`，撞面门禁 `sync-assets.mjs` **exit 7**。理由与名录见 §10.18
 - **快路径门禁 P0**：`scripts/fastpath-gate.mjs`（G0–G4 + 否决表 + 退出码 30–36，第 37 码由下述 P1 补）、`resolve-project.mjs` 带 `--module/--anchor/--text` 扩展、jsonl 记账、`.qoder/rules/` 与 `commands/supperH-bug.md` 同步、`tests/` 34 条用例
-- **快路径门禁 P1**：`fastPath` L2 覆盖接线（schema 声明 `enabled/maxDiffLines/maxFiles/allowAnchorKinds` + `resolve-project` 传值）；G5 脚本化（`verifyImpactReport` + 退出码 **37** + `--impact-json`/`--impact-report`）；A1 锚点（`traceId`/`ticketNo`）**识别**与保守出局（`needsLookup`）+ F1.4 反查链路（`bug-analyzer mode=lookup` + `data-fetch` anchor-lookup 契约）
+- **快路径门禁 P1**：`fastPath` L2 覆盖接线（schema 声明 `enabled/maxDiffLines/maxFiles/allowAnchorKinds` + `resolve-project` 传值）；G5 脚本化（`verifyImpactReport` + 退出码 **37** + `--impact-json`/`--impact-report`）；A1 锚点（`traceId`/`ticketNo`）**识别**与保守出局（`needsLookup`）+ F1.4 反查链路（`supperH-bug-analyzer mode=lookup` + `supperH-data-fetch` anchor-lookup 契约）
 - **快路径 G4 batch 化（P1.5）**：G4 从仓库粒度收窄到 batch 粒度（G4a 仓库级全等 + G4b `git diff ∩ sources` 交集复核），否则“任何人提一次交”就会把全仓快路径永久打成 35。连带变更：`index.md` 机器契约升 `supperh-index/2`（反查表六列 → **七列**，新增 `sources`），缺列即 32；退出码 **35 的语义变窄**（行为变更，不与码值变更混淆）；analyzer 输出契约新增 `touched_files`/`sources_incomplete`，writer 模板同步；jsonl 增记 `batch`/`g4b`。所有不确定形态一律 fail-closed 判 35，不把误杀换成漏杀。
-- **意图复述 I0（本轮）**：`fastpath-gate.mjs` 新增 `verifyIntent`（五条判据见 §10.11）+ 退出码 **40**（故意在 30–37 连续段外）；`resolve-project.mjs` 新增 `--intent-json`/`--intent-report`（互斥、一次给全）与 `--anchor-source lookup` 豁免；**两条路径常驻**（完整路径拿 `--anchor ""` 求值后改读 `fastPath.intent`）；jsonl `anchor_gate` 行埋 `intentGiven`/`intent{}`/`anchorSource`；`skills/incident-triage` 承载三层语义模型与现象类别；`--preflight`（只集本地事实、脏文件只记录不阻断）与 `git.deliveryMode` 缺省 `none` + `git stash create` 快照（§10.10）。**注意一处隐性接线**：F3 回灌模式（`--anchor` + `--text` + `--impact-json`）会在同一进程里重跑整条锚点门禁，`--intent-*` 因此也是它的必填入参 —— 漏带会被自己判成 36（`impact.applied:false`，G5 根本没求值），不是 G5 判宽。
+- **意图复述 I0（本轮）**：`fastpath-gate.mjs` 新增 `verifyIntent`（五条判据见 §10.11）+ 退出码 **40**（故意在 30–37 连续段外）；`resolve-project.mjs` 新增 `--intent-json`/`--intent-report`（互斥、一次给全）与 `--anchor-source lookup` 豁免；**两条路径常驻**（完整路径拿 `--anchor ""` 求值后改读 `fastPath.intent`）；jsonl `anchor_gate` 行埋 `intentGiven`/`intent{}`/`anchorSource`；`skills/supperH-incident-triage` 承载三层语义模型与现象类别；`--preflight`（只集本地事实、脏文件只记录不阻断）与 `git.deliveryMode` 缺省 `none` + `git stash create` 快照（§10.10）。**注意一处隐性接线**：F3 回灌模式（`--anchor` + `--text` + `--impact-json`）会在同一进程里重跑整条锚点门禁，`--intent-*` 因此也是它的必填入参 —— 漏带会被自己判成 36（`impact.applied:false`，G5 根本没求值），不是 G5 判宽。
 - **双通道取数（二期已落地部分）**：L1 带 MCP 壳 server（`mcp-skeleton/shell.py` + 共享契约包 `supperh_contract/`）。注册表只有一条 `supperh-drivers`（插件相对路径 + 零凭据），项目 adapter 由壳运行期 `importlib` **查找**装载 —— 加项目不改注册表也不改 IDE 配置，"项目配了但 server 没注册"这类漂移结构性消失。通道分类只有两条（`script` / `mcp`）；官方 server 与自研 adapter 属配置选型，不进入 L2 枚举。守卫唯一化：L1 发 `supperh_contract` Python 包，adapter 一律 import，不复制守卫。`kind`/`fallback`/`mcp` 三个字段入 schema；原门禁槽位 `vpnPreCheck` 已删（执行前预检实测无效，理由与实测数据见 §10.8），schema 保留键、validate 只发废弃警告；`healthCheck` 一律是本地脚本且必须协议级；`kind` 由 `/supperH-init` 注册期探测机械写定（探不过→回写 `kind: script`；`fallback: none` 只报 blocked 不悄悄翻写），会话内只读不重探。MCP 取数工具只绑 4 个只读/测试类子 agent，主 agent 与命令入口一律不绑。
 
 - **外部数据源可选化（本轮，见 §10.12）**：`schemas/project.schema.yaml` 顶层 `required` 去 `db`/`drivers`；`init-project.mjs` 新增 `planConnections`/`applyConnectionChoices`（不接 = 整段不写，接 = 整段生成，接一半 = 写盘前退 2 `connection-choices-incomplete`）；`validate-project.mjs` 新增 `checkTemplateResidue`（`example_*` 残留 → 2）与 `checkDbDriverCoherence`（有驱动无库 = 错、有库无驱动 = 警告）；`resolve-project.mjs --env` 在无 `db` 段时退 **36**（36 的触发条件扩展，**码集不变**）。`schemas/project.example.yaml` 的 db/drivers 两段改为注释形态的字段说明书（模板不再携带可被误用的假值），`/supperH-init` 步骤 2 改为一次多选接入清单。**端到端实证顺带抓出一个只在真实 CLI 路径才触发的缺陷**：`initWrite` 里 `cfgText` 被误写成 `const`，`decideChannels` 回写 `kind` 时抛 TypeError → `--write` 每次退 1，而当时全绿的都是渲染层用例。已修，并补 2 条 `spawnSync` 真实 CLI 用例（纯代码模式退 0 且落盘无 db/drivers；接一半退 2 且不落盘）—— **落盘类行为一律要有走命令行的用例，只测渲染层等于没测**。
@@ -624,7 +719,7 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 - 工单 watcher（task-1024 已定为二期）
 - Claude Code / DSH 兼容层（二期）
 - marketplace 发布通道（二期）
-- auto-fix 的 CLI 化实现（一期只出协议骨架）
+- supperH-auto-fix 的 CLI 化实现（一期只出协议骨架）
 - **快路径 P1 未完部分**：A1 锚点反查的**实际内网 driver 实现**（由用户经 `/supperH-driver` 逐个登记；L1 不规定它叫什么名字、也不假设有几个）——代码/契约/退出码已全部就位，缺的只是驱动本体；驱动未就绪时 F1.4 自动退回完整路径
 - **快路径 P2**：按 §10.6 的 jsonl 真实样本校准 `DEFAULTS`/`HARD_CAPS`；评估 A2（异常栈）在完整度 ≥ 某水位后放行；评估 analyzer 多维度并行 fan-out
 

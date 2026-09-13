@@ -38,14 +38,14 @@
 //                                   in the user's text -> quote provenance check waived
 //                                   (that path has its own "exactly one hit" guardrail).
 //                                   Anything else = direct (default, stricter).
-//   --impact-json <inline>          G5 check (P1-2): feed back the bug-analyzer(lite)
+//   --impact-json <inline>          G5 check (P1-2): feed back the supperH-bug-analyzer(lite)
 //   --impact-report <path>            report so the *script* - not the orchestrator -
 //                                     decides whether the impact radius is narrow.
 //                                     Usable on its own (no --module/--anchor needed).
 //                                     When combined with the anchor gate, the gate
 //                                     verdict wins unless it passed (0).
 //   --scope <absolute path>           Repeatable. The analysis budget the orchestrator
-//                                     handed bug-analyzer (codeRoot / CONTEXT_ROOT / a
+//                                     handed supperH-bug-analyzer (codeRoot / CONTEXT_ROOT / a
 //                                     single module dir). verifyImpactReport then checks
 //                                     that EVERY file path named in the report sits under
 //                                     one of them - a self-reported "I stayed inside"
@@ -430,7 +430,7 @@ const MAX_SNAPSHOT_TTL_DAYS = 365;
  * fail-safe 方向：非法 / 未知值归 `none`（三者中最安全的一个）而不是报错也不是放行，
  * 并把原值留在 `declared` 里供上层如实告知用户（静默改用户意图与静默放行同样糟）。
  * `push-pr` 是合法声明但一期不支持执行：这里只如实递出 `supported: false`，
- * 拒绝动作在 bug-dev（报 DELIVERY_UNSUPPORTED），不在此处改写用户的声明。
+ * 拒绝动作在 supperH-bug-dev（报 DELIVERY_UNSUPPORTED），不在此处改写用户的声明。
  *
  * @param {any} project 解析器返回的 `project` 段（完整 L2 文档）；无 `git` 段 = 全缺省
  */
@@ -769,7 +769,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
         dirtyTruncated,
         dirtyNote: dirtyTruncated
           ? `脏文件清单已截断（只列前 ${PREFLIGHT_DIRTY_CAP} / 共 ${dirtyAll.length}）：` +
-            '“脏文件是否命中本次计划内文件”因此不可靠，bug-dev 应用前必须对自己要改的每个路径跑 ' +
+            '“脏文件是否命中本次计划内文件”因此不可靠，supperH-bug-dev 应用前必须对自己要改的每个路径跑 ' +
             '`git status --porcelain -- <path>` 逐个复核（在白名单内）'
           : null
       };

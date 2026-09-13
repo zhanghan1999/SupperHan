@@ -346,7 +346,7 @@ test('壳的 stdout 是 UTF-8：中文诊断能被 Node 正确解码', (t) => {
 
 // ---------- 谁可以绑壳 server（R3.5：跑 driver 必须派子 agent） ----------
 const MCP_BOUND_AGENTS = [
-  'bug-analyzer.md', 'bug-test-writer.md', 'bug-tester.md', 'prelearn-analyzer.md',
+  'supperH-bug-analyzer.md', 'supperH-bug-test-writer.md', 'supperH-bug-tester.md', 'supperH-prelearn-analyzer.md',
 ];
 
 function frontmatterOf(file) {
@@ -465,7 +465,7 @@ test('契约声明了语句三态，且 queryOmitted 枚举与 envelope.py 逐�
   // 向后兼容铁律：新增字段不得让已注册项目突然全灭
   const required = doc.properties.meta.required || [];
   assert.ok(!required.includes('query'),
-    'query 进 required 会让存量驱动一夜全红；强制靠 skills/data-fetch 的 query_missing 上报');
+    'query 进 required 会让存量驱动一夜全红；强制靠 skills/supperH-data-fetch 的 query_missing 上报');
 });
 
 test('脚本通道：执行了什么就报什么，绑定值留在 params 里而不是塞进语句', (t) => {

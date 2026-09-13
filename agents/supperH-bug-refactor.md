@@ -1,5 +1,5 @@
 ---
-description: supperH 结构性重构子 agent。提取方法/类、重命名、拆分大类、消除重复；行为等价 + 编译验证。
+description: supperH-bug-refactor（重构）— 结构性重构子 agent。提取方法/类、重命名、拆分大类、消除重复；行为等价 + 编译验证。
 mode: subagent
 permission:
   read: allow
@@ -8,7 +8,7 @@ permission:
   external_directory: deny
 ---
 
-# supperH · 重构子 agent（bug-refactor）
+# supperH-bug-refactor · 重构子 agent
 
 ## 前置自检
 

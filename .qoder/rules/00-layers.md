@@ -33,7 +33,7 @@
 3. **CURRENT 原子切换**协议、copy-on-write 语义
 4. **派发协议**：主 agent 派 subagent 的输入格式、输出格式、失败降级策略
 5. **完成判定**：修复完成的必要条件清单
-6. 跨项目通用的红线：禁止跳过 DB 门禁、禁止改生产配置、禁止 prelearn-writer / driver-author 之外使用 external_directory
+6. 跨项目通用的红线：禁止跳过 DB 门禁、禁止改生产配置、禁止 supperH-prelearn-writer（预学习落笔） / supperH-driver-author（驱动编写） 之外使用 external_directory
 
 ## 灰色地带裁决规则
 
@@ -51,4 +51,4 @@ L1 文件里凡是要引用 L2 具体值，**必须**用双花括号占位符：
 
 sync 阶段完成替换；替换后仍残留双花括号字面量的字符串 → **阻断报错**，不降级。
 
-通道选型字段（kind / fallback / mcp 段）**不在 L1 prompt 里引用**：它们是注册期探测的结论，由解析器在运行期读出后交给 `data-fetch` 的 resolve 段机械选定。在 L1 里引用它 = 把某一次的探测结论冻结进产物，重跑探测也改不动。L1 里描述这类字段时用自然语言（“目标槽位已配置的取数通道”），不写占位符。
+通道选型字段（kind / fallback / mcp 段）**不在 L1 prompt 里引用**：它们是注册期探测的结论，由解析器在运行期读出后交给 `supperH-data-fetch`（取数协议） 的 resolve 段机械选定。在 L1 里引用它 = 把某一次的探测结论冻结进产物，重跑探测也改不动。L1 里描述这类字段时用自然语言（“目标槽位已配置的取数通道”），不写占位符。

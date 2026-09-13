@@ -2,14 +2,14 @@
 // 跨 workspace 写文件的能力（external_directory）到底放开了给谁 —— 机械点名。
 //
 // 为什么要有这个文件：
-//   `.qoder/rules/10-redlines.md` R2 第一条一直是「禁止 prelearn-writer 之外任何 agent 用
+//   `.qoder/rules/10-redlines.md` R2 第一条一直是「禁止 supperH-prelearn-writer 之外任何 agent 用
 //   external_directory: allow」，但**从来没有一条测试锁过它** —— 于是它是纯文字契约，
 //   谁加一个 frontmatter 都不会红。同一个仓库里"MCP 只绑 4 个只读子 agent"却是有名单测试的
 //   （mcp-manifest.test.mjs），一条靠测试一条靠自觉，靠自觉那条必然漂。
 //   本文件把它焊上：名单外的 allow 即红，名单内的必须自带路径前缀自检。
 //
 // 顺带锁住"一个 agent 只能有一个前缀"：把两个职责塞进同一个放开面 agent（曾评估把写驱动
-//   并入 prelearn-writer）会让判据从「路径必须以 X 开头」退化成「先判模式再查前缀」，
+//   并入 supperH-prelearn-writer）会让判据从「路径必须以 X 开头」退化成「先判模式再查前缀」，
 //   等于把边界交还给模型判断。那种写法在这里过不了测试（锚点行只能有一条）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,8 +32,8 @@ const frontmatterOf = (text) => {
  * 只改文案不改这里 = 本测试红；只改这里不改文案 = 文档开始说谎（评审抓不到，但下一次决策会错）。
  */
 const BOUND_AGENTS = [
-  { file: 'prelearn-writer.md', anchor: 'CONTEXT_ROOT' },
-  { file: 'driver-author.md',   anchor: 'DRIVERS_ROOT' },
+  { file: 'supperH-prelearn-writer.md', anchor: 'CONTEXT_ROOT' },
+  { file: 'supperH-driver-author.md',   anchor: 'DRIVERS_ROOT' },
 ];
 // command 入口（primary）侧的放开面同样点名：它们不是 subagent，但同样跨 workspace 写盘。
 const BOUND_COMMANDS = [

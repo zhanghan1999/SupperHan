@@ -96,7 +96,7 @@ def handle(source: str, params: dict, ctx: dict) -> dict:
 ```
 
 - `meta.query` / `meta.params` / `meta.queryOmitted` 三态规则见
-  `skills/driver-contract/SKILL.md` §字段规约；本仓库的示例 fixture adapter 会申报
+  `skills/supperH-driver-contract/SKILL.md` §字段规约；本仓库的示例 fixture adapter 会申报
   语句，因为 `tests/mcp-manifest.test.mjs` 拿两条通道的 meta 键集做对称比对，
   一边报一边不报会在那里失败，而不是悄悄分叉。
 
@@ -105,7 +105,7 @@ def handle(source: str, params: dict, ctx: dict) -> dict:
 schema 时传空串同样不拦、以及层级错配：清单里登记的是 database 名（`appdb`），而按 PG 语义该传的
 是 database 之内那一层（`app_dw`，即 jdbc URL 里的 `currentSchema`），两个命名空间的字符串永不相等，
 于是配置越正确、门禁越空转。该机制已从 L1 契约退役（数据库通道 = 只读源，写数据请产出 SQL 工件，
-见 `skills/driver-contract/SKILL.md` §SQL 工件契约）；`check()` 保留第二个形参仅作兼容位。
+见 `skills/supperH-driver-contract/SKILL.md` §SQL 工件契约）；`check()` 保留第二个形参仅作兼容位。
 
 - **不实现**：任意 URL 的 `http_fetch`、无守卫的自由文本 `sql` 参数、把 `*.local.json`
   路径当参数暴露给模型。

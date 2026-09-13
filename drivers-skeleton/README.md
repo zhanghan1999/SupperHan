@@ -2,7 +2,7 @@
 
 **这是什么**：supperH 驱动契约的**参考骨架**，不是可以直接对内网用的实现。它的存在只证明两件事：
 
-1. `skills/driver-contract/SKILL.md` 里定义的 CLI / envelope / exit-code 协议是**可执行**的
+1. `skills/supperH-driver-contract/SKILL.md` 里定义的 CLI / envelope / exit-code 协议是**可执行**的
 2. 你自己的内网 driver 从这里 `cp` 起步，不需要从零搭
 
 **这里没有的东西**（故意的）：
@@ -91,7 +91,7 @@ class MyDbDriver(BaseDriver):
                 driver_version=self.version)
 ```
 
-**必守规则**（详见 `skills/driver-contract/SKILL.md`）：
+**必守规则**（详见 `skills/supperH-driver-contract/SKILL.md`）：
 
 - stdout 只放最终 envelope；一切 debug/traceback 走 stderr
 - 成功信封必须定下语句申报状态：`query=`（真执行的那一条，占位符保留）或

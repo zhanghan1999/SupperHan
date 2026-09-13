@@ -446,7 +446,7 @@ test('P1-③ allowAnchorKinds 白名单：缺省不限，列了就只放行列�
 
 // ---------- P1-② G5 脚本化验收：verifyImpactReport ----------
 
-// lite 回报的证据登记表：kind 只允许 batch / data（见 agents/bug-analyzer.md 的证据三态）
+// lite 回报的证据登记表：kind 只允许 batch / data（见 agents/supperH-bug-analyzer.md 的证据三态）
 const EV = Object.freeze([
   { id: 'E1', kind: 'batch', ref: 'order/batch-01.md', lines: [40, 88], quote: 'create(): 入参非空校验' },
 ]);
@@ -529,7 +529,7 @@ test('P2-b2 证据登记：零证据 / 坏形状 / 孤儿引用 → 36；lite �
   assert.equal(verifyImpactReport({
     ...b(), evidence: [...b().evidence, { id: 'E2', kind: 'read', ref: 'C:/x/Y.java' }],
   }).status, EXIT.IMPACT_WIDE, 'reads=[] 却有 kind=read 证据 = 两份申报互相矛盾，与“偷读源码”同一笔账');
-  assert.deepEqual([...EVIDENCE_KINDS], ['read', 'batch', 'data'], '证据类型改了就要同步 agents/bug-analyzer.md 的三态表');
+  assert.deepEqual([...EVIDENCE_KINDS], ['read', 'batch', 'data'], '证据类型改了就要同步 agents/supperH-bug-analyzer.md 的三态表');
 });
 
 test('P2-b2 flow 每一跳必须落到 class#method 并绑证据（“某层处理了一下”不可核对也不可改）', () => {

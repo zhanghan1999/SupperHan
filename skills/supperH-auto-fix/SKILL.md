@@ -1,9 +1,9 @@
 ---
-name: auto-fix
-description: supperH 修复协议骨架 skill。定义一次完整修复的输入/输出契约、幂等性要求、回滚边界、失败分类。**一期只定义协议不实现自动化执行**——实际执行仍由 bug-dev 子 agent 承担；本 skill 存在的意义是让所有 agent 对"什么算一次 fix"达成一致。
+name: supperH-auto-fix
+description: supperH-auto-fix（修复协议）— 修复协议骨架 skill。定义一次完整修复的输入/输出契约、幂等性要求、回滚边界、失败分类。**一期只定义协议不实现自动化执行**——实际执行仍由 supperH-bug-dev 子 agent 承担；本 skill 存在的意义是让所有 agent 对"什么算一次 fix"达成一致。
 ---
 
-# skill: auto-fix（一期协议骨架）
+# skill: supperH-auto-fix · 修复协议（一期协议骨架）
 
 ## 前置自检（硬性）
 
@@ -11,7 +11,7 @@ description: supperH 修复协议骨架 skill。定义一次完整修复的输�
 
 ## 一期状态
 
-**协议定义完成，实现留白**。本 skill 一期不接入任何自动化 fix 通道；`bug-dev` 是唯一的实际执行者，通过 `edit` 工具直接改代码。二期若引入"批处理自动修复""跨仓库 fix 派发""fix 生成补丁文件"等能力时，遵循本 skill 定义的接口。
+**协议定义完成，实现留白**。本 skill 一期不接入任何自动化 fix 通道；`supperH-bug-dev` 是唯一的实际执行者，通过 `edit` 工具直接改代码。二期若引入"批处理自动修复""跨仓库 fix 派发""fix 生成补丁文件"等能力时，遵循本 skill 定义的接口。
 
 ## 目标
 
@@ -40,7 +40,7 @@ fix_request:
   module: <name>            # 命中 {{PROJECT.modules[].name}}
   target: <symbol or path>  # 例 "com.example.order.OrderService#create"
   symptom: <text>           # 现象描述，自由文本
-  root_cause: <text>        # 由 bug-analyzer 输出的根因判断，一段话
+  root_cause: <text>        # 由 supperH-bug-analyzer 输出的根因判断，一段话
   candidate_plan:
     - id: p1
       description: <text>
@@ -88,7 +88,7 @@ fix_result:
       failed: M
       skipped: K
       failures: [<test id>, ...]
-  content_gaps:             # 补学信号；见 prelearn skill
+  content_gaps:             # 补学信号；见 supperH-prelearn skill
     - batch: <name>
       route: <HTTP-METHOD path>
       missing_level: L1|L2|L3
@@ -147,7 +147,7 @@ Snapshot 是**回滚锚点**，不是提交动作。它必须满足三条：不�
 | Verify 编译失败 | `fail` | 全部回滚；报 `COMPILE_FAIL` + stderr |
 | Verify 单测失败 | `fail` | 全部回滚；报 `FAIL_TESTS` + 失败用例清单 |
 | 守卫拦下写语句（driver 侧漏实现） | `aborted` | 不进 Apply；报 `DB_GATE_DENY` |
-| 本次需要写 DB | `partial` | 不进 Apply；按 `driver-contract` §SQL 工件契约产出 SQL 文件 + 报 `DB_WRITE_OUT_OF_SCOPE`（不是失败，也不补跑） |
+| 本次需要写 DB | `partial` | 不进 Apply；按 `supperH-driver-contract` §SQL 工件契约产出 SQL 文件 + 报 `DB_WRITE_OUT_OF_SCOPE`（不是失败，也不补跑） |
 | `update-ref` 建快照失败 | `aborted` | 未 Apply，无副作用；报 `SNAPSHOT_REF_FAIL`（**没有锚点就不许进 Apply**） |
 | 脏文件命中本次 plan 的 `touched_files` | `aborted` | **停下来问用户**（硬清单第 1 条）；脏文件不在 plan 内则只记录继续 |
 | 快照恢复失败（ref 缺失 / sha 为空但确有改动） | `partial` | **停下来问用户**（硬清单第 2 条）；不得伪装成"已回滚" |
@@ -173,10 +173,10 @@ Snapshot 是**回滚锚点**，不是提交动作。它必须满足三条：不�
 
 > 本清单只管**动手之后**。入口（intake）层的提问在命令那一层另有预算：`/supperH-bug` 步骤 1 选模块、步骤 1.6 因 `40` 的一次性补问、步骤 5 的多方案选型（仅完整路径）。它们与本清单同一套纪律：**一次问全、只补一次、问不到就停下而不是猜**。
 
-## 与 bug-dev 子 agent 的关系
+## 与 supperH-bug-dev 子 agent 的关系
 
-- 一期：`bug-dev` 是本 skill 的**唯一实现者**；`bug-dev` 用自己的编辑工具直接改代码，不通过 `auto-fix` 命令行接口
-- 二期：抽出 `auto-fix` CLI，允许外部脚本 / CI 通过同一契约调用；`bug-dev` 变成 `auto-fix` CLI 的一个调用者
+- 一期：`supperH-bug-dev` 是本 skill 的**唯一实现者**；`supperH-bug-dev` 用自己的编辑工具直接改代码，不通过 `supperH-auto-fix` 命令行接口
+- 二期：抽出 `supperH-auto-fix` CLI，允许外部脚本 / CI 通过同一契约调用；`supperH-bug-dev` 变成 `supperH-auto-fix` CLI 的一个调用者
 
 ## 一期不实现清单
 

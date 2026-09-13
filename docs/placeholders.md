@@ -93,7 +93,7 @@
 
 **已展开的 impl 就是绝对路径**：用户在 L2 里写 `impl: "{{DRIVERS_ROOT}}/x.py"`，解析器/ sync 会先把 `{{DRIVERS_ROOT}}` 深度展开（含 `healthCheck` / `config`）后才交给产物 —— 所以 L1 侧只能写 `{{PROJECT.dbDriver.impl}}` 整体，**绝不能再拼一层 `drivers/` 前缀**（历史上拼过 → `.../supper-Han-private/drivers/{{DRIVERS_ROOT}}/x.py` 双前缀 + 未替换 token，只因 `drivers/` 为空目录而没炸）。
 
-**不进入 L1 占位符的字段**：`kind` / `fallback` / `mcp.server` / `mcp.sources` 是运行期通道判定输入，由 `data-fetch` 的 resolve 段直接读解析器输出选定，**不烤进 prompt**（烤进去 = 把注册期的探测结论冻结在产物里，重探一次也改不动）。注意这里没有机械拦：`{{PROJECT.drivers.<slot>.kind}}` 在语法上完全合法，会被正常 runtimeify 成 token——上一版本节说它“会被残留扫描拦下”是错的，本文件现在改回实话：**这条只能靠写 L1 的人自觉**（因为 sync 无法知道哪个 dot.path 是“注册期结论”、哪个是“注册值”）。
+**不进入 L1 占位符的字段**：`kind` / `fallback` / `mcp.server` / `mcp.sources` 是运行期通道判定输入，由 `supperH-data-fetch` 的 resolve 段直接读解析器输出选定，**不烤进 prompt**（烤进去 = 把注册期的探测结论冻结在产物里，重探一次也改不动）。注意这里没有机械拦：`{{PROJECT.drivers.<slot>.kind}}` 在语法上完全合法，会被正常 runtimeify 成 token——上一版本节说它“会被残留扫描拦下”是错的，本文件现在改回实话：**这条只能靠写 L1 的人自觉**（因为 sync 无法知道哪个 dot.path 是“注册期结论”、哪个是“注册值”）。
 
 **诊断基线也不是占位符**：`--env` 的返回体 `diagnoseBaseline = {declared, env, branch, schema, codeSide}` 每次调用现取 —— 环境来自用户当次的描述，不来自注册表（同一个项目今天查 uat、明天查 prod）。所以 L1 里**不存在也不得新增** `{{PROJECT.env}}` 这类占位符；`branches.*` / `db.schemas.*` 本身仍可按 §3.1 登记使用（它们是注册值）。两个基线的分界见 `docs/architecture.md` §10.9。
 

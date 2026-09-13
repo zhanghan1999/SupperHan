@@ -1,5 +1,5 @@
 ---
-description: supperH 测试编写子 agent。按接口签名和业务逻辑生成 unit/集成测试；只操作 test 目录，不修改生产代码。
+description: supperH-bug-test-writer（测试编写）— 测试编写子 agent。按接口签名和业务逻辑生成 unit/集成测试；只操作 test 目录，不修改生产代码。
 mode: subagent
 # MCP 壳 server（L1 注册，只读取数）。只绑子 agent，主 agent / 命令入口一律不绑；
 # 槽位默认 kind=script，未注册该 server 也不影响本 agent 工作。
@@ -12,7 +12,7 @@ permission:
   external_directory: deny
 ---
 
-# supperH · 测试编写子 agent（bug-test-writer）
+# supperH-bug-test-writer · 测试编写子 agent
 
 ## 前置自检
 

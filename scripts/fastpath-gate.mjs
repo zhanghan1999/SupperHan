@@ -13,7 +13,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import YAML from 'yaml';
 
-/** index.md 格式代际；与 skills/prelearn/SKILL.md「index.md 规范格式」节一致 */
+/** index.md 格式代际；与 skills/supperH-prelearn/SKILL.md「index.md 规范格式」节一致 */
 // /1 → /2：反查表新增 `sources` 列（batch → 可达源文件全集），G4b 靠它把
 // 仓库粒度判据收窄到 batch 粒度。旧代际的表没有这一列 → 无法安全做交集 →
 // 必须整表 32 出局重学，而不是"缺列就当它没依赖"。
@@ -38,7 +38,7 @@ export const EXIT = Object.freeze({
   STALE:      35, // G4 learnedAtCommit != HEAD **且** 本 batch 的 sources 与 diff 相交（或无从判定）；含 HEAD/diff 取不到、sources 不完整
   INCOMPLETE: 36, // 门禁未能完整求值：入参不成对（有 --anchor 无 --text）或脚本内部异常；
                   // 也用于「impact 回报结构不可用」——没东西可判时绝不假装判过
-  IMPACT_WIDE: 37, // G5：bug-analyzer(lite) 回报影响半径 > 1 层，或 lite 契约被破（读了源码）
+  IMPACT_WIDE: 37, // G5：supperH-bug-analyzer(lite) 回报影响半径 > 1 层，或 lite 契约被破（读了源码）
 
   /**
    * I0 意图欠定义：三槽位有空 / 原文引用验假 / 锚点在原话里找不到出处。
@@ -77,7 +77,7 @@ const SUPPORTED_KINDS = Object.freeze(['route', 'fqn', 'fileLine']);
  * 递出的字段刻意叫 `lookupNeed`（要成什么关系）而不是 `lookupVia`（走哪个槽位）：
  * F-11 之后槽位名归用户，脚本一旦输出 `drivers.logs` 就等于替全天下规定“日志源
  * 得叫 logs”。反查用哪个槽位由调用方按各槽位的 `desc` 选，选不出唯一一个即出局 ——
- * 详见 skills/data-fetch/SKILL.md §anchor-lookup。
+ * 详见 skills/supperH-data-fetch/SKILL.md §anchor-lookup。
  */
 const LOOKUP_KINDS = Object.freeze(['traceId', 'ticketNo']);
 
@@ -171,7 +171,7 @@ export function classifyAnchor(raw) {
  * 两处曾经的坑：
  * - 不剥注释：`learnedAtCommit: abc # 说明` → 值带尾巴，与 HEAD 永不相等 →
  *   该模块所有 bug 永久判 35，而提示语会说「学习数据过期」，把人引向重学而非改格式。
- *   而 skills/prelearn/SKILL.md 的示例本身就带行内注释，writer 照抄即中招。
+ *   而 skills/supperH-prelearn/SKILL.md 的示例本身就带行内注释，writer 照抄即中招。
  * - 用 /^"'|"'$/g 各剥一边：`"abc" # x` → `abc" # x`，比不剥更糟。
  */
 function normalizeScalar(v) {
@@ -788,7 +788,7 @@ export function evaluateFastPath(o = {}) {
 
   return {
     status: EXIT.PASS, eligible: true, gates,
-    message: '快路径准入通过（G1–G4 + 否决表无命中 + I0 意图复述已补齐）；下一步必须派 bug-analyzer(lite) 并把回报回灌 --impact-json 验 G5，不得自行判定',
+    message: '快路径准入通过（G1–G4 + 否决表无命中 + I0 意图复述已补齐）；下一步必须派 supperH-bug-analyzer(lite) 并把回报回灌 --impact-json 验 G5，不得自行判定',
     anchorKind: anchor.kind, anchorResolved: resolved, veto: [], intent: intentVerdict,
     budget: { maxDiffLines, maxFiles, hardCaps: HARD_CAPS },
     g4b,
@@ -796,7 +796,7 @@ export function evaluateFastPath(o = {}) {
   };
 }
 
-/** bug-analyzer(lite) 回报里被允许出现的 code 值（与 agents/bug-analyzer.md 输出契约逐字一致） */
+/** supperH-bug-analyzer(lite) 回报里被允许出现的 code 值（与 agents/supperH-bug-analyzer.md 输出契约逐字一致） */
 export const IMPACT_CODES = Object.freeze(['ANALYZED', 'INSUFFICIENT_LEARNING', 'TARGET_NOT_FOUND', 'IMPACT_WIDE']);
 
 /** 证据出处类型：read=读过源码行 / batch=学习记录条目 / data=一次取数信封 */
@@ -884,7 +884,7 @@ function pathKeyForScope(p) {
  *   36 = 回报结构不可用（缺字段、类型错、未知 code、深度越界、目标与锚点不一致、
  *        证据引用指不到东西、流程未落到 class#method、例外声明缺项）
  *
- * @param {any} report 已解析的 bug-analyzer(lite) 回报对象
+ * @param {any} report 已解析的 supperH-bug-analyzer(lite) 回报对象
  * @param {{expectedRoute?:string|null, scopeRoots?:string[]}} [o]
  *        expectedRoute：门禁解出的 anchorResolved.route，校“它分析的是不是同一个目标”；
  *        scopeRoots：主 agent 派单时圈定的允许范围（绝对路径），回报里任何一个文件路径

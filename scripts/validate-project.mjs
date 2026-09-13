@@ -276,7 +276,7 @@ export function checkWriteDeclarations(data) {
 const RETIRED_DB_KEYS = ['writableUser', 'forbidWriteSchemas'];
 function checkRetiredWriteKeys(data) {
   const errors = [];
-  const MIGRATE = '改数据请产出 SQL 工件交人工执行（skills/driver-contract/SKILL.md §SQL 工件契约）';
+  const MIGRATE = '改数据请产出 SQL 工件交人工执行（skills/supperH-driver-contract/SKILL.md §SQL 工件契约）';
   const db = data?.db;
   if (db && typeof db === 'object') {
     for (const k of RETIRED_DB_KEYS) {

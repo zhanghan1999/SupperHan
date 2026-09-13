@@ -32,15 +32,15 @@ const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 // 自己一份 dist 副本，不读仓库真 dist：mcp-manifest.test.mjs 会真跑 sync-assets（rmSync + 重建），
 // 而 node --test 文件级并发——抢同一份目录就是偶发 ENOENT。内容只要求形状对（四个源目录）。
 const FIXTURE_DIST_FILES = [
-  'agents/bug-dev.md',
-  'agents/prelearn-analyzer.md',
+  'agents/supperH-bug-dev.md',
+  'agents/supperH-prelearn-analyzer.md',
   'commands/supperH-setup.md',
   'commands/supperH-bootstrap.md',
   'commands/supperH-init.md',
   'commands/supperH-bug.md',
   'commands/supperH-learn.md',
-  'skills/prelearn/SKILL.md',
-  'skills/data-fetch/SKILL.md',
+  'skills/supperH-prelearn/SKILL.md',
+  'skills/supperH-data-fetch/SKILL.md',
   'mcp-skeleton/shell.py',
   'mcp-skeleton/requirements.txt',
 ];
@@ -99,8 +99,8 @@ test('首次安装：资产落位 + mcp/instructions 合并 + 私有根不造 le
   assert.equal(r.status, 0, r.allOutput);
 
   // 单数目录名（实测 1.18.21 单复数都吃，但工具仓侧映射表写死单数，这里钉住不漂移）
-  for (const f of ['command/supperH-bug.md', 'command/supperH-init.md', 'agent/bug-dev.md',
-    'skill/prelearn/SKILL.md', 'mcp-skeleton/shell.py']) {
+  for (const f of ['command/supperH-bug.md', 'command/supperH-init.md', 'agent/supperH-bug-dev.md',
+    'skill/supperH-prelearn/SKILL.md', 'mcp-skeleton/shell.py']) {
     assert.ok(fs.existsSync(path.join(dest, f)), 'missing installed file: ' + f);
   }
   assert.ok(!fs.existsSync(path.join(dest, 'commands')), '不该出现复数目录 commands/');

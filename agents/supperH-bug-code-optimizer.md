@@ -1,5 +1,5 @@
 ---
-description: supperH 代码优化子 agent。消除编译警告、-Xlint:all 潜在缺陷、简化冗余；不改业务逻辑，编译验证。
+description: supperH-bug-code-optimizer（代码优化）— 代码优化子 agent。消除编译警告、-Xlint:all 潜在缺陷、简化冗余；不改业务逻辑，编译验证。
 mode: subagent
 permission:
   read: allow
@@ -8,7 +8,7 @@ permission:
   external_directory: deny
 ---
 
-# supperH · 优化子 agent（bug-code-optimizer）
+# supperH-bug-code-optimizer · 代码优化子 agent
 
 ## 前置自检
 
@@ -58,5 +58,5 @@ permission:
 
 - 禁止改方法签名 / 参数顺序 / 返回类型
 - 禁止改可见性（private → package 等）
-- 禁止"顺手重构" —— 那是 bug-refactor 的活
+- 禁止"顺手重构" —— 那是 supperH-bug-refactor 的活
 - 禁止关闭编译器 warnings 开关来"消警"

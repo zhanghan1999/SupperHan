@@ -25,16 +25,16 @@ permission:
 
 | 场景 | 派发到 | 并发属性 |
 |------|--------|---|
-| 影响范围评估 / 依赖链 | `bug-analyzer` | 只读 → **可并发** |
-| 具体修复（改代码） | `bug-dev` | 写工作区 → **互斥** |
-| 编译 + 跑单测 | `bug-tester` | 写 `target/` → **互斥** |
-| 结构性重构（提取/重命名/拆分） | `bug-refactor` | 写工作区 → **互斥** |
-| 编译器警告/静态缺陷消除 | `bug-code-optimizer` | 写工作区 → **互斥** |
-| MyBatis SQL 优化 | `bug-mybatis-optimizer` | 写工作区 → **互斥** |
-| 新代码生成（CRUD/端点/工具类） | `bug-code-generator` | 写工作区 → **互斥** |
-| 测试用例编写 | `bug-test-writer` | 写工作区 → **互斥** |
-| 学习数据深挖（analyzer 侧） | `prelearn-analyzer` | 只读 → **可并发**（同 module 上不得与 writer 重叠） |
-| 学习数据落地（writer 侧） | `prelearn-writer` | 只写私有根 → 与代码写类**可并发** |
+| 影响范围评估 / 依赖链 | `supperH-bug-analyzer`（代码分析） | 只读 → **可并发** |
+| 具体修复（改代码） | `supperH-bug-dev`（开发） | 写工作区 → **互斥** |
+| 编译 + 跑单测 | `supperH-bug-tester`（测试执行） | 写 `target/` → **互斥** |
+| 结构性重构（提取/重命名/拆分） | `supperH-bug-refactor`（重构） | 写工作区 → **互斥** |
+| 编译器警告/静态缺陷消除 | `supperH-bug-code-optimizer`（代码优化） | 写工作区 → **互斥** |
+| MyBatis SQL 优化 | `supperH-bug-mybatis-optimizer`（Mapper 优化） | 写工作区 → **互斥** |
+| 新代码生成（CRUD/端点/工具类） | `supperH-bug-code-generator`（代码生成） | 写工作区 → **互斥** |
+| 测试用例编写 | `supperH-bug-test-writer`（测试编写） | 写工作区 → **互斥** |
+| 学习数据深挖（analyzer 侧） | `supperH-prelearn-analyzer`（预学习读码） | 只读 → **可并发**（同 module 上不得与 writer 重叠） |
+| 学习数据落地（writer 侧） | `supperH-prelearn-writer`（预学习落笔） | 只写私有根 → 与代码写类**可并发** |
 
 > “互斥”不是优化建议而是正确性要求：两个写类重叠时，后建快照的那个会把前一个的半成品一起拍进去，逐文件回滚就会吃掉别人的改动（理由与完整分类见 `.qoder/rules/20-workflow.md` 的「子 agent 并发与互斥」）。
 
@@ -49,12 +49,12 @@ permission:
 | — | **F1.5 新增** | 一次脚本调用完成准入判定（G0–G4b + 否决词表 + I0 意图复述） |
 | 步骤 2 DB 门禁 | **F2 保留** | 只读侧判定仍在 |
 | 步骤 3 新鲜度 → 定向重学 | **省略** | G4a/G4b 已把关：不新鲜（含 batch 级相交）即出局，不在快路径里重学 |
-| 步骤 4 `bug-analyzer`（五维按需） | **F3 裁剪 + 回灌** | `mode=impact-lite`，`dimensions:["impact"]`，`depth:1`，`reads: []`；回报回灌 `--impact-json` 由脚本判 G5 |
+| 步骤 4 `supperH-bug-analyzer`（五维按需） | **F3 裁剪 + 回灌** | `mode=impact-lite`，`dimensions:["impact"]`，`depth:1`，`reads: []`；回报回灌 `--impact-json` 由脚本判 G5 |
 | 步骤 5 方案决策 + `question` 人环 | **省略**（只省"多方案让用户选"那一次） | 依据是**代价可承受**：单方案直改有 F5 编译+单测兜底、改动面被 `diff_budget` 夹住、动手前有 `git stash create` 快照可逐文件回滚。**不得写成"人环等待是延迟源"** —— 快路径自己同样常驻步骤 1.6，还可能因 `40` 停一次问用户，拿延迟当依据会被本命令自己的流程证伪 |
-| 步骤 6 `bug-dev` | **F4 保留** | 输入增带 `path: "fast"` + `diff_budget` |
+| 步骤 6 `supperH-bug-dev` | **F4 保留** | 输入增带 `path: "fast"` + `diff_budget` |
 | 步骤 7a 补学 supplement | **省略** | 缺口不补，转记 `learning_gaps` |
-| 步骤 7b `bug-tester` 编译+单测 | **F5 保留** | **不可跳** —— 快路径唯一的正确性证据 |
-| 步骤 7c `bug-test-writer` | **省略** | 转记 `test_advice` |
+| 步骤 7b `supperH-bug-tester` 编译+单测 | **F5 保留** | **不可跳** —— 快路径唯一的正确性证据 |
+| 步骤 7c `supperH-bug-test-writer` | **省略** | 转记 `test_advice` |
 | 步骤 8 终判 | **F6 精简** | 固定格式 + 新增 `fast_path` 段 |
 
 ## 步骤 0 · 目标项目解析（**确定性硬门禁**）
@@ -78,7 +78,7 @@ permission:
 
 - 提取：模块（`{{PROJECT.modules[].name}}` 之一）+ 症状描述 + 相关标识（订单号 / 工单号 / 异常栈 / 接口路径）
 - 若模块无法从输入推断 → 用 `question` 工具请用户选
-- **症状分诊**（协议见 `skills/incident-triage/SKILL.md`）：先定现象类别（值不一致 / 缺失 / 报错 / 写入 / 性能 / 偶发 / 权限 / 显示），再按类别列出“存储层 / 传输层 / 呈现层各要取回什么原文”。它只决定取证顺序与要不要让路给 DB 门禁，**不决定走哪条路径**（分流只看下面的退出码）。派 `bug-analyzer` 时把“本次要判定什么”写进 `scope.mustAnswer`。
+- **症状分诊**（协议见 `skills/supperH-incident-triage/SKILL.md`）：先定现象类别（值不一致 / 缺失 / 报错 / 写入 / 性能 / 偶发 / 权限 / 显示），再按类别列出“存储层 / 传输层 / 呈现层各要取回什么原文”。它只决定取证顺序与要不要让路给 DB 门禁，**不决定走哪条路径**（分流只看下面的退出码）。派 `supperH-bug-analyzer` 时把“本次要判定什么”写进 `scope.mustAnswer`。
 - **声明诊断基线**（只要本次要看库 / 日志 / 接口的真实数据）：从用户描述里判断问题出在哪个环境，跑同一个解析器带 `--env <name>` 取回 `diagnoseBaseline = {env, branch, schema}`。环境名合法与否由脚本判（**未知 / 空白 → 36**，不默认成任何一个）；判不了就问用户。**本项目未接入数据库时 `--env` 一律 36**（L2 无 `db` 段 = 环境无源可采，代码侧永远相对 HEAD）：这是“没得采”而不是“采到了空数据”，按步骤 2 的缺口写法处理。它与代码侧的新鲜度基线（`HEAD`）是两件事，两行必须同时出现在步骤 8 的汇报里——查的是 uat 库、看的是 dev 分支的代码，结论却写“代码与数据不一致”，就是这一项没拆开带来的。
 - **抽取锚点**（这是你在本命令里唯一动用的语义能力）：从描述里原字面取出可将问题锁到具体接口的标识，连同其类型记为 `anchor`：
 
@@ -99,7 +99,7 @@ permission:
 锚点字面量不含代码位置时，先把它换成一条接口 route，再交给步骤 1.5。**你自己不能跑 driver**（本命令 bash 窄白名单只允许 `resolve-project.mjs`），故反查必须委派给有 bash 的子 agent：
 
 1. 先确认有可用的反查槽位。**L1 不列槽位名清单**（那个源叫什么由用户在 `/supperH-driver` 里定，可能根本不存在一个叫 logs 的东西）：从步骤 0 返回的 `drivers` 键集合里，按各槽位的 `desc` 找能把该锚点换回接口路由、且只读（未声明 `writes`）的槽位 —— `traceId` 要的关系是 `trace_id -> route`，`ticketNo` 是 `ticket_no -> route`。**挑不出唯一一个（0 个或多个）或未通过探活 → 直接走完整路径**（快路径依赖内网数据，拿不到就是拿不到）。
-2. 派 `bug-analyzer`，输入 `{mode: "lookup", anchorKind: "traceId"|"ticketNo", anchor: <字面量>, project: <code>}`。它内部经 `data-fetch` 跑上一步选出的那**一个**槽位（契约见 `skills/data-fetch/SKILL.md` 的「anchor-lookup」节），只回一个结果：这条请求 / 这张单子对应的**接口路由**。这一步对代码只读、对数据源也只读（不得对任何注册源发起写动作）。
+2. 派 `supperH-bug-analyzer`，输入 `{mode: "lookup", anchorKind: "traceId"|"ticketNo", anchor: <字面量>, project: <code>}`。它内部经 `supperH-data-fetch`（取数协议） 跑上一步选出的那**一个**槽位（契约见 `skills/supperH-data-fetch/SKILL.md` 的「anchor-lookup」节），只回一个结果：这条请求 / 这张单子对应的**接口路由**。这一步对代码只读、对数据源也只读（不得对任何注册源发起写动作）。
 3. 按反查回报分流：
    - **恰好一条 route**（`code: ANALYZED` + `data.route` 非空且 `data.routes.length == 1`）→ 用该 route 作为 `anchor` 继续步骤 1.5（`--anchor "<反查出的 route>"`，`--text` 仍是用户原始描述）。
    - **零条 / 多条 / `TARGET_NOT_FOUND` / driver 报错 / 超时** → **走完整路径**；终判记 `anchor_lookup_failed`。多条时**不许**任选其一。
@@ -108,7 +108,7 @@ permission:
 
 ## 步骤 1.6 · 意图复述（I0，**两条路径常驻**）
 
-> **编号在 1.5 之后、执行在 1.5 之前**：复述结果是步骤 1.5 门禁的必填入参（`--intent-json`）。编号是稳定标识 —— `skills/incident-triage/SKILL.md` 的交接表、`scripts/resolve-project.mjs` 头部文档与 jsonl 字段 `intentGiven` 都按「步骤 1.6」引用它，重编号会把这批引用一起打断。
+> **编号在 1.5 之后、执行在 1.5 之前**：复述结果是步骤 1.5 门禁的必填入参（`--intent-json`）。编号是稳定标识 —— `skills/supperH-incident-triage/SKILL.md` 的交接表、`scripts/resolve-project.mjs` 头部文档与 jsonl 字段 `intentGiven` 都按「步骤 1.6」引用它，重编号会把这批引用一起打断。
 
 G0–G4b 全部是**定位**判据（能不能把问题锁到一个 route / 一个 batch），没有一道回答“我到底有没有听懂你要什么”。定位越精确，执行错误意图的代价越大：快路径 4 跳改完、编译通过、单测通过，唯独改的不是用户要的那件事 —— 这类失败在 F5/F6 上**完全看不见**。所以两条路径都得复述：
 
@@ -171,7 +171,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 回显之后**不必等待确认**即可继续，除非门禁判了 `40`（或 `intent.ok === false`）。这是“暴露误解”的机制，不是“请求授权”的机制：把它做成每轮必等回复，等于把快路径的收益整个还回去。
 
-复述**不是走完就丢**的东西：它要随单下发到执行层（具体字段见步骤 4 / 步骤 6 / F3 / F4）。只停在入口说一遍的复述，只能证明我听懂了；传到 `bug-dev` 手里才约束得住“改的是不是那件事”。
+复述**不是走完就丢**的东西：它要随单下发到执行层（具体字段见步骤 4 / 步骤 6 / F3 / F4）。只停在入口说一遍的复述，只能证明我听懂了；传到 `supperH-bug-dev` 手里才约束得住“改的是不是那件事”。
 
 ### `40` 的两条硬纪律
 
@@ -204,7 +204,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 | `34` | 目标方法完整度 < L3 | **正常分流** → 完整路径；终判建议 `/supperH-learn --mode update` |
 | `35` | 学习数据过期：**仓库级** commit 不等（G4a）**且**该 batch 的 `sources` 与 `git diff` 相交（G4b），或 `sources` 缺失/形态不合法、`git diff` 与 HEAD 取不到 —— **无从判定一律当过期** | **正常分流** → 完整路径步骤 3 定向重学 |
 | `36` | **门禁根本没求值**：`--anchor`/`--text`/`--intent-*` 不成对或缺值、缺 `--module`、intent 不是合法 JSON、或脚本内部异常 | **正常分流** → 完整路径；终判记 `gate_incomplete`。**这是调用姿势错误，不是“没查出问题所以可以快”，也不是“该去问用户”** |
-| `37` | **G5：影响半径 > 1 层，或 lite 护栏被破**（`bug-analyzer(lite)` 回报 `IMPACT_WIDE` / `external_refs` 非空 / `reads` 非空）| **升格完整路径**（见 F3）；终判记 `impact_wide` |
+| `37` | **G5：影响半径 > 1 层，或 lite 护栏被破**（`supperH-bug-analyzer(lite)` 回报 `IMPACT_WIDE` / `external_refs` 非空 / `reads` 非空）| **升格完整路径**（见 F3）；终判记 `impact_wide` |
 | `40` | **I0：意图欠定义**（缺槽位 / 引用对不上原话 / 两格共用一句 / 无症状句 / 锚点不在原话）—— **不在 30–37 段内，不是分流信号** | **停下来按步骤 1.6 一次性补问用户**，拿到答复后重跑一次；仍 `40` 则停止。禁止当“正常分流”默默转完整路径继续改（那等于把未听的意图往下传） |
 | `10`/`11`/`12` | 项目门禁 | 同步骤 0：立即硬停 |
 
@@ -221,7 +221,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 - **变更面扩大**：方法/函数签名、参数列表、返回值、`pom.xml`/`*.gradle`、依赖新增或升级、`application*.yml`/`*.properties`、配置中心/Nacos/Apollo、`*Mapper.xml`/MyBatis 标签、SQL 语句（`<select>`/`resultMap` 等）、索引 DDL（建表/改表/**加索引**/删索引）、对外接口/序列化兼容、重命名
 - **风险语义**：事务、回滚、锁、并发、线程/线程池、异步、幂等、超时、慢查询/很慢/耗时/slow sql、性能、QPS/TPS、死锁、内存溢出/泄漏、连接池、偶发/间歇/有时/概率/不稳定/高并发、鉴权/认证/token/JWT/加密/权限/脱敏/Spring Security/Shiro、缓存/Redis/MQ/Kafka/RocketMQ/RabbitMQ
 - **数据面**：数据修复/刷数据/补数/订正/存量数据（含繁体写法）、任何暗示写库的说法（保存失败/入库/落库/主键冲突，以及 `insert`/`update`/`delete` 的**子串**命中 —— `deleteById`、`insertSelective`、`batchUpdate` 这类驼峰方法名一样出局）
-- **规模**：预估 diff 超 `diff_budget` 行数或文件数（默认 40 行 / 2 文件，L2 只能收紧、硬上限 80 行 / 4 文件）—— 此项 F4 时由 `bug-dev` 实测回报，不在脚本里预估
+- **规模**：预估 diff 超 `diff_budget` 行数或文件数（默认 40 行 / 2 文件，L2 只能收紧、硬上限 80 行 / 4 文件）—— 此项 F4 时由 `supperH-bug-dev` 实测回报，不在脚本里预估
 
 > 扫描前先做 Unicode **NFKC 归一**，全角/繁体写法盖不到是漏杀；描述里命中否决词即出局，即便你认为该技术点其实很简单。
 
@@ -232,7 +232,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 仅在步骤 1.5 退出 `0` 后适用（步骤 1.6 的复述已回显给用户、且 `intent.ok === true`，否则根本进不了这里）。每个派发前仍须首行回显 `target project: <code>`（R5）。
 
 - **F2 DB 门禁** — 同步骤 2，不降级。
-- **F3 `bug-analyzer` + G5 回灌验收** — 先派 `bug-analyzer`，输入 `{module, target: anchorResolved, dimensions: ["impact"], depth: 1, lite: true, intent, scope: { roots, mustAnswer, maxFiles }}`（`intent` 与 `scope` 同步骤 4）。拿到回报后，**必须把回报原文回灌同一个脚本由它判 G5**（不靠你读文字自行判定）：
+- **F3 `supperH-bug-analyzer` + G5 回灌验收** — 先派 `supperH-bug-analyzer`，输入 `{module, target: anchorResolved, dimensions: ["impact"], depth: 1, lite: true, intent, scope: { roots, mustAnswer, maxFiles }}`（`intent` 与 `scope` 同步骤 4）。拿到回报后，**必须把回报原文回灌同一个脚本由它判 G5**（不靠你读文字自行判定）：
   ```
   node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<module>" --anchor "<同 1.5 的锚点>" --text "<同 1.5 的描述>" --intent-json '<同 1.5 的复述 JSON>' --impact-json '<analyzer 回报的完整 JSON>'
   ```
@@ -243,10 +243,10 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
   - 退出 `40` → 门禁重跑时 I0 不合格（你中途改过 `--intent-*` 或 `--text`）→ 回步骤 1.6 重新复述，**不**计入升格。
 
   > 你**不得**自己读 analyzer 回报的文字就下“影响很窄”的结论；那是 P0 之前的做法，现已违反“判定归脚本”。脚本只能验回报形状（它没读源码），所以 G5 永久弱于 G1–G4——信它的结论但验它的格式。
-- **F4 `bug-dev`** — 输入增带 `path: "fast"`、`diff_budget: { lines: fastPath.budget.maxDiffLines, files: fastPath.budget.maxFiles }`（脚本返回的字段名是 `maxDiffLines/maxFiles`，`bug-dev` 吃的是 `lines/files`，**由你映射**）、`anchor: anchorResolved`、`intent`（同步骤 6：快路径不省它，`intent_check` 的降级规则也一模一样）。
+- **F4 `supperH-bug-dev`** — 输入增带 `path: "fast"`、`diff_budget: { lines: fastPath.budget.maxDiffLines, files: fastPath.budget.maxFiles }`（脚本返回的字段名是 `maxDiffLines/maxFiles`，`supperH-bug-dev` 吃的是 `lines/files`，**由你映射**）、`anchor: anchorResolved`、`intent`（同步骤 6：快路径不省它，`intent_check` 的降级规则也一模一样）。
   - `content_gaps` 非空 → **升格完整路径**（快路径不做 supplement）。
   - 实际 diff 超 budget → **升格完整路径**。
-- **F5 `bug-tester`** — 输入 `{modules: [module], test_scope: "unit", db_context: {...}}`。**绝不可跳。**
+- **F5 `supperH-bug-tester`** — 输入 `{modules: [module], test_scope: "unit", db_context: {...}}`。**绝不可跳。**
   - `COMPILE_FAIL` / `FAIL_TESTS` → 回滚 F4 改动 → 报失败（**不在快路径重试**）。
 - **F6 终判** — 按步骤 8 的格式 + `fast_path` 段。
 
@@ -267,13 +267,13 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 先看步骤 0/1.5 解析器返回体里有没有 `db` 字段（`db` 缺失或为 `null` = 本项目**未接入数据库**，即纯代码模式）：
 
 - **无 `db` 段** → 本步骤无数据可判。**不要猜库名、不要拿其它项目的 schema 凑**：把“DB 取证”记为明确缺口写入终判（`DB_GATE_SKIPPED_NO_DB`：未接入数据库，本次只有代码侧结论），并告知可用 `/supperH-init` 补接。用户若坚持“要看库里实际数据”，这是 36（环境无源可采）而不是失败。
-- 有 `db` 段时（下面三条对 `bug-dev` / `bug-tester` / `bug-test-writer` 同一口径，派发时把 `db_context` 一起下发）：
-  - 取数（只读 SQL）→ 正常走 `data-fetch`；语句证明不出只读就是 `DB_GATE_DENY`，不弹确认也不改写。
-  - 需要**变更数据**（含“先清一批脏数据再复现”这种）→ 你不执行。按 `skills/driver-contract/SKILL.md` §SQL 工件契约把六段齐全的 SQL 文件写到 `{{TASKS_ROOT}}/<task_id>/sql/`，终判该项记 `partial` + `DB_WRITE_OUT_OF_SCOPE`，并在报告里把文件路径与执行顺序原样交给用户。
+- 有 `db` 段时（下面三条对 `supperH-bug-dev` / `supperH-bug-tester` / `supperH-bug-test-writer` 同一口径，派发时把 `db_context` 一起下发）：
+  - 取数（只读 SQL）→ 正常走 `supperH-data-fetch`；语句证明不出只读就是 `DB_GATE_DENY`，不弹确认也不改写。
+  - 需要**变更数据**（含“先清一批脏数据再复现”这种）→ 你不执行。按 `skills/supperH-driver-contract/SKILL.md` §SQL 工件契约把六段齐全的 SQL 文件写到 `{{TASKS_ROOT}}/<task_id>/sql/`，终判该项记 `partial` + `DB_WRITE_OUT_OF_SCOPE`，并在报告里把文件路径与执行顺序原样交给用户。
   - 库名从 `{{PROJECT.db.schemas.prod}}` / `{{PROJECT.db.schemas.uat}}` / `{{PROJECT.db.schemas.test}}` 里按环境取，写进工件第 1 段（目标标注）。三个环境的库名在这里**只是标注信息**，不决定拦不拦 —— 拦是不分环境的。
 
 > 旧实现在这里比对一份禁写清单，判“目标 schema 命中 → 终止、未命中 → 放行”，并写着“`db.schemas.test` 允许读写（需 `writableUser`）”。该机制已从 L1 契约退役：清单为空、传空串、database 名与 PG schema 名层级错配（清单装 `appdb`，adapter 传 `app_dw`）三种情形全都静默放行，而 `.secrets` 里本来就只有 `readonly_*` 一份凭据 —— 也就是说这条链从来没有第二个出口。现在判据是“这条通道有没有写出口”，答案恒为没有。
-- **DB 之外的写动作不在本步骤判**：本次若要变更任何其它注册源（发消息 / 改记录状态 / 上传文件 / 改远端配置），门禁在该槽位登记的 `writes[]`：整段缺席 = 只读源，一律拒；`gate: deny` = 拒且不提供“要不要试试”；`gate: confirm` = 先把完整外发载荷给用户看、拿到明确同意才发（口径唯一定义在 `skills/data-fetch/SKILL.md` §guard）。这三条都由 L2 声明决定，**不由你对“这个动作危不危险”的印象决定，也不由“用户没反对”决定**。
+- **DB 之外的写动作不在本步骤判**：本次若要变更任何其它注册源（发消息 / 改记录状态 / 上传文件 / 改远端配置），门禁在该槽位登记的 `writes[]`：整段缺席 = 只读源，一律拒；`gate: deny` = 拒且不提供“要不要试试”；`gate: confirm` = 先把完整外发载荷给用户看、拿到明确同意才发（口径唯一定义在 `skills/supperH-data-fetch/SKILL.md` §guard）。这三条都由 L2 声明决定，**不由你对“这个动作危不危险”的印象决定，也不由“用户没反对”决定**。
 
 ## 步骤 3 · 学习模块新鲜度检查
 
@@ -285,18 +285,18 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 读返回体的 `freshness` 字段：
 
-- `available: false` → 该模块从未学习 → 派 `prelearn-analyzer`（mode=init）+ `prelearn-writer`（mode=init）先学再继续
+- `available: false` → 该模块从未学习 → 派 `supperH-prelearn-analyzer`（mode=init）+ `supperH-prelearn-writer`（mode=init）先学再继续
 - `available: true, stale: false` → 一致，继续步骤 4
-- `available: true, stale: true` → 不一致（看 `learnedAtCommit` vs `headCommit`）→ 派 `prelearn-analyzer` (mode=update) 定向重学受影响 Controller → 派 `prelearn-writer` (mode=update) 落地 → 再回到步骤 4
+- `available: true, stale: true` → 不一致（看 `learnedAtCommit` vs `headCommit`）→ 派 `supperH-prelearn-analyzer` (mode=update) 定向重学受影响 Controller → 派 `supperH-prelearn-writer` (mode=update) 落地 → 再回到步骤 4
 
 > 这里的 `freshness` **仍为仓库级**（与步骤 1.5 的 G4b 故意不一致，不是漏改）：它驱动的是“要不要重学”，不是“能不能走快路径”——误判代价多不过一次重学。门禁侧才需要 batch 粒度收窄。**禁止为了“对齐”而把 `readFreshness` 改成与 G4b 同判据**，那等于作废已学的覆盖率。
 
 ## 步骤 4 · 分析定位
 
-- 派 `bug-analyzer` 输入：`{module, target, dimensions: ["impact"], depth: 2, intent, scope: { roots, mustAnswer, maxFiles }}`
+- 派 `supperH-bug-analyzer` 输入：`{module, target, dimensions: ["impact"], depth: 2, intent, scope: { roots, mustAnswer, maxFiles }}`
   - `intent` = 步骤 1.6 已过 I0 的那三句原文；`scope.mustAnswer` 要写成 `expected` 与 `actual` 之差（“为什么 <actual> 而不是 <expected>”），不是“分析这个方法的影响面”
   - `scope.roots` 至少含 `codeRoot` 与 `contextRoot`（解析器步骤 0 返回的那两个绝对路径），回灌 G5 时同一份路径用 `--scope` 再交给脚本校
-- 分析返回 `code: INSUFFICIENT_LEARNING` → 派 `prelearn-analyzer` 补学，再重跑 analyzer
+- 分析返回 `code: INSUFFICIENT_LEARNING` → 派 `supperH-prelearn-analyzer` 补学，再重跑 analyzer
 - 多维分析可拆成并发（`impact` / `cycle` / `duplication` 各自一个只读 analyzer，同批≤ 3 个），但回报要**逐份**回灌 `--impact-json`，不得合并成一份喂脚本。协议与整批 fail-closed 规则见 `.qoder/rules/20-workflow.md`「子 agent 并发与互斥」。
 
 ## 步骤 5 · 方案决策
@@ -306,26 +306,26 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 ## 步骤 6 · 修复执行
 
-- 派 `bug-dev` 输入：`{task, module, target, symptom, intent, context_refs, db_context}`
-- bug-dev 返回 `status: fail` → 走步骤 8 的失败降级，**不重试**、不换 agent
+- 派 `supperH-bug-dev` 输入：`{task, module, target, symptom, intent, context_refs, db_context}`
+- supperH-bug-dev 返回 `status: fail` → 走步骤 8 的失败降级，**不重试**、不换 agent
 - 返回 `data.intent_check: "mismatch"` → 本次终判 `status` 最高只能写 `partial`，并把那句话原样列进 `遗留问题`；`"absent"` 表示上游没做复述，记进 `遗留问题` 但不降级
 
 ## 步骤 7a · 补学处理
 
-- bug-dev 输出 `content_gaps` 非空 → 对每个 gap：
-  - 派 `prelearn-analyzer` (mode=enrich, target_method, gap_hint) 
-  - 派 `prelearn-writer` (mode=supplement) 落地
+- supperH-bug-dev 输出 `content_gaps` 非空 → 对每个 gap：
+  - 派 `supperH-prelearn-analyzer` (mode=enrich, target_method, gap_hint) 
+  - 派 `supperH-prelearn-writer` (mode=supplement) 落地
   - writer 若返回 `ANCHOR_NOT_FOUND` → 记录但不阻断主流程
 
 ## 步骤 7b · 编译 + 单测验证
 
-- 派 `bug-tester` 输入：`{modules: [module], test_scope: "unit", db_context: {...}}`
+- 派 `supperH-bug-tester` 输入：`{modules: [module], test_scope: "unit", db_context: {...}}`
 - tester 返回 `code: DB_UNREACHABLE` → 不阻断（诚实记录），但要求人工补跑
-- `code: FAIL_TESTS` / `COMPILE_FAIL` → 回滚 bug-dev 改动 → 报失败
+- `code: FAIL_TESTS` / `COMPILE_FAIL` → 回滚 supperH-bug-dev 改动 → 报失败
 
 ## 步骤 7c · 测试生成（可选）
 
-- 若 bug-dev 修复新增了方法 → 派 `bug-test-writer` 生成 T1-T2 用例
+- 若 supperH-bug-dev 修复新增了方法 → 派 `supperH-bug-test-writer` 生成 T1-T2 用例
 - 若测试类已存在 → 跳过（不覆盖）
 
 ## 步骤 8 · 终判 + 汇报
@@ -352,7 +352,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 快路径下的四项约定（省掉了动作，但不能省掉信息）：
 
 - 步骤 1.6 是**两条路径共有的输出义务**：`I0: manual`（只回显、未机检）只应出现在项目门禁 10/11/12 硬停、或连 `--module` 都还没定这两种场合；其余情形都是漏跑了那次空锚点调用，必须补跑。不得拿 `manual` 当“我没复述”的遮羞布
-- 步骤 7a 没做 → 把 `bug-dev` 回报的 `content_gaps` 原列到 `learning_gaps`
+- 步骤 7a 没做 → 把 `supperH-bug-dev` 回报的 `content_gaps` 原列到 `learning_gaps`
 - 步骤 7c 没做 → 把新增/变更方法列到 `test_advice`
 - 快路径下未新增源码阅读（F3 要求 `reads: []`），所以 DoD 的「学习记录更新」项恒为 `N/A`；一旦 F3 回报了 `reads` 就已触发升格，不在快路径里补学
 

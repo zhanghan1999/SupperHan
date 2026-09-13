@@ -34,10 +34,10 @@ subagent 返回必须是**结构化 JSON**，字段：
 
 | 并发属性 | agent | 依据 |
 |---|---|---|
-| **只读，可并发** | `bug-analyzer`、`prelearn-analyzer` | 不改仓内任何文件；取数只读 |
-| **写工作区，互斥** | `bug-dev`、`bug-refactor`、`bug-code-generator`、`bug-code-optimizer`、`bug-mybatis-optimizer`、`bug-test-writer` | 改代码 / 新增文件 |
-| **等同写类** | `bug-tester` | 跑编译与单测会写 `target/`、能触 `install`；两个 maven 同仓并行会相争产物目录与本地仓库 |
-| **只写私有根，与代码写类可并发** | `prelearn-writer` | 不碰 `codeRoot`；但**与同 module 的 `prelearn-analyzer` 互斥**（一边写 CURRENT/新代目录一边读它，拿到的批次的集合不是任何一瞬间的真实状态） |
+| **只读，可并发** | `supperH-bug-analyzer`（代码分析）、`supperH-prelearn-analyzer`（预学习读码） | 不改仓内任何文件；取数只读 |
+| **写工作区，互斥** | `supperH-bug-dev`（开发）、`supperH-bug-refactor`（重构）、`supperH-bug-code-generator`（代码生成）、`supperH-bug-code-optimizer`（代码优化）、`supperH-bug-mybatis-optimizer`（Mapper 优化）、`supperH-bug-test-writer`（测试编写） | 改代码 / 新增文件 |
+| **等同写类** | `supperH-bug-tester`（测试执行） | 跑编译与单测会写 `target/`、能触 `install`；两个 maven 同仓并行会相争产物目录与本地仓库 |
+| **只写私有根，与代码写类可并发** | `supperH-prelearn-writer`（预学习落笔） | 不碰 `codeRoot`；但**与同 module 的 `supperH-prelearn-analyzer` 互斥**（一边写 CURRENT/新代目录一边读它，拿到的批次的集合不是任何一瞬间的真实状态） |
 
 ### 并发约束
 
@@ -45,20 +45,20 @@ subagent 返回必须是**结构化 JSON**，字段：
 2. **同一 driver 槽位同时最多 1 个在途取数**。多个并行探活/查询叠在同一内网端点上，叠不出新信息，只会把本来健康的端点测成超时。
 3. **整批等齐再用**：任一返回 `fail` / `INSUFFICIENT_LEARNING` / `TARGET_NOT_FOUND` → **全批按最差的那个分流**（fail-closed）。不得拿“其余三个都 ok”掩盖那一个出局。
 4. **回灌脚本一次只装一份回报**：`--impact-json` / `--intent-json` 的输入都是一份对象，把两份 analyzer 回报合并成一份喂给脚本 = 稀释 `external_refs`，那比不验收更糟。
-5. **快路径 F3 不并发**：它只有一个 `bug-analyzer(lite)`，且回报要回灌 G5；并发收益只存在于**完整路径步骤 4**（把 `dimensions` 拆成多个只读 analyzer 同时派）与**多模块同时学习**（每模块一个 `prelearn-analyzer`）。
+5. **快路径 F3 不并发**：它只有一个 `supperH-bug-analyzer(lite)`，且回报要回灌 G5；并发收益只存在于**完整路径步骤 4**（把 `dimensions` 拆成多个只读 analyzer 同时派）与**多模块同时学习**（每模块一个 `supperH-prelearn-analyzer`）。
 6. 每个并发派发仍须逐条满足上面三条前置（首行回显 `target project: <code>` + 列参数 + 声明兜底），并发不免除任何一项；派发参数里永远显式带 `--project <code>`（既有红线）。
 
-> 真误并发了（写类重叠）不自行收拾：也不新增一个“并发冲突检测”去自壮（那会成了第三个真相源）。下一次 `bug-dev` 进它的步骤 4 时，`git status` 与 `dirty_files` 一比就露馅，落回“允许停下来问用户”硬清单第 1 条。
+> 真误并发了（写类重叠）不自行收拾：也不新增一个“并发冲突检测”去自壮（那会成了第三个真相源）。下一次 `supperH-bug-dev` 进它的步骤 4 时，`git status` 与 `dirty_files` 一比就露馅，落回“允许停下来问用户”硬清单第 1 条。
 
 ## 分批学习算法
 
-`prelearn-analyzer` 按 Controller 为单元切分 batch，遵守：
+`supperH-prelearn-analyzer` 按 Controller 为单元切分 batch，遵守：
 
 - **单 batch 上限 30KB**（含 frontmatter、路由标记、正文），超过必须切分
 - **一个 Controller 只属于一个 batch**（不允许跨 batch 拆同一 Controller 的方法）
 - **切分优先级**：Controller 数分片 > 方法数分片 > 单方法深挖后拆段
 - **batch 命名**：`batch-<NN>.md`，NN 从 01 递增，零填充
-- **`index.md` 必带**：路由名 → batch 文件 + 行号范围 + 完整度标记；格式按 `prelearn` skill 的「index.md 规范格式」节（首张表以 `| route |` 开列，七列 `route/controller/method/batch/lines/level/sources` **缺一不可** —— 这是机器契约，缺列 = 格式漂移 = 快路径门禁判 32 出局）。`sources` 列 = 该 batch 调用链可达文件全集（含 Controller 自身，repo-relative POSIX，`;` 分隔，追不全写 `-`），供快路径门禁 G4b 与 `git diff` 求交集做 batch 级新鲜度复核
+- **`index.md` 必带**：路由名 → batch 文件 + 行号范围 + 完整度标记；格式按 `supperH-prelearn`（预学习统筹） skill 的「index.md 规范格式」节（首张表以 `| route |` 开列，七列 `route/controller/method/batch/lines/level/sources` **缺一不可** —— 这是机器契约，缺列 = 格式漂移 = 快路径门禁判 32 出局）。`sources` 列 = 该 batch 调用链可达文件全集（含 Controller 自身，repo-relative POSIX，`;` 分隔，追不全写 `-`），供快路径门禁 G4b 与 `git diff` 求交集做 batch 级新鲜度复核
 
 ## CURRENT 原子切换
 
@@ -127,8 +127,8 @@ subagent 返回 `status: fail` 时：
 
 ## 内容级补学（supplement 模式）
 
-触发路径**只允许**：`bug-dev` 在修复过程中读了某方法的源码 → 修复摘要里输出"内容缺口清单"→ 主 agent 派 `prelearn-analyzer` 定向深挖 → 派 `prelearn-writer` copy-on-write 合并。
+触发路径**只允许**：`supperH-bug-dev` 在修复过程中读了某方法的源码 → 修复摘要里输出"内容缺口清单"→ 主 agent 派 `supperH-prelearn-analyzer` 定向深挖 → 派 `supperH-prelearn-writer` copy-on-write 合并。
 
 禁止：
 - 用户手动 `/supperH-learn --enrich`（污染上下文；一期不开放）
-- 无 bug-dev 回报的"整模块预补学"
+- 无 supperH-bug-dev 回报的"整模块预补学"

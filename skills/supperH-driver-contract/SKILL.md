@@ -1,9 +1,9 @@
 ---
-name: driver-contract
-description: supperH 驱动契约 skill。定义内网数据源驱动的标准接口：CLI 参数、JSON envelope、exit code、SELECT-only 守卫、凭据装载规范、协议级探活判据，以及两种调用通道（script / mcp）的同构关系与探测降级纪律。槽位名与个数归用户（L1 不列清单）。用户自开发内网实现时以本 skill 为唯一符合性判据。
+name: supperH-driver-contract
+description: supperH-driver-contract（驱动契约）— 驱动契约 skill。定义内网数据源驱动的标准接口：CLI 参数、JSON envelope、exit code、SELECT-only 守卫、凭据装载规范、协议级探活判据，以及两种调用通道（script / mcp）的同构关系与探测降级纪律。槽位名与个数归用户（L1 不列清单）。用户自开发内网实现时以本 skill 为唯一符合性判据。
 ---
 
-# skill: driver-contract
+# skill: supperH-driver-contract · 驱动契约
 
 ## 前置自检（硬性）
 
@@ -171,7 +171,7 @@ driver **只**允许从以下途径拿凭据：
 
   “没报”与“本就没有”必须分得开：一个 SQL 驱动与一个健康探测驱动同样不填 `query`，消费方就分不清“驱动忘了报”（缺陷，要上报 `query_missing`）与“确实没有”（事实）。枚举而不是自由文本，是为了让“没报”这一格可机械发现（同义词会漂）。
 - `query` 与 `queryOmitted` **互斥**；`params` 只能跟着 `query` 出现（没展示语句却给一堆绑定值 = 第二个无人解释的事实源）。两套实现（`base_driver.emit_ok` / `envelope.ok_envelope`）都在写入时一次性定死，不给下游去猜
-- 这三个键在 schema 里是**可选**字段而不是 `required`：写死必填会让存量驱动全部 exit 5，而“加字段不得让已注册项目突然全灭”是本契约的兼容铁律。约束落在 `skills/data-fetch` 的上报义务上，不落在文件形状上
+- 这三个键在 schema 里是**可选**字段而不是 `required`：写死必填会让存量驱动全部 exit 5，而“加字段不得让已注册项目突然全灭”是本契约的兼容铁律。约束落在 `skills/supperH-data-fetch` 的上报义务上，不落在文件形状上
 - `data.columns` 顺序与 `data.rows[i]` 严格对齐
 - 空结果 → `rows: []` 而非 `rows: null`；`columns` 允许空数组
 - 数值类型：`Decimal` → `float`；`datetime` → ISO 8601 字符串；`bytes` → base64 字符串。`base_driver.py` 提供 `_json_default` helper 自动处理

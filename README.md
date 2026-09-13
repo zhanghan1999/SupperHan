@@ -51,7 +51,7 @@ node scripts/setup.mjs --check           # 只体检不写入
 - 本仓库上传 `schemas/driver-response.schema.json` + `drivers-skeleton/base_driver.py` + 可跑的 `example_json_driver.py`
 - MCP 通道上传 `mcp-skeleton/`：一个壳 server（`supperh-drivers`，插件相对注册、零凭据）+ 共享契约包 `supperh_contract/`（envelope / exit code / SELECT-only 守卫 / 私有根定位）
 - 真实内网驱动实现（用户自己登记的那些源：业务库、日志检索、外部平台……）放 `../supper-Han-private/drivers/`，每人自开发，登记走 `/supperH-driver`；`kind: mcp` 的额外写一份 `drivers/<code>/adapter.py`（import 契约包，不复制守卫）
-- 取数通道只有两条：`script`（bash + 退出码）/ `mcp`（工具化）。MCP 只换取数通道，**不作任何分流依据**，且取数工具只绑 4 个只读/测试类子 agent（主 agent 与命令入口不绑）—— 见 `skills/driver-contract/SKILL.md` §调用通道
+- 取数通道只有两条：`script`（bash + 退出码）/ `mcp`（工具化）。MCP 只换取数通道，**不作任何分流依据**，且取数工具只绑 4 个只读/测试类子 agent（主 agent 与命令入口不绑）—— 见 `skills/supperH-driver-contract/SKILL.md` §调用通道
 - **没有“执行前预检”（VPN/网络通不通）这种模块**：连通性唯一合法判据是各槽位 `healthCheck` 的**协议级握手**退出码（ping / 网卡名 / 裸 TCP connect 均已被实测证伪）；连不上就停下，把端点 + 错误原文交给用户要求可连接环境 —— 见 `docs/architecture.md` §10.8
 
 ---
@@ -80,7 +80,7 @@ git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
 | `/supperH-init` | `commands/supperH-init.md` | 工作区级注册：扫描仓库预填结构字段 → 外部源**由用户多选**（全不选 = 纯代码模式，`db`/`drivers` 两段整段不写）→ 落 `projects/<code>.yaml` + `menus/<code>.yaml`；连通门禁 + driver 通道（`kind`）探测在此机械写定 |
 | `/supperH-bug` | `commands/supperH-bug.md` | Bug 全流程主入口：解析→DB 门禁→学习模块检查→派 subagent 修复→验证→终判 |
 | `/supperH-learn` | `commands/supperH-learn.md` | 学习入口：代码学习 / 菜单学习 / 流程学习 |
-| `/supperH-driver` | `commands/supperH-driver.md` | 数据源登记的唯一入口：槽位名由用户定（L1 不写死固定四种源）→ 描述充分性门禁 → 分流（驱动已有就直接登记 / 否则派 `driver-author` 先写）→ 写能力归类（`writes` + `confirm`/`deny` 由用户定）→ `driver-registry.mjs` 落盘 |
+| `/supperH-driver` | `commands/supperH-driver.md` | 数据源登记的唯一入口：槽位名由用户定（L1 不写死固定四种源）→ 描述充分性门禁 → 分流（驱动已有就直接登记 / 否则派 `supperH-driver-author`（驱动编写） 先写）→ 写能力归类（`writes` + `confirm`/`deny` 由用户定）→ `driver-registry.mjs` 落盘 |
 
 **二期再补**：`/supperH-flow`、`/supperH-package`、`/supperH-test`
 
@@ -113,9 +113,10 @@ git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
 ```
 supper-Han-java/
 ├── agents/                11 个 subagent（放开 external_directory 的只有 2 个，各锁一个私有根子目录：
-│                          prelearn-writer→context/ · driver-author→drivers/；名单锁在 tests/agent-permissions.test.mjs）
+│                          supperH-prelearn-writer→context/ · supperH-driver-author→drivers/；名单锁在 tests/agent-permissions.test.mjs）
 ├── commands/              6 个 primary command（setup/bootstrap/init/driver/bug/learn）
-├── skills/                5 个 skill（prelearn/data-fetch/auto-fix/driver-contract/incident-triage）
+├── skills/                5 个 skill（预学习统筹 / 取数协议 / 修复协议 / 驱动契约 / 现象分诊）
+│                          三条通道标识符一律 supperH- 前缀（IDE 全局命名空间同名会静默互相遮蔽）；名录见 docs/architecture.md §10.18
 ├── schemas/               L2 project.schema.yaml + 示例 + driver-response.schema.json
 ├── drivers-skeleton/      驱动契约骨架 + 可跑的 JSON 示例（script 通道）
 ├── mcp-skeleton/          MCP 壳 server + 共享契约包 supperh_contract（mcp 通道；零凭据）
@@ -156,7 +157,7 @@ supper-Han-java/
 
 ## 冲突点提示
 
-- `external_directory: deny` 是**除 prelearn-writer / driver-author 外**所有 agent 的硬约束。两个例外的共同特征是“写入落在私有根”且下沉不成脚本：writer 锁 `{{PRIVATE_ROOT}}/context/`（学习数据），driver-author 锁 `{{DRIVERS_ROOT}}`（驱动本体）。名单钉在 `tests/agent-permissions.test.mjs`，只改文案不改名单测试会先红。
+- `external_directory: deny` 是**除 supperH-prelearn-writer（预学习落笔） / supperH-driver-author 外**所有 agent 的硬约束。两个例外的共同特征是“写入落在私有根”且下沉不成脚本：writer 锁 `{{PRIVATE_ROOT}}/context/`（学习数据），supperH-driver-author 锁 `{{DRIVERS_ROOT}}`（驱动本体）。名单钉在 `tests/agent-permissions.test.mjs`，只改文案不改名单测试会先红。
 - `.qoder/rules/` **不走变量替换**——Qoder 直接把原文注入 prompt。红线里禁止出现任何 `{{...}}` 与真实项目专有词。
 - Qoder plugin 组件路径禁 `..` 与绝对路径 → sync 阶段把 `{{PRIVATE_ROOT}}` 等替换成绝对路径后写入 `dist/`。
 - MCP 侧是个例外：注册表 `dist/.mcp.json` **只能**是插件相对路径 + `env_vars` 名单，绝对私有根走 `mcp-skeleton/private-root.txt` 指针文件带外传递（sync 的 `--check` 形态断言：出现盘符、写了 env 值、指针缺失 → exit 4）。

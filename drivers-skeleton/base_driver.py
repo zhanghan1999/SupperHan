@@ -4,7 +4,7 @@
 supperH driver skeleton - base_driver.py
 
 Shared utilities for building data-fetch drivers that conform to the
-`driver-contract` skill in this repository.
+`supperH-driver-contract` skill in this repository.
 
 This file is a SKELETON. It does not connect to any real backend.
 Copy it (or example_json_driver.py) to <PRIVATE_ROOT>/drivers/ and
@@ -477,7 +477,7 @@ def SELECT_only_guard(sql: str, target_schema: str = "", forbid_writes: Iterable
         emit_error(EXIT_BAD_ARGS,
                    "DB_GATE_DENY: write side effect " + kw
                    + " —— 数据库通道无条件只读；需要变更数据请产出 SQL 工件交人工执行"
-                     "（见 skills/driver-contract/SKILL.md §SQL 工件契约）")
+                     "（见 skills/supperH-driver-contract/SKILL.md §SQL 工件契约）")
 
 
 # ---------- Base class ----------

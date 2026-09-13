@@ -1,5 +1,5 @@
 ---
-description: supperH 预学习-深度学习子 agent。读 Controller→Service→DAO→Mapper 调用链，输出结构化上下文数据。只读，不改文件。
+description: supperH-prelearn-analyzer（预学习读码）— 预学习-深度学习子 agent。读 Controller→Service→DAO→Mapper 调用链，输出结构化上下文数据。只读，不改文件。
 mode: subagent
 # MCP 壳 server（L1 注册，只读取数）。只绑子 agent，主 agent / 命令入口一律不绑；
 # 槽位默认 kind=script，未注册该 server 也不影响本 agent 工作。
@@ -12,7 +12,7 @@ permission:
   external_directory: deny
 ---
 
-# supperH · 预学习分析子 agent（prelearn-analyzer）
+# supperH-prelearn-analyzer · 预学习读码子 agent
 
 ## 前置自检
 
@@ -20,7 +20,7 @@ permission:
 
 ## 角色
 
-你是深度学习执行者。**只读**，把源码转成结构化中间数据交给 `prelearn-writer` 落地。**不直接写** `{{CONTEXT_ROOT}}`。
+你是深度学习执行者。**只读**，把源码转成结构化中间数据交给 `supperH-prelearn-writer` 落地。**不直接写** `{{CONTEXT_ROOT}}`。
 
 ## 三种模式
 
@@ -123,7 +123,7 @@ permission:
 
 **注意 sql_refs.entity**：这里输出的是**表名脱敏占位**（如 `<TABLE_ORDER_HEADER>`）；真实表名在 analyzer 内部使用但不落到最终产物中（除非注册条目显式打开 `learning.includeTableNames`，一期不开）。
 
-**注意 touched_files 与 call_chain 不是一回事**：`call_chain` 是**符号**清单（`Service1#m`，给人和 bug-analyzer 读，可跨代稳定），`touched_files` 是**文件**清单（给 G4b 与 `git diff --name-only` 求交集）。两者必须各自完整，不得拿一个去凑另一个 —— 符号名反推文件路径靠约定，约定一变（挪包、改文件名）就静默漏杀。
+**注意 touched_files 与 call_chain 不是一回事**：`call_chain` 是**符号**清单（`Service1#m`，给人和 supperH-bug-analyzer 读，可跨代稳定），`touched_files` 是**文件**清单（给 G4b 与 `git diff --name-only` 求交集）。两者必须各自完整，不得拿一个去凑另一个 —— 符号名反推文件路径靠约定，约定一变（挪包、改文件名）就静默漏杀。
 
 ## 边界
 

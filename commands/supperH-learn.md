@@ -17,7 +17,7 @@ permission:
 
 ## 角色
 
-你是 supperH 学习调度器。你不亲自读源码、不亲自写学习文件；你派发 `prelearn-analyzer` 分析 + `prelearn-writer` 落地。
+你是 supperH 学习调度器。你不亲自读源码、不亲自写学习文件；你派发 `supperH-prelearn-analyzer`（预学习读码） 分析 + `supperH-prelearn-writer`（预学习落笔） 落地。
 
 ## 三种模式
 
@@ -49,7 +49,7 @@ permission:
 node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>"
 ```
 
-- 退出 `0` → 持有返回 JSON 的 `code / contextRoot / codeRoot / effectiveRoot` 等；后续对 `prelearn-analyzer`/`prelearn-writer`/driver 的调用均**显式带** `--project <code>` 与该 `contextRoot`。
+- 退出 `0` → 持有返回 JSON 的 `code / contextRoot / codeRoot / effectiveRoot` 等；后续对 `supperH-prelearn-analyzer`/`supperH-prelearn-writer`/driver 的调用均**显式带** `--project <code>` 与该 `contextRoot`。
 - 退出 `10/11/12` → **立即停止**，原样输出解析器 `message`（分别引导 `/supperH-init`、消歧、`/supperH-bootstrap`），禁止进入步骤 1。不做任何 LLM 猜测。
 
 ## 步骤 0.5 · 菜单来源门禁（**仅菜单模式**）
@@ -91,10 +91,10 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 ## 步骤 3.5 · 菜单获取（**仅菜单模式**）
 
-输入 = 步骤 0 的 `menu` 配置；派 `prelearn-analyzer` 获取菜单数据（主 agent **不亲自连库/读文件**）：
+输入 = 步骤 0 的 `menu` 配置；派 `supperH-prelearn-analyzer` 获取菜单数据（主 agent **不亲自连库/读文件**）：
 
 ```
-派 prelearn-analyzer {
+派 supperH-prelearn-analyzer {
   mode: menu,
   module: "menu",
   menu_source: <步骤 0 的 menu 对象>,
@@ -102,7 +102,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 }
 ```
 
-- `menu.source == "database"` → analyzer 用**数据库通道**跑 **SELECT-only** 查询（默认取 `dbDriver` 指向的槽位；`menu.database.slot` 显式写了名字时以它为准。`--source <menu.database.source>`，`--filter` 传 `table/id/parentId/name/path`，可选 `where`；详见 driver-contract）。库里没接出数据库通道时不得“猜一个驱动先跑着”。
+- `menu.source == "database"` → analyzer 用**数据库通道**跑 **SELECT-only** 查询（默认取 `dbDriver` 指向的槽位；`menu.database.slot` 显式写了名字时以它为准。`--source <menu.database.source>`，`--filter` 传 `table/id/parentId/name/path`，可选 `where`；详见 supperH-driver-contract（驱动契约））。库里没接出数据库通道时不得“猜一个驱动先跑着”。
 - `menu.source == "code"` → analyzer 读 `menu.code.path`（相对 `effectiveRoot`），按 `menu.code.format` 解析。
 - analyzer 失败 → 原样上报其错误/退出码，**不换源重试**。
 
@@ -110,7 +110,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 对每一批 Controller：
 ```
-派 prelearn-analyzer {
+派 supperH-prelearn-analyzer {
   mode: init | update | enrich,
   module,
   controllers: [...],
@@ -121,12 +121,12 @@ analyzer 返回 → 立即派 writer 落地（**不留到最后一并落**，避
 
 > **并发只有一种形态**：多模块同时学 —— 每个 module 一条自己的 `analyzer → writer` 流水（不同 module 的分区目录天然不碰）。**同一 module 上永远串行**：writer 正在写新代目录 / 切 `CURRENT` 时再派一个 analyzer 读它，拿到的 batch 集合不是任何一瞬间的真实状态（完整规则见 `.qoder/rules/20-workflow.md`「子 agent 并发与互斥」）。
 
-> **菜单模式不重复本步**：菜单数据已在步骤 3.5 由 `prelearn-analyzer(mode=menu)` 产出 `data.menus`；菜单模式直接进步骤 5 落地（`module: "menu"`）。
+> **菜单模式不重复本步**：菜单数据已在步骤 3.5 由 `supperH-prelearn-analyzer(mode=menu)` 产出 `data.menus`；菜单模式直接进步骤 5 落地（`module: "menu"`）。
 
 ## 步骤 5 · 派发 writer（原子切换）
 
 ```
-派 prelearn-writer {
+派 supperH-prelearn-writer {
   mode: init | update | supplement,
   module,
   analyzer_output: <analyzer 返回的 data 字段>
@@ -165,4 +165,4 @@ writer 返回：
 - 禁止跳过 worktree 清理直接返回
 - 禁止把 `--enrich` 作为面向用户的公开模式（enrich 只由 supperH-bug 步骤 7a 内部触发；`/supperH-learn` 一期只暴露 init/update）
 - 禁止在菜单模式推断菜单来源或猜测 DB 表名/列名（红线：来源一律取自步骤 0 的 `menu` 配置）
-- 禁止主 agent 亲自连库或读菜单文件（红线：由 `prelearn-analyzer(mode=menu)` 获取）
+- 禁止主 agent 亲自连库或读菜单文件（红线：由 `supperH-prelearn-analyzer(mode=menu)` 获取）

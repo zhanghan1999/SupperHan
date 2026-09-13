@@ -112,7 +112,7 @@ properties:
     type: object
     additionalProperties: false
     required: [host, port, schemas, readonlyUser]
-    description: "Optional. ABSENT = this project connects no database (pure-code mode): DB-backed evidence steps in /supperH-bug are reported as gaps, and --env is rejected with exit 36 because there is no environment to sample from. When present EVERY key below is required on purpose - a half-filled db section is an undecided intent, and the undecided fields would keep their example_* template values, which read as real credentials and real schema names - validate-project.mjs' template-residue check fails such a file. This section describes a READ-ONLY channel: host/port/readonlyUser are connection facts and schemas is the environment-name -> database-name mapping; no key here grants writing. Changing data is delivered as a SQL artifact for a human to run (skills/driver-contract/SKILL.md §SQL 工件契约), never executed by a driver. db.writableUser and db.forbidWriteSchemas are retired keys: additionalProperties would only say 'unknown field', so validate-project.mjs names them with the migration step attached."
+    description: "Optional. ABSENT = this project connects no database (pure-code mode): DB-backed evidence steps in /supperH-bug are reported as gaps, and --env is rejected with exit 36 because there is no environment to sample from. When present EVERY key below is required on purpose - a half-filled db section is an undecided intent, and the undecided fields would keep their example_* template values, which read as real credentials and real schema names - validate-project.mjs' template-residue check fails such a file. This section describes a READ-ONLY channel: host/port/readonlyUser are connection facts and schemas is the environment-name -> database-name mapping; no key here grants writing. Changing data is delivered as a SQL artifact for a human to run (skills/supperH-driver-contract/SKILL.md §SQL 工件契约), never executed by a driver. db.writableUser and db.forbidWriteSchemas are retired keys: additionalProperties would only say 'unknown field', so validate-project.mjs names them with the migration step attached."
     properties:
       host: { type: string, minLength: 1 }
       port: { type: integer, minimum: 1, maximum: 65535 }
@@ -212,7 +212,7 @@ properties:
           enum: [route, fqn, fileLine]
 
   # ────────────────────────────────────────────────────────────────
-  # git 交付与回滚快照（skills/auto-fix「Snapshot 语义」/ docs/architecture.md §10.10）。
+  # git 交付与回滚快照（skills/supperH-auto-fix「Snapshot 语义」/ docs/architecture.md §10.10）。
   # 全部可选，缺省即最安全的形态：不 commit、改动留在工作区给人核对。
   #
   # 这两个值是**运行期输入**，由脚本在 --preflight 时读出并显式递出，
@@ -257,7 +257,7 @@ definitions:
       config:
         type: object
         description: "Driver-specific extras (index pattern, table prefix, etc). Free-form."
-      # ---- call channel (see skills/driver-contract/SKILL.md §调用通道) ----
+      # ---- call channel (see skills/supperH-driver-contract/SKILL.md §调用通道) ----
       kind:
         type: string
         enum: [script, mcp]

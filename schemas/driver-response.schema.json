@@ -24,7 +24,7 @@
         "driverVersion": { "type": "string" },
         "query": {
           "type": "string",
-          "description": "The statement ACTUALLY executed, placeholders kept as placeholders (bound values belong to `params`) - never a statement reconstructed after the fact. This is what lets a reviewer re-run the result instead of trusting it. Optional HERE on purpose: making it required would brick every driver registered before it existed, so enforcement lives one layer up - skills/data-fetch must surface an envelope that has neither `query` nor `queryOmitted` as `query_missing`."
+          "description": "The statement ACTUALLY executed, placeholders kept as placeholders (bound values belong to `params`) - never a statement reconstructed after the fact. This is what lets a reviewer re-run the result instead of trusting it. Optional HERE on purpose: making it required would brick every driver registered before it existed, so enforcement lives one layer up - skills/supperH-data-fetch must surface an envelope that has neither `query` nor `queryOmitted` as `query_missing`."
         },
         "params": {
           "type": ["object", "array"],

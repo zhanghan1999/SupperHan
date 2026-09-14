@@ -328,6 +328,8 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 - 若 supperH-bug-dev 修复新增了方法 → 派 `supperH-bug-test-writer` 生成 T1-T2 用例
 - 若测试类已存在 → 跳过（不覆盖）
+- 派发输入：`{module, targets: ["<class fqn>[#<method>]", ...], types: ["T1","T2"], db_context: {...}}`。`targets` 由**你**（主命令）用步骤 0/1.5 已跑过的 `resolve-project.mjs` 返回体（route→controller/method→sources 文件路径）拼出，随 `db_context` 一起下发。
+- **不要让 `supperH-bug-test-writer` 自己去读 `{{CONTEXT_ROOT}}`**：它 `external_directory: deny`，私有根在工作区外读不到（与本文步骤 2、`/supperH-learn` 步骤 2 同一纪律）。学习产物的反查一律由命令层经解析器完成后作为入参喂给它。
 
 ## 步骤 8 · 终判 + 汇报
 

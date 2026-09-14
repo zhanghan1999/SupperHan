@@ -779,6 +779,18 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 **通用性不变式**：与 F-15 同源——L1 可内置探测能力（认得"看着像入口"的目录名），不可内置唯一出口（认定入口必在 `controller/` 下）。`agents/supperH-prelearn-analyzer.md` 工作流改为**双向追踪**（正向追下游 Service/DAO、反向追上游入口 route），`skills/supperH-prelearn/SKILL.md` 记明 `sources` 列的正反双用契约。
 
 ---
+
+### 10.22 权限声明与正文互斥：deny 角色的正文不许伸手私有根去读（F-17）
+
+**缺陷（S2）**：`supperH-bug-test-writer` 的 frontmatter 是 `external_directory: deny`，但正文工作流第 1 步写着"从 `{{CONTEXT_ROOT}}/<module>/CURRENT/index.md` 读方法清单"。`CONTEXT_ROOT = PRIVATE_ROOT/context/` 按 C1/C2/C4 必在工具仓库工作区**之外**，deny 角色物理上读不到——**声明禁止的事，正文要求它做**。这是提示词 prose（非代码），运行时表现为静默退化：要么读失败、要么编造签名，三种都不报错，正落在本仓自定义的最坏类别（"默默变错，最难发现"）。机械扫之下发现**第二处同类**：`supperH-bug-mybatis-optimizer.md` 也写着"路径从 `{{CONTEXT_ROOT}}` 定位"。
+
+**本仓早有正解、只是没管到它**：C5（§6）为同类冲突（门禁要读 `index.md` 但 `bug-analyzer`/主 agent 均 deny）定的纪律是"**不改权限，把读取下沉进 node 进程（`resolve-project.mjs`），结果以 JSON 返回**"；`commands/supperH-learn.md` 步骤 2 也明写"你不亲自读 `{{CONTEXT_ROOT}}`，用解析器取数"。这两处 deny 角色的正文却直接伸手，违反了自己所在的纪律。
+
+**修法（对齐 C5，零权限扩张）**：① 两个 agent 正文去掉"从 `{{CONTEXT_ROOT}}` 读"，改为"用命令层派发时传入的 `targets`（类/方法 FQN 清单）定位，再读其在**本项目 codeRoot 内**的源文件"，并显式写"你不亲自读私有根"；② `commands/supperH-bug.md` 步骤 7c 明确由主命令用 `resolve-project.mjs` 返回体（route→method→`sources` 文件路径）拼 `targets` 随 `db_context` 下发；③ `tests/agent-permissions.test.mjs` 加机械护栏——**deny 的 agent/command 正文不得出现"从/由 + 私有根占位符"的肯定式读取**，命中即红。护栏诚实边界：只抓最直白的伸手句式（换措辞仍可绕，prose 无法完全机械判定），且明确**不**误伤否定句（"你不亲自读 `{{CONTEXT_ROOT}}`"）、描述 allow-agent 落点的句子（"产物落 `{{CONTEXT_ROOT}}`"）。**写侧**（"写到 `{{TASKS_ROOT}}`"）是另一类问题（TASKS 写权归属：supperH-bug 连 `edit: deny` 都无，需先定由谁落盘），不在本条范围，另计。
+
+**根因归类**：权限声明层（frontmatter 布尔开关）与提示词层（正文动作）此前**无任何一致性校验**，这类互斥可以只存在于一个 agent 正文里而全绿通过——与 entryPattern"只存在于设计文档/正文里也算违反"是同一盲区，现由本护栏补上。
+
+---
 ## 11. 一期范围与二期规划
 
 **一期做**：

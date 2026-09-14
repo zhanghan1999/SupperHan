@@ -28,7 +28,7 @@ permission:
 
 ## 工作流
 
-1. 读目标模块的 `Mapper.java` + `Mapper.xml`（路径从 `{{CONTEXT_ROOT}}/<module>/CURRENT/index.md` 定位）
+1. 读目标模块的 `Mapper.java` + `Mapper.xml`（源文件都在**本项目 codeRoot 内**，可直接读；要优化哪些 Mapper／`<select>` 由主命令派发时传入的 `targets` 给出，其文件路径来自 `resolve-project.mjs` 的 `sources` 列，命令层已解好）。**你不亲自读 `{{CONTEXT_ROOT}}`**（它在工作区之外，本 agent `external_directory: deny`，同 `/supperH-learn` 步骤 2 纪律）
 2. **建立基线** — 对每个待优化 `<select>` 用一个固定输入参数跑一次，记录结果集的**内容哈希**（列名+行排序后 SHA256）
 3. **应用优化** — 一次一个 `<select>`
 4. **等价验证** — 同参数再跑一次；结果哈希必须一致

@@ -41,7 +41,7 @@ permission:
 
 ## 工作流
 
-1. **收集接口签名** — 从 `{{CONTEXT_ROOT}}/<module>/CURRENT/index.md` 或指定 Controller/Service 文件读方法清单
+1. **收集接口签名** — 用主命令派发时传入的 `targets`（类 / 类#方法 FQN 清单）定位目标类，再读它在**本项目 codeRoot 内**的 Controller/Service 源文件取方法签名与参数类型。**你不亲自读 `{{CONTEXT_ROOT}}` 下的任何文件**（它在工作区之外，本 agent `external_directory: deny` + bash 窄白名单，两件事都做不到 —— 与 `/supperH-learn` 步骤 2 同一纪律）；学习产物 `index.md` 的 route→method→文件反查由命令层经 `resolve-project.mjs` 完成后作为入参下发，缺签名一律走步骤 6 的 `content_gaps` 回报，**不得**为凑齐用例臆造参数
 2. **分类** — 按上表 T1-T4 归类
 3. **生成骨架** — 每方法至少 3 个用例：正常路径 / 边界 / 异常
 4. **写文件** — 到 `src/test/java/{{PACKAGE_ROOT_PATH}}/<module>/...Test.java`

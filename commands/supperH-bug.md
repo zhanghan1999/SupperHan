@@ -295,6 +295,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 ## 步骤 4 · 分析定位
 
 - 派 `supperH-bug-analyzer` 输入：`{module, target, dimensions: ["impact"], depth: 2, intent, scope: { roots, mustAnswer, maxFiles }}`
+  - **不要让 `supperH-bug-analyzer` 自己去读 `{{CONTEXT_ROOT}}`**：它 `external_directory: deny`，私有根在工作区外读不到。学习产物 `index.md` 的 route→method→`sources` 反查由命令层经 `resolve-project.mjs` 完成后作为 `target`/入参喂给它（与本文步骤 7c、`/supperH-learn` 步骤 2 同一纪律）
   - `intent` = 步骤 1.6 已过 I0 的那三句原文；`scope.mustAnswer` 要写成 `expected` 与 `actual` 之差（“为什么 <actual> 而不是 <expected>”），不是“分析这个方法的影响面”
   - `scope.roots` 至少含 `codeRoot` 与 `contextRoot`（解析器步骤 0 返回的那两个绝对路径），回灌 G5 时同一份路径用 `--scope` 再交给脚本校
 - 分析返回 `code: INSUFFICIENT_LEARNING` → 派 `supperH-prelearn-analyzer` 补学，再重跑 analyzer
@@ -308,6 +309,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 ## 步骤 6 · 修复执行
 
 - 派 `supperH-bug-dev` 输入：`{task, module, target, symptom, intent, context_refs, db_context}`
+  - `context_refs` 是**你**（主命令）用步骤 0/1.5/4 已跑过的 `resolve-project.mjs` 返回体（route→method→`sources` 文件路径 / `path:line`）拼出、本项目 codeRoot 内的指针清单。**不要让 `supperH-bug-dev` 自己去读 `{{CONTEXT_ROOT}}`**：它也 `external_directory: deny`，私有根读不到（同步骤 4/7c 纪律）
 - supperH-bug-dev 返回 `status: fail` → 走步骤 8 的失败降级，**不重试**、不换 agent
 - 返回 `data.intent_check: "mismatch"` → 本次终判 `status` 最高只能写 `partial`，并把那句话原样列进 `遗留问题`；`"absent"` 表示上游没做复述，记进 `遗留问题` 但不降级
 

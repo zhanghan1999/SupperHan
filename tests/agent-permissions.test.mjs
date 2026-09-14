@@ -134,7 +134,7 @@ test('rules 文件自身合规：不得含双花括号占位符（它们不走 s
 //   而它们 `external_directory: deny` —— 声明禁止的事，正文要求它做。frontmatter 与 prose
 //   之间没有任何机械校验，这类互斥能全绿通过（和 entryPattern"只存在于设计文档也算违反"同盲区）。
 //   本测试把"肯定式伸手私有根"这一可机械识别的形态钉死：deny 文件正文命中即红。
-// 诚实边界（地板不是天花板）：只抓 `[从/由]` 或 `[写到/写进/写入]` + 占位符 这种最直白的伸手句式；
+// 诚实边界（地板不是天花板）：只抓 `[从/由/直读]`（否定后瞻排除"亲自/自己 读"）或 `[写到/写进/写入]` + 占位符 这种最直白的伸手句式；
 //   换措辞（如"落盘到 {{...}}"、"经 --emit-sql 落盘"）仍可能绕过——prose 无法完全机械判定，这条只挡最典型
 //   的复发。以下**不该**被算作伸手、故不匹配：① 否定句"你不亲自读 {{CONTEXT_ROOT}}"（无伸手前缀）；
 //   ② 描述 allow-agent 落点的句子"产物落 {{CONTEXT_ROOT}}"（"落"不在动词集）；③ 经 node 落盘的正确写法
@@ -144,12 +144,15 @@ const bodyOf = (text) => {
   const m = text.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
   return m ? text.slice(m[0].length) : text;
 };
-// 伸手前缀 = 读（从/由 私有根取数）或 写（写到/写进/写入 私有根）；后（可夹反引号+空白）紧跟私有根占位符。
-// 读侧曾漏网 `supperH-bug-test-writer` / `supperH-bug-mybatis-optimizer`（S2）；写侧曾漏网
+// 伸手前缀 = 读（从/由/直读 私有根取数）或 写（写到/写进/写入 私有根）；后（可夹反引号+空白）紧跟私有根占位符。
+// 读侧曾漏网 `supperH-bug-test-writer` / `supperH-bug-mybatis-optimizer`（S2，F-17）；写侧曾漏网
 // `supperH-bug` 主命令与 `supperH-bug-dev`（F-18：正文让它俩把 SQL 文件写到 {{TASKS_ROOT}}，而都 external_directory: deny）。
-const REACH_PRIVATE_RE = /(?:[从由]|写(?:到|进|入))[\s`]*\{\{(?:CONTEXT|PRIVATE|DRIVERS|TASKS)_ROOT\}\}/;
+// F-19 补上无"从/由"前缀的肯定式"直读/只读 {{CONTEXT_ROOT}}"（`supperH-bug-dev` L70 / `supperH-bug-analyzer` L37）：
+// 用否定后瞻区分肯定式与否定式——本仓否定式修正句只有"亲自读"与"自己去读"两种（都以 读 结尾但表否定），
+// 分别被 (?<!亲自) / (?<!自己去) 排除；而肯定式"只读"（前置 只）、行首列表项"读"（前置空白）无这些前缀，仍命中。
+const REACH_PRIVATE_RE = /(?:[从由]|(?<!亲自)(?<!自己去)(?<!自己)读|写(?:到|进|入))[\s`]*\{\{(?:CONTEXT|PRIVATE|DRIVERS|TASKS)_ROOT\}\}/;
 
-test('deny 的 agent/command：正文不得出现"从/由 私有根读"或"写到 私有根"指令（S2 权限声明与正文互斥）', () => {
+test('deny 的 agent/command：正文不得出现"从/由/直读 私有根"或"写到 私有根"指令（S2 权限声明与正文互斥）', () => {
   const offenders = [];
   for (const dir of ['agents', 'commands']) {
     const base = path.join(ROOT, dir);

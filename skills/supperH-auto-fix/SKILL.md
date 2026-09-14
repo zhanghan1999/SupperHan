@@ -195,3 +195,4 @@ Snapshot 是**回滚锚点**，不是提交动作。它必须满足三条：不�
 - 禁止 Apply 段绕过 Plan 的 `touched_files` 白名单（编辑了计划外文件即视为 `aborted`）
 - 禁止在没有快照锚点（`snapshot.sha` 为 null 且工作区不干净，或 `update-ref` 未成功）的情况下进入 Apply
 - 禁止把 fix_result 原样写入 git 追踪文件；结果落地在 `{{PRIVATE_ROOT}}/tasks/<task_id>/result.json`
+- **谁落这个 result.json（与 §SQL 工件同一盘归属）**：上面那句写的是**落点**，不是“让某个 agent 用编辑工具去写”。一期本 skill 只是协议骨架、无人真的落这个盘（`supperH-bug-dev` 把结果按输出契约**回传**给主命令，主命令向用户汇报）。二期抽出 `supperH-auto-fix` CLI 时，落 `{{PRIVATE_ROOT}}/tasks/` 依旧只能是 **node 进程内 `writeFileSync`**（与 `resolve-project.mjs --emit-sql`、jsonl 账本同源）——实现者 `supperH-bug-dev` 与主命令都 `external_directory: deny`，写不了工作区外的私有根，不得把它们接上直写此路径的活（那会重踏 F-18 的 S2 写侧后尘）。

@@ -805,6 +805,19 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 **遗留（另计，不在本条）**：`agents/supperH-bug-dev.md` L71 "只读 `{{CONTEXT_ROOT}}/<module>/CURRENT/index.md`" 是同类**读侧**伸手（bug-dev `external_directory: deny` 读不到 CONTEXT_ROOT），但其句式无"从/由"前缀，未被读侧护栏逮到；属 S2 读侧的另一处漏网，待单独核。`auto-fix` 的 `result.json` 落 `PRIVATE_ROOT/tasks` 是否同病，亦待盘上核验后另论。
 
 ---
+### 10.24 权限声明与正文互斥（读侧收尾）：deny 角色的正文不许"只读/读"私有根 index.md（F-19，闭 F-18 遗留）
+
+**缺陷（S2 读侧的最后两处漏网）**：F-17 消灭了带"从/由"前缀的伸手读取（`supperH-bug-test-writer` / `supperH-bug-mybatis-optimizer`），F-18 又在遗留里点名 `supperH-bug-dev` 工作流第 1 步"只读 `{{CONTEXT_ROOT}}/<module>/CURRENT/index.md`"——句式无"从/由"前缀，读侧护栏 `[从由]` 逮不到。**盘上核验时又发现第三处同类**：`supperH-bug-analyzer` 工作流第 1 步"读 `{{CONTEXT_ROOT}}/.../index.md` 建立基础认知"，而它同样 `external_directory: deny`——这正是 C5（§6）当初点名"门禁要读 `index.md` 但 `bug-analyzer`/主 agent 均 deny"的那个冲突；只是 C5 的"读取下沉进 node"历来只落到 `resolve-project.mjs` 给**主命令**用，从没管到 analyzer 正文自己伸手。两处运行时都是静默退化（读失败或编造 `path:line`），落在本仓自定义的最坏类别（"默默变错，最难发现"）。
+
+**修法（对齐 C5 / R3.5，零权限扩张）**：① `supperH-bug-dev` 工作流第 1 步去掉"只读 `{{CONTEXT_ROOT}}`"，改为"用命令层派发时传入的 `context_refs`（`index.md` 反查后的 route→method→`sources` 文件路径 / `path:line`，命令层已解好）定位，再读其在**本项目 codeRoot 内**的源文件"，并显式写"你不亲自读 `{{CONTEXT_ROOT}}`"；输入契约里 `context_refs` 的说明（原写 `<path in CONTEXT_ROOT>`，会诱导 bug-dev 去开私有根）与角色节口径一并改到"codeRoot 内指针、不亲自访问私有根"。② `supperH-bug-analyzer` 工作流第 1/2 步同改：反查结果由命令层喂进入参，回读源码限定在 `{{EFFECTIVE_ROOT}}`（= codeRoot，工作区内可读）；输入契约 `scope.roots` 注释澄清"contextRoot 出现于 roots 仅供回灌 `--scope` 做越界校验，不是让你去读它"。③ `commands/supperH-bug.md` 步骤 4 / 步骤 6 各加一条"不要让 analyzer/dev 自己读 `{{CONTEXT_ROOT}}`，反查由命令层经 `resolve-project.mjs` 完成后作为入参下发"（与既有步骤 7c 同句式）。④ 护栏 `agent-permissions.test.mjs` 把读侧伸手前缀从 `[从由]` 扩到含**肯定式"读"**。
+
+**护栏第一次要处理"同一动词的肯定/否定二义"**：本仓两处否定式修正句"**你不亲自读** `{{CONTEXT_ROOT}}`"（test-writer / mybatis / learn）与"**不要让 … 自己去读** `{{CONTEXT_ROOT}}`"（supperH-bug 步骤 4/6/7c）都以"读 + 私有根占位符"成形却表否定，**必须放过**；而肯定式"只读 `{{…}}`"（前置 `只`）与行首列表项"读 `{{…}}`"（前置空白）无这些前缀，命中即红。故用变长否定后瞻 `(?<!亲自)(?<!自己去)(?<!自己)读` 精确切开（Node 支持变长后瞻）。诚实边界不变——仍是地板不是天花板，换措辞可绕，但"伸手读 index.md"这一最典型复发形态自此有了一道机检。
+
+**`auto-fix` 的 `result.json` 遗留（同批核验，结论 = 非同类）**：F-18 把"`result.json` 落 `{{PRIVATE_ROOT}}/tasks` 是否同病"列为待核。盘上核验：`result.json` 只在 `skills/supperH-auto-fix/SKILL.md`（协议骨架，**skill 不在护栏扫描的 agents/commands 范围**）以**落点叙述**出现（"结果落地在 …"用"落/落地在"，非"写到"），`commands/supperH-bug.md` 与 `supperH-bug-dev.md` 正文**零引用** `result.json`——一期无人真的落这个盘（bug-dev 按输出契约回传、主命令向用户汇报）。故**不构成活跃的 S2 写侧缺陷**，是 F-18 诚实边界明列的"叙述一个 node 落盘目标路径"允许形态。仅在 §边界补一句"谁落这个盘"把二期 CLI 的落盘钉死在 node 进程（防将来把 deny-agent 接上直写私有根），闭掉这条遗留。
+
+**根因归类**：与 F-17/F-18 同盲区（权限声明层与提示词动作层此前无一致性校验），差别只在护栏的措辞覆盖面。本轮把读侧肯定式补到"含无介词前缀的动词'读'"，并首次引入否定后瞻处理肯定/否定二义。
+
+---
 ## 11. 一期范围与二期规划
 
 **一期做**：

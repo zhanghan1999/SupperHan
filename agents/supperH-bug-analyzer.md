@@ -34,8 +34,8 @@ permission:
 
 ## 工作流
 
-1. 读 `{{CONTEXT_ROOT}}/<module>/CURRENT/index.md` 建立基础认知（lite 模式下只读反查表指向的那一个 batch）
-2. **只有当学习记录不足** 时才回读 `{{EFFECTIVE_ROOT}}` 源码，读的位置必须严格限定在 index.md 指示的 `path:line` 区间（**lite 模式禁止这一步**）
+1. 用主命令派发时传入的学习产物反查结果（`index.md` 的 route→method→`sources` 文件路径 / `path:line`，命令层经 `resolve-project.mjs` 解好后作为入参下发）建立基础认知。**你不亲自读 `{{CONTEXT_ROOT}}` 下的任何文件**（它在工作区之外，本 agent `external_directory: deny`，物理上读不到；取这份数据靠命令层把反查结果喂进入参，同 `/supperH-learn` 步骤 2、`commands/supperH-bug.md` 步骤 7c 纪律）。
+2. **只有当传入的学习记录不足** 时才回读 `{{EFFECTIVE_ROOT}}`（本项目 codeRoot，在工作区**之内**，可读）源码，读的位置必须严格限定在入参反查结果指示的 `path:line` 区间（**lite 模式禁止这一步**）
 3. 输出结构化 JSON；**每一次读源码**都要在响应里显式声明（`reads: [...]`），供主 agent 判定是否要派 `supperH-prelearn-analyzer` 补学
 
 ## 输入契约
@@ -48,7 +48,7 @@ permission:
   "depth": 2,
   "intent": { "expected": "<用户期望>", "actual": "<当前实际>", "repro": "<复现条件|absent>" },  // 可选：步骤 1.6 已过 I0 验真的复述
   "scope": {
-    "roots": ["<绝对目录>", "..."],   // 只允许在这些目录下取证据（通常 = codeRoot [+ CONTEXT_ROOT]）
+    "roots": ["<绝对目录>", "..."],   // 只允许在这些目录下取证据（实际可读的只有 codeRoot；`CONTEXT_ROOT` 在工作区外你读不到，它的反查结果由命令层喂进 `target`/入参，出现于 roots 仅供回灌 `--scope` 做越界校验）
     "mustAnswer": "<一句话：本次要判定什么>",
     "maxFiles": 8
   },

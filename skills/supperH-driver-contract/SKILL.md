@@ -300,6 +300,8 @@ exit code ↔ JSON-RPC error code 对照（表本体在 `mcp-skeleton/supperh_co
 数据库通道不执行写。确实需要变更数据时，你的产物是一份**交人工执行的 SQL 工件**，落在
 `{{TASKS_ROOT}}/<task_id>/sql/`，文件名 `NNNN-<slug>.sql`（四位序号 + 短横线小写 slug，序号即建议执行顺序）。
 
+> **谁落这个盘：不是 agent 自己，是 node 进程。** 产出六段的角色（`supperH-bug` 主命令 / `supperH-bug-dev`）都 `external_directory: deny`，而 `{{TASKS_ROOT}}` 在工作区之外——它们用编辑工具写不进去。落盘唯一合法出口：主命令把六段正文写进一个临时文件，再跑 `node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --emit-sql --cwd "<WORKSPACE>" --task-id <id> --order <NNNN> --slug <slug> --sql-report <临时文件>`，由脚本确定式写进上面的路径（与私有根的 jsonl 账本同源：写私有根只有 node 进程做得到，不花任何 agent 权限）。**任何正文都不得要求 `deny` 角色用自己的编辑工具往私有根写文件**——那物理上做不到，属 S2 类缺陷（声明禁止的事正文却要求它做）。
+
 工件必须含六段，缺任意一段视为未产出（宁可回报缺口，也不交半截文件）：
 
 | # | 段 | 内容 | 为什么必须有 |
@@ -313,7 +315,7 @@ exit code ↔ JSON-RPC error code 对照（表本体在 `mcp-skeleton/supperh_co
 
 配套规则：
 
-- **产出即终判**：工件写完就到此为止。本次 DB 侧结论是 `partial` + `code: DB_WRITE_OUT_OF_SCOPE` —— 这不是失败，也不是“等会儿自己偷偷跑”，是能力边界。
+- **产出即终判**：工件落盘就到此为止。本次 DB 侧结论是 `partial` + `code: DB_WRITE_OUT_OF_SCOPE` —— 这不是失败，也不是“等会儿自己偷偷跑”，是能力边界。
 - `DB_WRITE_OUT_OF_SCOPE` 与 `DB_UNREACHABLE` 必须分开报：前者是“契约不授予写”，后者是“连不上”。混起来会让人去查网络，而问题从来不在网络。
 - 未接入数据库（解析器输出里没有 `db` 段）→ 连工件也写不出：第 1 段的库名没有出处。记为缺口 `DB_GATE_SKIPPED_NO_DB`，**不猜库名、不拿别的项目的库名凑**。
 - 工件里只放 SQL 与注释：不放账号名、不放连接串、不放 `*.local.json` 里的任何凭据。执行人本来就自己有连接方式。

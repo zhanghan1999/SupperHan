@@ -38,8 +38,7 @@ permission:
   "context_refs": ["<path in CONTEXT_ROOT>", ...],
   "db_context": {
     "connected": <true | false>,          // 解析器输出里有没有 db 段（false = 纯代码模式）
-    "env": "<prod | uat | test | absent>",
-    "artifact_dir": "{{TASKS_ROOT}}/<task_id>/sql"   // 需要改数据时 SQL 工件写这里，不是"能执行的入口"
+    "env": "<prod | uat | test | absent>"   // 需改数据时你只产出 SQL 正文；落盘由主命令经 resolve-project.mjs --emit-sql 完成（你 `external_directory: deny`，写不了私有根）
   },
   "delivery_mode": "none",
   "dirty_files": ["<--preflight 记录的仓库任务开始时已脏的文件>", "..."]
@@ -71,7 +70,7 @@ permission:
 1. **读上下文** — 只读 `{{CONTEXT_ROOT}}/<module>/CURRENT/index.md` 指向的 batch 文件，定位候选方法/SQL/校验点。**禁止直接 grep 源码定位**（红线）；只有当学习记录里已经指向具体文件+行号区间，你才可以 Read 那个文件的那一段。
 2. **确认根因** — 输出根因假设 + 影响的文件清单，逐条列 `path:line`。
 3. **DB 边界** — 你不执行任何写库动作，也不生成“复制粘贴即可跑”的 SQL。这不是“先比对一份禁写清单、不在清单里就放行”的问题——那条链已退役（清单为空 / 库名层级错配时它静默放行），现在的判据是**这条通道根本没有写出口**：
-   - 修复确实需要变更数据 → 按 `skills/supperH-driver-contract/SKILL.md` §SQL 工件契约把**六段齐全**的 SQL 文件写进 `db_context.artifact_dir`，路径进 `data.artifacts`，本次 `status: partial` + `code: DB_WRITE_OUT_OF_SCOPE`，`message` 里写清“等人工执行哪一份文件的哪一段”
+   - 修复确实需要变更数据 → 按 `skills/supperH-driver-contract/SKILL.md` §SQL 工件契约产出**六段齐全**的 SQL 正文，**放进输出契约 `data.sql_artifacts`（结构化文本数组，一条一个工件）——你 `external_directory: deny`，绝不自己往私有根写文件**，落盘由主命令经 `resolve-project.mjs --emit-sql` 完成。本次 `status: partial` + `code: DB_WRITE_OUT_OF_SCOPE`，`message` 里写清“每条工件建议的执行顺序”
    - `db_context.connected` 为 `false`（本项目未接入数据库）→ 连工件也写不出：目标库名没有出处。记 `DB_GATE_SKIPPED_NO_DB` 缺口，**不猜库名、不拿其它项目的 schema 凑**
    - 只读取证不归你：那是主 agent 侧 `supperH-data-fetch` 的事（它有自己的只读守卫）。你只改代码与产出工件
    - **不得**把“先跑一条 UPDATE 清场再复现”当成修代码的一部分，也不得要求主 agent 代跑
@@ -119,7 +118,8 @@ permission:
     "compile": "pass | fail",
     "content_gaps": [
       { "module": "...", "method": "...", "gap": "..." }
-    ]
+    ],
+    "sql_artifacts": [ "<六段齐全的 SQL 正文，一条工件一个字符串；需改数据才填，否则留空数组>" ]
   },
   "artifacts": []
 }

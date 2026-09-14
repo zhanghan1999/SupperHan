@@ -791,6 +791,20 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 **根因归类**：权限声明层（frontmatter 布尔开关）与提示词层（正文动作）此前**无任何一致性校验**，这类互斥可以只存在于一个 agent 正文里而全绿通过——与 entryPattern"只存在于设计文档/正文里也算违反"是同一盲区，现由本护栏补上。
 
 ---
+
+### 10.23 权限声明与正文互斥（写侧）：deny 角色的正文不许往私有根落 SQL 工件（F-18）
+
+**缺陷本体（S2 的写侧孪生）**：§SQL 工件契约把"变更数据的唯一合法产物"定为一份落在 `{{TASKS_ROOT}}/<task_id>/sql/NNNN-<slug>.sql` 的文件，而**被指定去写它的两个角色都写不了**：`commands/supperH-bug.md` 步骤 2 让主命令"把六段 SQL 文件写到 `{{TASKS_ROOT}}`"（它 `edit: deny` + `external_directory: deny`，连一个文件都写不了，还与其自己步骤 3 "两件事都做不到"的声明正面打架）；`agents/supperH-bug-dev.md` L74 + 输入契约 `artifact_dir` 让 bug-dev"把 SQL 文件写进 `artifact_dir`"（它 `edit: allow` 但 `external_directory: deny`，同样写不了工作区外的私有根）。全模型围绕"一份落盘的文件"设计（`auto-fix` 的 `sql_path`、`data-fetch`/`incident-triage` 的"产出 SQL 文件"皆依赖它），所以**错不在"要不要文件"，而在"让谁落盘"**。
+
+**本仓早有正解、同 C5 一脉**：私有根只能由 **node 进程**写——`resolve-project.mjs` 的 `logFastPathAttempt` 就往 `PRIVATE_ROOT/logs/fastpath-*.jsonl` 落盘，注释明写"costs no agent permission"（模型没有该能力，被 spawn 的 node 进程有）。喂大段多行内容进这个脚本的既有先例是 `--intent-report <临时文件>`（专避 PowerShell 吃引号/换行）。写侧正解因此是：**保留 `.sql` 文件模型不动（那 6 处引用继续成立），只把"写"从 deny-agent 挪进 node**。
+
+**修法（对齐 C5，零权限扩张）**：① `scripts/resolve-project.mjs` 加 `--emit-sql` 独立写盘模式——读 `--sql-report <临时文件>` 的六段正文，校验 `--task-id`/`--order`(四位)/`--slug` 均为单个安全路径段（防穿越）后确定式落 `tasksRoot/<id>/sql/NNNN-<slug>.sql`，成功退 0 递 `sqlArtifact.path`、任何不合格退 36 **绝不为 0**；`--emit-sql` 已在主命令 bash 窄白名单内，故主命令"跑白名单脚本 + 造一个喂脚本的临时文件"两个动作本就合法（同 `--intent-report`）。② `commands/supperH-bug.md` L273 改为"产出正文→回传→写临时文件→`--emit-sql` 落盘→终判展示路径+六段"，不再"用自己的编辑工具写私有根"。③ `agents/supperH-bug-dev.md` 去掉 `artifact_dir`，改为把六段正文放进**输出契约 `data.sql_artifacts`**（回传，不落盘），由主命令落。④ 契约正本 `skills/supperH-driver-contract/SKILL.md` §SQL 工件契约补"谁落这个盘"段。⑤ 护栏 `agent-permissions.test.mjs` 把伸手前缀从"从/由（读）"扩到"写到/写进/写入（写）"：deny 角色正文命中"写到 `{{..._ROOT}}`"即红。诚实边界不变——只禁"deny 角色用编辑工具伸手"，**不**误伤"叙述一个 node 落盘目标路径"（"确定式落盘到 `{{TASKS_ROOT}}`"无"写到"前缀，不匹配）。
+
+**端到端护栏**：落盘类 CLI 必须有走命令行的用例（本仓红线），`tests/resolve-project-cli.test.mjs` 补 5 例钉死 happy 落盘 / 参数与穿越一律 36 / 空正文不落半截 / jsonl 记账 / 项目未解析（10/11/12）根本不落盘。
+
+**遗留（另计，不在本条）**：`agents/supperH-bug-dev.md` L71 "只读 `{{CONTEXT_ROOT}}/<module>/CURRENT/index.md`" 是同类**读侧**伸手（bug-dev `external_directory: deny` 读不到 CONTEXT_ROOT），但其句式无"从/由"前缀，未被读侧护栏逮到；属 S2 读侧的另一处漏网，待单独核。`auto-fix` 的 `result.json` 落 `PRIVATE_ROOT/tasks` 是否同病，亦待盘上核验后另论。
+
+---
 ## 11. 一期范围与二期规划
 
 **一期做**：

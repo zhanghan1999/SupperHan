@@ -3,7 +3,7 @@ description: 当用户描述一个 Java bug、接口报错、异常堆栈、空�
 mode: primary
 permission:
   edit: deny
-  bash: allow   # 窄用途：本命令唯一允许的 bash 脚本是 resolve-project.mjs（可带 --module/--anchor/--text/--intent-json/--impact-json/--env/--preflight 多次调用，做 I0 意图门禁、快路径准入、新鲜度、G5 验收与本地事实预检）；编译/DB/测试/driver 仍走子 agent
+  bash: allow   # 窄用途：本命令唯一允许的 bash 脚本是 resolve-project.mjs（可带 --module/--anchor/--text/--intent-json/--impact-json/--env/--preflight/--emit-sql 多次调用，做 I0 意图门禁、快路径准入、新鲜度、G5 验收、本地事实预检，以及把六段 SQL 工件经 node 落盘到私有根）；编译/DB/测试/driver 仍走子 agent
   external_directory: deny
   task: allow
 ---
@@ -270,7 +270,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 - **无 `db` 段** → 本步骤无数据可判。**不要猜库名、不要拿其它项目的 schema 凑**：把“DB 取证”记为明确缺口写入终判（`DB_GATE_SKIPPED_NO_DB`：未接入数据库，本次只有代码侧结论），并告知可用 `/supperH-init` 补接。用户若坚持“要看库里实际数据”，这是 36（环境无源可采）而不是失败。
 - 有 `db` 段时（下面三条对 `supperH-bug-dev` / `supperH-bug-tester` / `supperH-bug-test-writer` 同一口径，派发时把 `db_context` 一起下发）：
   - 取数（只读 SQL）→ 正常走 `supperH-data-fetch`；语句证明不出只读就是 `DB_GATE_DENY`，不弹确认也不改写。
-  - 需要**变更数据**（含“先清一批脏数据再复现”这种）→ 你不执行。按 `skills/supperH-driver-contract/SKILL.md` §SQL 工件契约把六段齐全的 SQL 文件写到 `{{TASKS_ROOT}}/<task_id>/sql/`，终判该项记 `partial` + `DB_WRITE_OUT_OF_SCOPE`，并在报告里把文件路径与执行顺序原样交给用户。
+  - 需要**变更数据**（含“先清一批脏数据再复现”这种）→ 你不执行、**也不要用自己的编辑工具往私有根写文件**（你 `edit: deny` + `external_directory: deny`，物理上写不了）。做法：让下游按 `skills/supperH-driver-contract/SKILL.md` §SQL 工件契约产出**六段齐全**的 SQL 正文并回传，你把正文放进一个临时文件（同 `--intent-report <临时文件>` 的用法），跑 `node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --emit-sql --cwd "<WORKSPACE>" --task-id "<task_id>" --order "<NNNN>" --slug "<slug>" --sql-report "<临时文件>"` 由 node 确定式落盘到 `{{TASKS_ROOT}}/<task_id>/sql/`（node 进程写私有根不花你的权限，与 jsonl 同源），返回体 `sqlArtifact.path` 即成品路径。终判该项记 `partial` + `DB_WRITE_OUT_OF_SCOPE`，并在报告里把**落盘路径 + 六段正文 + 建议执行顺序**原样交给用户；`--emit-sql` 退出码非 0（36）= 没落成，如实记缺口，别当已交付。
   - 库名从 `{{PROJECT.db.schemas.prod}}` / `{{PROJECT.db.schemas.uat}}` / `{{PROJECT.db.schemas.test}}` 里按环境取，写进工件第 1 段（目标标注）。三个环境的库名在这里**只是标注信息**，不决定拦不拦 —— 拦是不分环境的。
 
 > 旧实现在这里比对一份禁写清单，判“目标 schema 命中 → 终止、未命中 → 放行”，并写着“`db.schemas.test` 允许读写（需 `writableUser`）”。该机制已从 L1 契约退役：清单为空、传空串、database 名与 PG schema 名层级错配（清单装 `appdb`，adapter 传 `app_dw`）三种情形全都静默放行，而 `.secrets` 里本来就只有 `readonly_*` 一份凭据 —— 也就是说这条链从来没有第二个出口。现在判据是“这条通道有没有写出口”，答案恒为没有。

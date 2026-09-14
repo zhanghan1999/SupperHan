@@ -83,6 +83,24 @@
 //                                   connectivity checks, and this invariant is what lets the flag
 //                                   exist at all. **It never changes the exit code.** Absent -> the
 //                                   field is not emitted (same shape discipline as --env).
+//   --emit-sql                      WRITE mode (docs §10.23, F-18): land a six-segment SQL artifact
+//                                   (the only legal data-change product, §SQL 工件契约) into
+//                                   <tasksRoot>/<task-id>/sql/<order>-<slug>.sql. Needs --cwd to
+//                                   resolve the project. The body comes from a temp file via
+//                                   --sql-report <path> (same channel as --intent-report, chosen to
+//                                   dodge PowerShell eating quotes/newlines). WHY a node process does
+//                                   this write and not the agent: the private root sits OUTSIDE the
+//                                   workspace, and every producer role here (supperH-bug primary,
+//                                   supperH-bug-dev) is external_directory: deny - it physically cannot
+//                                   write there. Writing the private root from inside this node process
+//                                   costs no agent permission (identical to the jsonl ledger above), and
+//                                   keeps the "only node touches the private root" invariant intact.
+//                                   --task-id/--order(4 digits)/--slug are validated as single safe path
+//                                   segments (no separators / traversal); an empty or missing report body
+//                                   is reported as a gap, never a half file. Exit 0 = landed (payload.sqlArtifact
+//                                   .path is the artifact); a bad arg or write failure is 36, never 0.
+//                                   Independent mode: runs no gate, reads no learning data, injects no
+//                                   fastPath/freshness/preflight fields (plain shape stays identical).
 //
 // L2 overrides are wired here: project.fastPath = { enabled, maxDiffLines, maxFiles,
 // allowAnchorKinds }. Budgets are clamped to HARD_CAPS, so a typo cannot widen them.
@@ -224,6 +242,55 @@ function logFastPathAttempt(privateRoot, rec) {
   } catch {
     // Logging must never change the gate verdict or the exit code.
   }
+}
+
+// Land a six-segment SQL artifact into the private root from THIS node process. The
+// producer agents are external_directory: deny (private root is outside the workspace),
+// so they must not hand-write it - only a node process may write the private root (same
+// reason logFastPathAttempt can). This function does NOT judge the six segments' completeness
+// (that is the artifact contract / model's job); it only validates that task_id / order / slug
+// are single safe path segments and lands the given bytes at a path provably under tasksRoot.
+// Returns { status, written, path, ... }; status is 0 on success, EXIT.INCOMPLETE (36) otherwise
+// (never 0 for a partial/failed write, so the orchestrator can't read a miss as a delivery).
+function emitSqlArtifact(binding, { taskId, order, slug, reportFile }) {
+  const problems = [];
+  // Single safe path segment: leading alnum, then alnum/._- , length-capped. Rejects separators
+  // and ".." traversal by construction (first char must be alnum, so a bare ".." can't match).
+  const segOk = (v) => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(v);
+  const slugOk = (v) => typeof v === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(v);
+  const tid = typeof taskId === 'string' ? taskId.trim() : '';
+  const ordr = typeof order === 'string' ? order.trim() : '';
+  const slg = typeof slug === 'string' ? slug.trim() : '';
+  if (!reportFile) problems.push('缺 --sql-report：六段 SQL 正文的临时文件路径未给出（大段多行内容走文件通道，别塞进命令行）');
+  if (!segOk(tid) || tid.includes('..')) problems.push('--task-id 需为单个安全路径段（字母数字起头，可含 . _ -，不含分隔符/穿越）');
+  if (!/^\d{4}$/.test(ordr)) problems.push('--order 需为四位数字序号（NNNN，即建议执行顺序）');
+  if (!slugOk(slg)) problems.push('--slug 需为短横线小写 slug（[a-z0-9-]，字母数字起头，无路径分隔符）');
+  let body;
+  if (!problems.length) {
+    try { body = fs.readFileSync(path.resolve(reportFile), 'utf8').replace(/^\uFEFF/, ''); }
+    catch (e) { problems.push(`--sql-report 读取失败：${e && e.message ? e.message : String(e)}`); }
+    if (body !== undefined && body.trim() === '') {
+      problems.push('--sql-report 内容为空：宁可回报缺口，也不落半截/空工件');
+    }
+  }
+  if (!problems.length) {
+    const dest = path.join(binding.tasksRoot, tid, 'sql', `${ordr}-${slg}.sql`);
+    if (!isUnder(normKey(binding.tasksRoot), normKey(dest))) {
+      // Should be unreachable given segment validation, but the invariant "only land under
+      // tasksRoot" is worth a defensive check rather than a silent escape.
+      problems.push('目标工件路径逃逸出 tasksRoot（防御性拦截，不应发生）');
+    } else {
+      try {
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, body, 'utf8');
+        return { status: EXIT.PASS, written: true, path: dest,
+          bytes: Buffer.byteLength(body, 'utf8'), task_id: tid, order: ordr, slug: slg };
+      } catch (e) {
+        problems.push(`落盘失败：${e && e.message ? e.message : String(e)}`);
+      }
+    }
+  }
+  return { status: EXIT.INCOMPLETE, written: false, task_id: tid || null, order: ordr || null, slug: slg || null, problems };
 }
 
 // Absolute root set a project "owns" for cwd matching.
@@ -571,6 +638,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   let envSeen = false;
   let envName;                    // --env <name>：诊断基线（证据来自哪个环境），与代码侧的 HEAD 分家
   let preflightSeen = false;      // --preflight：只集本地事实 + 清扫快照 ref，永不改变退出码
+  let emitSqlSeen = false;        // --emit-sql：把六段 SQL 工件经 node 落盘到私有根（F-18 写侧 S2 的唯一合法出口）
+  let sqlTaskId;                  // --task-id <id>（落盘子目录名，单段安全路径）
+  let sqlOrder;                   // --order <NNNN>（四位序号 = 建议执行顺序）
+  let sqlSlug;                    // --slug <slug>（短横线小写）
+  let sqlReportFile;              // --sql-report <path>（六段正文临时文件，与 --intent-report 同通道避 shell 吃引号）
   const intentSource = () => (intentInline !== undefined ? '--intent-json' : '--intent-report');
   // 只认 lookup（大小写/空白不敏感），其余一律归 direct。写错了只会多验一道（多拦），
   // 不会把"锚点出处验真"这道护栏静默关掉——方向必须与漏杀/误杀纪律一致。
@@ -595,6 +667,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     else if (flag === '--scope') { scopeSeen = true; if (hasValue) scopeRoots.push(argv[++i]); }
     else if (flag === '--env') { envSeen = true; if (hasValue) envName = argv[++i]; }
     else if (flag === '--preflight') { preflightSeen = true; }
+    else if (flag === '--emit-sql') { emitSqlSeen = true; }
+    else if (flag === '--task-id')    { if (hasValue) sqlTaskId = argv[++i]; }
+    else if (flag === '--order')      { if (hasValue) sqlOrder = argv[++i]; }
+    else if (flag === '--slug')       { if (hasValue) sqlSlug = argv[++i]; }
+    else if (flag === '--sql-report') { if (hasValue) sqlReportFile = argv[++i]; }
   }
   // `--module` on its own is the documented freshness-only mode (exit 0, no gate fields).
   // A verdict is only requested once --anchor/--text/--intent shows up.
@@ -737,6 +814,23 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       ? { ...res.binding }
       : { ok: false, status: res.status, cwd: res.cwd, message: res.message, candidates: res.candidates };
     exitCode = res.status;
+
+    // ---- --emit-sql：独立写盘模式，先于所有门禁求值 ----
+    // 项目未解析（10/11/12）时 res.ok 为假，根本不进这里（“步骤 0 未过禁止一切下游”）。
+    // 命中就办完落盘直接 emit()（内部 process.exit），不再跑锚点/G5/预检：它是纯落盘，
+    // 不产任何判定字段，输出形状除 sqlArtifact 外与 plain 一致（同 --preflight/--env 的选配纪律）。
+    if (res.ok && emitSqlSeen) {
+      const r = emitSqlArtifact(res.binding, { taskId: sqlTaskId, order: sqlOrder, slug: sqlSlug, reportFile: sqlReportFile });
+      payload.sqlArtifact = r;
+      exitCode = r.status;
+      logFastPathAttempt(res.binding.privateRoot, {
+        stage: 'emit_sql', project: res.binding.code, status: r.status,
+        taskId: r.task_id ?? null, order: r.order ?? null, slug: r.slug ?? null,
+        written: r.written === true, path: r.path ?? null, bytes: r.bytes ?? null,
+        problems: r.problems ?? [], wall_time_ms: Date.now() - startedAt
+      });
+      emit();
+    }
 
     // Step-0 project gate wins over everything: never evaluate a fast path for a
     // workspace that has no unambiguously resolved project (R3.5). Hard stops

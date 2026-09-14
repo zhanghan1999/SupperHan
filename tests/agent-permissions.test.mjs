@@ -133,19 +133,23 @@ test('rules 文件自身合规：不得含双花括号占位符（它们不走 s
 //   `supperH-bug-test-writer` / `supperH-bug-mybatis-optimizer` 写着"从 {{CONTEXT_ROOT}} 读"，
 //   而它们 `external_directory: deny` —— 声明禁止的事，正文要求它做。frontmatter 与 prose
 //   之间没有任何机械校验，这类互斥能全绿通过（和 entryPattern"只存在于设计文档也算违反"同盲区）。
-//   本测试把"肯定式 从/由 私有根读取"这一可机械识别的形态钉死：deny 文件正文命中即红。
-// 诚实边界（地板不是天花板）：只抓 `从/由`+占位符 这种最直白的伸手句式；换措辞（不带"从"字）
-//   仍可能绕过——prose 无法完全机械判定，这条只挡最典型的复发。以下**不该**被算作伸手、故不匹配：
-//   ① 否定句"你不亲自读 {{CONTEXT_ROOT}}"（无"从"）；② 描述 allow-agent 落点的句子"产物落 {{CONTEXT_ROOT}}"；
-//   ③ 写侧"写到 {{TASKS_ROOT}}"（属 TASKS 写权归属的另一议题，不在本条范围）。
+//   本测试把"肯定式伸手私有根"这一可机械识别的形态钉死：deny 文件正文命中即红。
+// 诚实边界（地板不是天花板）：只抓 `[从/由]` 或 `[写到/写进/写入]` + 占位符 这种最直白的伸手句式；
+//   换措辞（如"落盘到 {{...}}"、"经 --emit-sql 落盘"）仍可能绕过——prose 无法完全机械判定，这条只挡最典型
+//   的复发。以下**不该**被算作伸手、故不匹配：① 否定句"你不亲自读 {{CONTEXT_ROOT}}"（无伸手前缀）；
+//   ② 描述 allow-agent 落点的句子"产物落 {{CONTEXT_ROOT}}"（"落"不在动词集）；③ 经 node 落盘的正确写法
+//   "确定式落盘到 {{TASKS_ROOT}}"（无"写到/写进/写入"前缀）——写侧的正解就是把落盘下沉进 node，
+//   只禁"deny 角色用自己的编辑工具伸手"，不禁"叙述一个 node 落盘的目标路径"。
 const bodyOf = (text) => {
   const m = text.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
   return m ? text.slice(m[0].length) : text;
 };
-// "从/由" 后（可夹一个反引号 + 空白）紧跟私有根占位符 = 要求本角色从私有根取数。
-const REACH_PRIVATE_RE = /[从由][\s`]*\{\{(?:CONTEXT|PRIVATE|DRIVERS|TASKS)_ROOT\}\}/;
+// 伸手前缀 = 读（从/由 私有根取数）或 写（写到/写进/写入 私有根）；后（可夹反引号+空白）紧跟私有根占位符。
+// 读侧曾漏网 `supperH-bug-test-writer` / `supperH-bug-mybatis-optimizer`（S2）；写侧曾漏网
+// `supperH-bug` 主命令与 `supperH-bug-dev`（F-18：正文让它俩把 SQL 文件写到 {{TASKS_ROOT}}，而都 external_directory: deny）。
+const REACH_PRIVATE_RE = /(?:[从由]|写(?:到|进|入))[\s`]*\{\{(?:CONTEXT|PRIVATE|DRIVERS|TASKS)_ROOT\}\}/;
 
-test('deny 的 agent/command：正文不得出现"从/由 私有根读取"指令（S2 权限声明与正文互斥）', () => {
+test('deny 的 agent/command：正文不得出现"从/由 私有根读"或"写到 私有根"指令（S2 权限声明与正文互斥）', () => {
   const offenders = [];
   for (const dir of ['agents', 'commands']) {
     const base = path.join(ROOT, dir);
@@ -157,5 +161,5 @@ test('deny 的 agent/command：正文不得出现"从/由 私有根读取"指令
     }
   }
   assert.deepEqual(offenders, [],
-    '这些 deny 角色正文要求"从私有根读"，但 external_directory: deny 让它读不到——应改由命令层经 resolve-project.mjs 注入入参（见 supperH-learn 步骤 2 纪律）');
+    '这些 deny 角色正文要求"从私有根读/往私有根写"，但 external_directory: deny 让它做不到——读取应改由命令层经 resolve-project.mjs 注入入参（见 supperH-learn 步骤 2 纪律），落盘应下沉进 node（见 resolve-project.mjs --emit-sql）');
 });

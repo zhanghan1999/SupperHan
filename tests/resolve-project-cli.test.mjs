@@ -861,3 +861,93 @@ test('d2 jsonl：预检落 stage=preflight 一行，带交付解析与清扫计�
   assert.equal(rec.dirtyListed, 1);
   assert.ok(!('dirtyFiles' in rec), '脏清单本体不进账本：它可以有几千条，只记数量');
 });
+
+// ---------- F-18 --emit-sql：六段 SQL 工件经 node 落盘到私有根（写侧 S2 的唯一合法出口） ----------
+// 为什么存在：产出工件的角色（supperH-bug 主命令 / supperH-bug-dev）都 external_directory: deny，
+// 私有根在工作区外它们写不了；写私有根只有 node 进程做得到（与 jsonl 同源）。这组用例锁的是接线：
+// CLI 旗标 → 路径段校验（防穿越）→ 真落盘 → 退出码 → jsonl，以及“没落成绝不为 0”。
+const DEMO_TASKS = () => path.join(privateRoot, 'tasks', 'demo');
+const SQL_BODY = [
+  '-- [1] 目标标注: prod -> appdb / table orders / expect 1 row',
+  '-- [2] 前置校验',
+  "SELECT status FROM orders WHERE id=42;  -- expect: 1 row, status=0",
+  'BEGIN;',
+  "UPDATE orders SET status=1 WHERE id=42;  -- [3] 变更语句（故意不写 COMMIT）",
+  '-- [4] 回滚',
+  'ROLLBACK;',
+  '-- [5] 证据链: task_id=T-1, OrderController.java:88',
+  '-- [6] 禁用项: 本工件不得由 AI/脚本自动执行'
+].join('\n');
+
+test('F-18 --emit-sql happy：六段正文落到 tasksRoot/<id>/sql/NNNN-<slug>.sql 且原样可读回', () => {
+  const report = path.join(root, 'sql-report.sql');
+  fs.writeFileSync(report, SQL_BODY, 'utf8');
+  const r = runCli(['--cwd', workspace, '--emit-sql', '--task-id', 'T-1',
+    '--order', '0001', '--slug', 'fix-order-status', '--sql-report', report]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.json.sqlArtifact.written, true);
+  assert.equal(r.json.sqlArtifact.order, '0001');
+  const expect = path.join(DEMO_TASKS(), 'T-1', 'sql', '0001-fix-order-status.sql');
+  assert.equal(path.normalize(r.json.sqlArtifact.path), path.normalize(expect), '落点必须是契约规定的 <task_id>/sql/NNNN-slug.sql');
+  assert.ok(fs.existsSync(expect), '文件应真的在盘上');
+  assert.equal(fs.readFileSync(expect, 'utf8'), SQL_BODY, '字节原样落盘，不得改写/加 BOM');
+  // 纯落盘模式不得顺带伪造门禁字段（与 plain 同一形状纪律）
+  assert.ok(!('fastPath' in r.json) && !('preflight' in r.json), 'emit-sql 不跑门禁也不预检');
+});
+
+test('F-18 --emit-sql 参数不合格一律 36、绝不为 0、且不落半截文件', () => {
+  const report = path.join(root, 'sql-report-bad.sql');
+  fs.writeFileSync(report, SQL_BODY, 'utf8');
+  const cases = [
+    ['缺 --sql-report', ['--cwd', workspace, '--emit-sql', '--task-id', 'T-2', '--order', '0001', '--slug', 'x']],
+    ['order 非四位', ['--cwd', workspace, '--emit-sql', '--task-id', 'T-2', '--order', '1', '--slug', 'x', '--sql-report', report]],
+    ['slug 含大写/非法字符', ['--cwd', workspace, '--emit-sql', '--task-id', 'T-2', '--order', '0001', '--slug', 'Fix_Order', '--sql-report', report]],
+    ['task-id 穿越', ['--cwd', workspace, '--emit-sql', '--task-id', '../escape', '--order', '0001', '--slug', 'x', '--sql-report', report]],
+    ['slug 穿越', ['--cwd', workspace, '--emit-sql', '--task-id', 'T-2', '--order', '0001', '--slug', '../../pwn', '--sql-report', report]],
+  ];
+  for (const [desc, args] of cases) {
+    const r = runCli(args);
+    assert.equal(r.status, 36, `${desc}：应为 36，实际 ${r.status} ${r.stderr}`);
+    assert.equal(r.json.sqlArtifact.written, false, `${desc}：未落成不得报 written:true`);
+    assert.ok((r.json.sqlArtifact.problems || []).length > 0, `${desc}：要把原因递到调用方手上`);
+  }
+  // 穿越目标绝不能被创建在 tasksRoot 之外
+  assert.ok(!fs.existsSync(path.join(privateRoot, 'escape')), 'task-id 穿越不得在私有根别处落文件');
+});
+
+test('F-18 --emit-sql 空正文 = 回报缺口，不落空工件（宁可缺口也不交半截）', () => {
+  const empty = path.join(root, 'sql-empty.sql');
+  fs.writeFileSync(empty, '   \n\n  ', 'utf8');
+  const r = runCli(['--cwd', workspace, '--emit-sql', '--task-id', 'T-3',
+    '--order', '0001', '--slug', 'empty', '--sql-report', empty]);
+  assert.equal(r.status, 36, '空白正文不得落成一个空 .sql 冒充已交付');
+  assert.equal(r.json.sqlArtifact.written, false);
+});
+
+test('F-18 --emit-sql jsonl：落一条 stage=emit_sql，带 written/path；失败也记账', () => {
+  const report = path.join(root, 'sql-report-log.sql');
+  fs.writeFileSync(report, SQL_BODY, 'utf8');
+  runCli(['--cwd', workspace, '--emit-sql', '--task-id', 'T-4', '--order', '0002', '--slug', 'logged', '--sql-report', report]);
+  runCli(['--cwd', workspace, '--emit-sql', '--task-id', 'T-4', '--order', 'bad', '--slug', 'logged', '--sql-report', report]);
+  const logDir = path.join(privateRoot, 'logs');
+  const f = fs.readdirSync(logDir).filter((x) => /^fastpath-\d{6}\.jsonl$/.test(x))[0];
+  const lines = fs.readFileSync(path.join(logDir, f), 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  const recs = lines.filter((l) => l.stage === 'emit_sql');
+  assert.equal(recs.length >= 2, true, '成功与失败都要记账：否则“多少工件没落成”无从统计');
+  const ok = recs.filter((l) => l.written === true).at(-1);
+  assert.equal(ok.status, 0);
+  assert.ok(ok.path && ok.path.endsWith('0002-logged.sql'), JSON.stringify(ok));
+  const bad = recs.filter((l) => l.written === false).at(-1);
+  assert.equal(bad.status, 36, '未落成记 36，不得混进成功分母');
+});
+
+test('F-18 --emit-sql 在项目未解析时根本不落盘（10/11/12 优先）', () => {
+  const elsewhere = path.join(root, 'ws-noemit');
+  fs.mkdirSync(elsewhere, { recursive: true });
+  const report = path.join(root, 'sql-noemit.sql');
+  fs.writeFileSync(report, SQL_BODY, 'utf8');
+  const r = runCli(['--cwd', elsewhere, '--emit-sql', '--task-id', 'T-9',
+    '--order', '0001', '--slug', 'x', '--sql-report', report]);
+  assert.equal(r.status, 10, '未注册工作区：硬停优先，不得因写了文件而变 0');
+  assert.ok(!('sqlArtifact' in r.json), '未解析项目时不注入 sqlArtifact 字段');
+});

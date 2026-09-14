@@ -11,9 +11,9 @@ permission:
 
 ## 职责边界（一句话）
 
-**bootstrap 建目录，init 写条目。** 本命令不生成、不修改、不覆盖任何项目配置（`projects/<code>.yaml` / `menus/<code>.yaml`）——那些只能由 `/supperH-init` 在**目标项目的工作区**里扫描后生成，否则结构字段（模块清单 / 包链 / git 分支）就得靠人肉猜。
+**bootstrap 建目录，init 写条目。** 本命令不生成、不修改、不覆盖任何项目配置（`projects/<code>.yaml` / `screens/<code>.yaml`）——那些只能由 `/supperH-init` 在**目标项目的工作区**里扫描后生成，否则结构字段（模块清单 / 包链 / git 分支）就得靠人肉猜。
 
-> 为什么曾经不是这样（F-9）：本命令旧版从 `schemas/project.example.yaml` 复制一份写 `<私有根>/project.yaml`，并交互式问四个字段。于是“注册项目”有两个入口，而这里是劣化复制：无扫描、无探活门禁、无菜单采集，产物还是注册表模型之前的 legacy 单文件，要事后靠 `scripts/migrate-registry.mjs` 收尸。两个入口并存时用户不知道该跑哪个 —— 现在分工不重叠。
+> 为什么曾经不是这样（F-9）：本命令旧版从 `schemas/project.example.yaml` 复制一份写 `<私有根>/project.yaml`，并交互式问四个字段。于是“注册项目”有两个入口，而这里是劣化复制：无扫描、无探活门禁、无页面发现器采集，产物还是注册表模型之前的 legacy 单文件，要事后靠 `scripts/migrate-registry.mjs` 收尸。两个入口并存时用户不知道该跑哪个 —— 现在分工不重叠。
 
 ## 前置自检
 
@@ -34,7 +34,7 @@ node "{{TOOL_ROOT}}/scripts/bootstrap.mjs" --check
 
 用 `question` 工具确认：
 
-> 我将在 `<TOOL_ROOT>/../supper-Han-private/` 创建私有根骨架：`projects/` `menus/` `drivers/` `context/` `tasks/` 五个子目录 + `prefs.md`。此目录**不进 git**（私有数据只落这里）。确认？
+> 我将在 `<TOOL_ROOT>/../supper-Han-private/` 创建私有根骨架：`projects/` `screens/` `drivers/` `context/` `tasks/` 五个子目录 + `prefs.md`。此目录**不进 git**（私有数据只落这里）。确认？
 
 用户确认后执行 `node "{{TOOL_ROOT}}/scripts/bootstrap.mjs"`（幂等：已存在的目录与 `prefs.md` 一律不动）。
 
@@ -56,7 +56,7 @@ node "{{TOOL_ROOT}}/scripts/bootstrap.mjs" --check
 
 ## 边界
 
-- **禁止**写任何 `projects/*.yaml` / `menus/*.yaml`：那是 `/supperH-init` 的唯一产物（本命令 `edit: deny` 就是这条边界的机械表达）
+- **禁止**写任何 `projects/*.yaml` / `screens/*.yaml`：那是 `/supperH-init` 的唯一产物（本命令 `edit: deny` 就是这条边界的机械表达）
 - **禁止**把私有根创建到本仓库内（`{{TOOL_ROOT}}/supper-Han-private/` 是错的；必须是同级 `../supper-Han-private/`，或用户显式设 `SUPPERH_PRIVATE_ROOT`）
 - **禁止**覆盖已存在的 `prefs.md`（它是 L3 用户资产）
 - **禁止**未经用户同意改名/删除 legacy `project.yaml`：只有 `--migrate`（= 用户点了头）才动它，且原文转 `.migrated.bak` 保留

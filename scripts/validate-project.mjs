@@ -344,6 +344,85 @@ function checkDbDriverCoherence(data) {
   return { errors, warnings };
 }
 
+// ---- 页面档案（screens/<code>.yaml）：v2 契约的跨字段规则与独立校验 -------------
+// 与 projects 条目分开校验：一个项目一份页面档案，schema 也不同（screens.schema.yaml）。
+// 极简校验器没有 not/if-then/allOf，所以“other 必须带 userPhrase”“键依赖闭合”这两类
+// 跨字段判据落在这里（§4.5 / §4.2）。硬约束（other 没带原话）是 errors，init 落盘前退 2；
+// 键依赖不闭合、引用了不存在的槽位是 warnings（纯代码模式合法，不阻断）。
+export function loadScreensSchema() {
+  const file = path.resolve(import.meta.dirname, '..', 'schemas', 'screens.schema.yaml');
+  let text = fs.readFileSync(file, 'utf8');
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  return YAML.parse(text);
+}
+
+// discovery 每一项都要能把它的字段翻译成骨架键；下面这几个是 L1 翻译规则产出的内置键
+// （path→route、name→name、id→screenId），不随项目变。
+const SCREEN_BUILTIN_KEYS = ['route', 'name', 'screenId'];
+export function screenRuleIssues(data) {
+  const errors = [], warnings = [];
+  const discovery = Array.isArray(data?.discovery) ? data.discovery : [];
+  // ① 泄压阀：format 取 other 时必须带 userPhrase（否则下次还会靠模型现场猜一次）
+  discovery.forEach((item, i) => {
+    if (item && typeof item === 'object' && item.format === 'other'
+        && !(typeof item.userPhrase === 'string' && item.userPhrase.trim())) {
+      errors.push(`discovery[${i}]: format=other 必须带 userPhrase（一句话说清它是什么、怎么解析）：不留原话等于没扩展`);
+    }
+  });
+  // ② 键依赖闭合（警告）：produced = 内置键 + discovery 翻译产出 + rules.capture + hops.produces
+  const produced = new Set(SCREEN_BUILTIN_KEYS);
+  for (const item of discovery) {
+    const cols = item?.columns;
+    if (cols && typeof cols === 'object') {
+      if (cols.path) produced.add('route');
+      if (cols.name) produced.add('name');
+      if (cols.id) produced.add('screenId');
+    }
+    for (const r of (Array.isArray(item?.rules) ? item.rules : [])) {
+      for (const k of Object.keys(r?.capture || {})) produced.add(k);
+    }
+  }
+  const hops = Array.isArray(data?.hops) ? data.hops : [];
+  const hopOut = new Set();
+  for (const h of hops) for (const k of (Array.isArray(h?.produces) ? h.produces : [])) hopOut.add(k);
+  hops.forEach((h, i) => {
+    for (const req of (Array.isArray(h?.requires) ? h.requires : [])) {
+      if (!produced.has(req) && !hopOut.has(req)) {
+        warnings.push(`hops[${i}]（${h?.id ?? '?'}）requires '${req}' 无任何上游产出（discovery columns / 其它 hop produces / 内置 ${SCREEN_BUILTIN_KEYS.join('/')}）：这一跳永远 incomplete，除非补上来源`);
+      }
+    }
+  });
+  return { errors, warnings };
+}
+
+// 校验一份内存页面档案文档：schema + 跨字段。meta.projectData = 对应 projects 条目（查槽位引用）。
+export function checkScreenDocument(data, schema, meta = {}) {
+  const errors = [], warnings = [];
+  if (!data || typeof data !== 'object') return { errors: ['文件为空或不是 mapping'], warnings };
+  errors.push(...validateAgainstSchema(data, schema));
+  const rule = screenRuleIssues(data);
+  errors.push(...rule.errors);
+  warnings.push(...rule.warnings);
+  // 引用的 driver 槽位必须真实存在（不存在 = 运行期取不到数；纯代码模式不引用槽位则跳过）
+  const slotNames = new Set(Object.keys(meta.projectData?.drivers || {}));
+  for (const [i, item] of (Array.isArray(data?.discovery) ? data.discovery : []).entries()) {
+    const slot = item?.slot;
+    if ((item?.via === 'database' || item?.via === 'driver')
+        && typeof slot === 'string' && slot && !slotNames.has(slot)) {
+      warnings.push(`discovery[${i}]: slot '${slot}' 不在该项目 drivers 里（${[...slotNames].join('/') || '无任何槽位'}）：运行期这条发现器取不到数`);
+    }
+  }
+  const want = schema.properties?.schemaVersion?.const;
+  if (want !== undefined && data.schemaVersion !== want) {
+    errors.push(`schemaVersion: got ${JSON.stringify(data.schemaVersion)}, expected ${want}（1 = 旧 menu 配置，已不再接受，请重跑 /supperH-init）`);
+  }
+  const code = data?.project;
+  if (meta.expectCode && code && meta.expectCode !== code) {
+    warnings.push(`文件名 '${meta.expectCode}.yaml' ≠ project '${code}'（约定由 /supperH-init 保证）`);
+  }
+  return { errors, warnings };
+}
+
 /**
  * 对一份**内存里的**文档跑完所有规则：schema + 跨字段。
  * 抽出来是为了给写入门禁复用（driver-registry.mjs add/update/remove）：登记路径必须先算出
@@ -430,7 +509,53 @@ export function validateRegistry(opts = {}) {
       r.errors.push(`identity.code '${code}' 重复：${files.map((f) => path.basename(f)).join(', ')}（一个 code 只能对应一个文件）`);
     }
   }
-  return { exitCode: results.some((r) => r.errors.length) ? 2 : 0, legacy, checked: results.length, results, privateRoot: info.privateRoot };
+  // 页面档案（screens/<code>.yaml）单独一遍：一个项目一份，schema 与跨字段规则都不同。
+  // 不抖进上面的 results（否则“project 与 screen 共用一个 code”会被错报成重复 code）。
+  // --file 只校验 projects 草稿（页面档案由 init 自检），所以 opts.file 时跳过。
+  const screenResults = opts.file ? [] : validateScreenFiles(info, opts.code, results);
+  const screenFailed = screenResults.some((r) => r.errors.length);
+  return {
+    exitCode: (results.some((r) => r.errors.length) || screenFailed) ? 2 : 0,
+    legacy, checked: results.length, results, screenResults,
+    privateRoot: info.privateRoot,
+  };
+}
+
+// 扫 <PRIVATE_ROOT>/screens/*.yaml（可选按 code 过滤），逐份校验。
+// projectDataBy 取自已扫的 projects 条目，供检查发现器引用的槽位是否存在。
+function validateScreenFiles(info, onlyCode, projectResults) {
+  const dir = path.join(info.privateRoot, 'screens');
+  let names = [];
+  try {
+    if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+      names = fs.readdirSync(dir).filter((n) => /\.ya?ml$/i.test(n)).sort((a, b) => a.localeCompare(b));
+    }
+  } catch { return []; }
+  if (!names.length) return [];
+  let screenSchema = null;
+  try { screenSchema = loadScreensSchema(); } catch { /* schema 缺失时逐文件报读错 */ }
+  const codeToData = new Map();
+  for (const r of (projectResults || [])) {
+    if (!r.code) continue;
+    const loaded = loadProjectFile(r.file);
+    if (loaded.ok) codeToData.set(r.code, loaded.data);
+  }
+  const out = [];
+  for (const name of names) {
+    const file = path.join(dir, name);
+    const expectCode = name.replace(/\.ya?ml$/i, '');
+    if (onlyCode && expectCode !== onlyCode) continue;
+    const res = { file, code: expectCode, errors: [], warnings: [] };
+    out.push(res);
+    const loaded = loadProjectFile(file);
+    if (!loaded.ok) { res.errors.push(loaded.error); continue; }
+    res.code = loaded.data?.project ?? expectCode;
+    if (!screenSchema) { res.errors.push('schemas/screens.schema.yaml 缺失（先跑 node scripts/sync-assets.mjs）'); continue; }
+    const doc = checkScreenDocument(loaded.data, screenSchema, { expectCode, projectData: codeToData.get(res.code) });
+    res.errors.push(...doc.errors);
+    res.warnings.push(...doc.warnings);
+  }
+  return out;
 }
 
 // CLI
@@ -472,6 +597,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     const label = res.code || path.basename(res.file, path.extname(res.file));
     if (res.errors.length) {
       failed++;
+      console.error(`[validate] FAIL: ${label}  ${res.file}`);
+      for (const e of res.errors) console.error('  - ' + e);
+    } else {
+      console.log(`[validate] OK: ${label}  ${res.file}`);
+    }
+    for (const w of res.warnings) console.error(`  ! ${label}: ${w}`);
+  }
+  // 页面档案单独列：label 前缀 screens/ 以区别同名的 projects/ 条目。
+  for (const res of (r.screenResults || [])) {
+    const label = `screens/${res.code || path.basename(res.file, path.extname(res.file))}`;
+    if (res.errors.length) {
       console.error(`[validate] FAIL: ${label}  ${res.file}`);
       for (const e of res.errors) console.error('  - ' + e);
     } else {

@@ -27,7 +27,7 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
           └── ...
 ```
 
-- `<module>` 必须命中 `{{PROJECT.modules[].name}}`，**或**为保留分区名 `menu`；否则拒绝写入
+- `<module>` 必须命中 `{{PROJECT.modules[].name}}`，**或**为保留分区名 `screens`；否则拒绝写入
 - `<ts>` 格式：`yyyymmddHHMMSS`（本地时区，秒级足够）
 - `CURRENT` 是**文件**（不是符号链接），内容单行为 gen 目录名；读方 `readFile + trim`
 
@@ -75,16 +75,16 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
 | `init` | `/supperH-learn --mode init` | 模块首次学习：analyzer 全量输出 | 新 gen 目录 + CURRENT 首次建立 |
 | `update` | `/supperH-learn --mode update` | 代码变更后重学：analyzer 输出的**变更 Controller 清单** | 新 gen 目录（未受影响 batch 从旧代拷） + CURRENT 原子切换 |
 | `supplement` | `/supperH-bug` 步骤 7a 内部触发 | 单个 `target_method` + `gap_hint` | 新 gen 目录（只有目标 batch 被替换） + CURRENT 原子切换 |
-| `menu` | `/supperH-learn --menu <menu-id>` | 菜单来源配置（`menu` 对象） | 菜单索引 batch（`index.md` frontmatter 带 `kind: menu`）+ CURRENT 原子切换 |
+| `screen` | `/supperH-learn --screen` | 页面档案配置（`screen` 对象，含 `discovery` 数组） | 页面索引 batch（`index.md` frontmatter 带 `kind: screens`）+ CURRENT 原子切换 |
 
 `supplement` 不面向用户直接调用（`/supperH-learn` 一期只暴露 `init|update`）；只由 `supperH-bug-dev` 上报 `content_gaps` → 主 agent 派 `supperH-prelearn-analyzer(mode=enrich)` → 派 `supperH-prelearn-writer(mode=supplement)` 内部串起来。
 
-### 菜单分区约定（保留名 `menu`）
+### 页面分区约定（保留名 `screens`）
 
-- `menu` 为**保留分区名**，禁止与业务模块重名冲突：`/supperH-init` 采集 `modules[].name` 时须校验不含 `menu`，冲突则提示改名或让用户确认。
-- 菜单学习产物固定落 `{{CONTEXT_ROOT}}/menu/gen-<ts>/`；`index.md` frontmatter 带 `kind: menu` 与 `menuSource: database|code`。
-- 菜单 batch 锚点约定为 `--- menu: <menu-id> <path> ---`（便于 supplement / 反查）。
-- 菜单分区与业务模块分区共享同一套目录不变量（CURRENT / gen / copy-on-write / 30KB 分批）。
+- `screens` 为**保留分区名**，禁止与业务模块重名冲突：`/supperH-init` 采集 `modules[].name` 时须校验不含 `screens`，冲突则提示改名或让用户确认。
+- 页面学习产物固定落 `{{CONTEXT_ROOT}}/screens/gen-<ts>/`；`index.md` frontmatter 带 `kind: screens` 与 `screenSource: <discovery[].via>`。
+- 页面 batch 锚点约定为 `--- screen: <screen-id> <path> ---`（便于 supplement / 反查）。
+- 页面分区与业务模块分区共享同一套目录不变量（CURRENT / gen / copy-on-write / 30KB 分批）。
 
 ## index.md 规范格式（机器可解析）
 
@@ -97,7 +97,7 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
 ```yaml
 ---
 schema: supperh-index/2
-module: <modules[].name | menu>
+module: <modules[].name | screens>
 kind: code
 learnedAt: <ISO-8601>
 learnedAtCommit: "<git-sha>"
@@ -109,8 +109,8 @@ coveredControllers: N
 字段含义（**写进 `index.md` 的只有上面这几行，不要把下面这段说明文字抄进去、也不要补行内注释**）：
 
 - `schema`：固定值 `supperh-index/2`。解析器据此判**格式代际** —— 不符或缺失一律 32 出局。`/1` → `/2` 是因为反查表新增 `sources` 列（旧表无此列→无法安全判 G4b）；看到 `/1` 的存量数据一律先重学。
-- `module`：目标模块名；菜单分区写 `menu`。
-- `kind`：`code`（代码学习）或 `menu`（菜单学习）。**菜单分区必须 `kind: menu`**，否则 G2 会把它当业务模块。
+- `module`：目标模块名；页面分区写 `screens`。
+- `kind`：`code`（代码学习）或 `screens`（页面学习）。**页面分区必须 `kind: screens`**，否则 G2 会把它当业务模块。
 - `learnedAt`：本次学习完成时刻。
 - `learnedAtCommit`：学习时所在代码库的 HEAD SHA；**缺此项 → G4 新鲜度直接判失败（35）**。必须加引号，见下面「已知类型陷阱」。它仍然是**仓库级** HEAD（不是模块级、不是 batch 级）—— G4b 靠它作 diff 的左端点，而非拿它直接当相等判据。
 - `controllers` / `coveredControllers`：目标总数 / 本 index 覆盖数；比值即 95% 完整度自检输入。

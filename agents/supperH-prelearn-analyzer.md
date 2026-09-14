@@ -29,18 +29,18 @@ permission:
 | **init** | 一个 module 名 + Controller 清单 | 每个 Controller 一个 JSON，含方法级路由 + 调用链 + **调用链可达文件集（`touched_files`）** + SQL 摘要 + 异常清单 + 跨模块依赖 |
 | **update** | 目标 gen 目录 + 变更范围 | 只输出被变更影响的 Controller 数据（增量），`touched_files` 仍按**全集**输出（不留旧代残缺） |
 | **enrich** | 单方法 fqn + "内容缺口"描述 | 深挖一层：完整 if 分支清单 + 每条 throw 文案 + 跨字段联合校验；`touched_files` 同步补全 |
-| **menu** | 菜单来源配置（`menu_source`）+ commit | 菜单项清单（`data.menus`）：id/parentId/name/path + 尽力而为的 route/controller 映射 |
+| **screen** | 页面档案配置（`screen_config`，含 `discovery` 数组）+ commit | 页面清单（`data.screens`）：id/parentId/name/path（+ 可选 type/perms）+ 尽力而为的 route/controller 映射 |
 
 ## 输入契约
 
 ```
 {
-  "mode": "init" | "update" | "enrich" | "menu",
-  "module": "<one of {{PROJECT.modules[].name}}>",  // menu 模式固定为保留名 "menu"
+  "mode": "init" | "update" | "enrich" | "screen",
+  "module": "<one of {{PROJECT.modules[].name}}>",  // screen 模式固定为保留名 "screens"
   "controllers": ["<Controller fqn>", ...],     // init / update
   "target_method": "<class.method fqn>",        // enrich
   "gap_hint": "...",                             // enrich
-  "menu_source": { ... },                        // menu：步骤 0 的 menu 配置对象
+  "screen_config": { ... },                       // screen：步骤 0 的 screen 配置对象（含 discovery 数组）
   "commit": "<git commit hash at time of learning>"
 }
 ```
@@ -58,25 +58,27 @@ permission:
 4. **分段与预算** — 单 Controller 输出超 30KB 时按方法分组；每组一段，段头 `--- route: <method> ---` 锚点（writer 用此锚点定位合并位置）
 5. **不合并、不格式化** — 输出原始结构化数据；由 writer 负责落地格式与批次切分
 
-### 菜单模式（`mode: menu`）工作流
+### 页面模式（`mode: screen`）工作流
 
-输入 = `menu_source`（`/supperH-learn` 步骤 0 的 `menu` 配置对象）+ `module: "menu"`。**主 agent 不亲自连库/读文件**，由你执行：
+输入 = `screen_config`（`/supperH-learn` 步骤 0 的 `screen` 配置对象）+ `module: "screens"`。**主 agent 不亲自连库/读文件**，由你逐项处理 `screen_config.discovery`（按每项 `via` 分派）：
 
-- `menu_source.source == "database"` → 跑数据库通道（`dbDriver`，即 `role: database` 那个槽位）的驱动，**仅 SELECT**：
+- `via: database` → 跑数据库通道（该项 `slot`，缺省 = `role: database` 那个槽位）的驱动，固定以保留源名 `screen` 调用，**仅 SELECT**：
   ```
-  {{PROJECT.dbDriver.impl}} --project <code> --source <menu_source.database.source> \
-    --filter table=<menu_source.database.table> \
-    --filter id=<menu_source.database.columns.id> \
-    --filter parentId=<menu_source.database.columns.parentId> \
-    --filter name=<menu_source.database.columns.name> \
-    --filter path=<menu_source.database.columns.path> \
-    [--filter where=<menu_source.database.extraFilter>] \
-    --limit <menu_source.database.limit>
+  <db-impl> --project <code> --source screen \
+    --filter table=<item.table> \
+    --filter id=<item.columns.id> \
+    --filter parentId=<item.columns.parentId> \
+    --filter name=<item.columns.name> \
+    --filter path=<item.columns.path> \
+    [--filter type=<item.columns.type>] [--filter perms=<item.columns.perms>] \
+    [--filter where=<item.extraFilter>] \
+    --limit <item.limit>
   ```
   - 以 **argv 数组**传参（禁止 shell 字符串拼接）；只读；凭据仅走 env/`.secrets`，禁止明文出现在命令行/日志；
-  - 驱动返回标准 envelope（`columns/rows`）→ 按 `columns` 映射回 `id/parentId/name/path/order`。
-- `menu_source.source == "code"` → 读 `menu_source.code.path`（相对 `{{EFFECTIVE_ROOT}}`），按 `menu_source.code.format`（`json | sql | properties | router`）解析。
-- **菜单 → 代码映射（尽力而为）**：对每条菜单的 `path`，按路由前缀/后缀启发式匹配 `{{EFFECTIVE_ROOT}}` 下 Controller 的 `route.path`；命中则填 `route` / `controller`，未命中留空（不阻断、不报错）。
+  - 驱动返回标准 envelope（`columns/rows`）→ 按 `columns` 映射回 `id/parentId/name/path/order`（可选 `type`/`perms`）；库里没接出数据库通道时不得“猜一个驱动先跑着”。
+- `via: driver` → 用该项 `slot` 登记的驱动槽位、按其 `source` / `map` 自己的查询协议取页面清单。
+- `via: code` / `via: artifact` → 读该项 `path`（相对 `{{EFFECTIVE_ROOT}}`），按 `format`/`parser` 或 `rules` 解析；`format: other` 缺 `userPhrase` 属配置缺陷，原样上报不猜。
+- **页面 → 代码映射（尽力而为）**：对每条页面的 `path`，按路由前缀/后缀启发式匹配 `{{EFFECTIVE_ROOT}}` 下 Controller 的 `route.path`；命中则填 `route` / `controller`，未命中留空（不阻断、不报错）。
 
 ## 输出契约
 
@@ -106,7 +108,7 @@ permission:
         ]
       }
     ],
-    "menus": [
+    "screens": [
       {
         "id": "...",
         "parentId": "...",
@@ -132,5 +134,5 @@ permission:
 - 禁跳过 worktree 边界：`effectiveRoot` 若与 `codeRoot` 不同，只读 `effectiveRoot`（避免读到过时分支）
 - **禁把 `touched_files` 写成绝对路径、反斜杠路径、或带 `./` 前缀的路径**：形态不对 → 与 git diff 输出永不相等 → G4b 交集恒空 → 门禁对任何无关提交都放行 = 漏杀，比改造前更糟。宁缺（标 `sources_incomplete: true`）勿错形态。
 - **禁为凑齐 `touched_files` 而猜路径**：猜出来的文件出现在 diff 里会造成**误杀**（明明无关却判过期），猜漏了会造成**漏杀**。追不到就标 `sources_incomplete: true`，让下游保守出局。
-- `menu` 模式 `database` 源**禁止任何非 SELECT**（只读）；驱动失败按其 exit code（1/2/3/4/5）原样上报，**不换源重试**
-- `menu` 模式禁止把真实表名/列名 dump 到聊天正文或最终产物（仅报数量/来源类型）
+- `screen` 模式 `via: database` 源**禁止任何非 SELECT**（只读）；驱动失败按其 exit code（1/2/3/4/5）原样上报，**不换源重试**
+- `screen` 模式禁止把真实表名/列名 dump 到聊天正文或最终产物（仅报数量/来源类型）

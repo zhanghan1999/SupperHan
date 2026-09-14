@@ -38,7 +38,7 @@ const BOUND_AGENTS = [
 // command 入口（primary）侧的放开面同样点名：它们不是 subagent，但同样跨 workspace 写盘。
 const BOUND_COMMANDS = [
   'supperH-bootstrap.md',   // 建私有根骨架
-  'supperH-init.md',        // 写 projects/<code>.yaml + menus/<code>.yaml
+  'supperH-init.md',        // 写 projects/<code>.yaml + screens/<code>.yaml
   'supperH-driver.md',      // 写 projects/<code>.yaml（经 driver-registry.mjs）与临时 values JSON
   'supperH-setup.md',       // 写 IDE 加载目录
 ];

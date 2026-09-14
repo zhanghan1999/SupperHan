@@ -9,7 +9,7 @@
 //        - BAKE tool-global constants: {{TOOL_ROOT}} {{PRIVATE_ROOT}} {{DRIVERS_ROOT}} {{SYNC_TIMESTAMP}}
 //        - RUNTIMEIFY project-specific refs into ${SUPPERH.*} tokens the agent fills at
 //          run time from scripts/resolve-project.mjs: {{CONTEXT_ROOT}} {{TASKS_ROOT}}
-//          {{EFFECTIVE_ROOT}} {{PACKAGE_ROOT_PATH}} {{MENU_CONFIG}} {{PROJECT.<dot.path>}}
+//          {{EFFECTIVE_ROOT}} {{PACKAGE_ROOT_PATH}} {{SCREEN_CONFIG}} {{PROJECT.<dot.path>}}
 //   5. scan residuals: any remaining {{...}} → hard fail (exit 3, no degrade).
 //      ${SUPPERH.*} are sanctioned runtime tokens and are NOT counted as residual.
 //   6. emit .qoder-plugin/plugin.json and the MCP shell registration .mcp.json
@@ -74,7 +74,7 @@ function copyTree(src, dst) {
 // into ${SUPPERH.*} tokens. At run time the primary agent (via the step-0 gate)
 // runs scripts/resolve-project.mjs and substitutes these from the returned JSON.
 // Bare roots mapped 1:1:
-const RUNTIME_BARE = ['CONTEXT_ROOT', 'TASKS_ROOT', 'EFFECTIVE_ROOT', 'PACKAGE_ROOT_PATH', 'MENU_CONFIG'];
+const RUNTIME_BARE = ['CONTEXT_ROOT', 'TASKS_ROOT', 'EFFECTIVE_ROOT', 'PACKAGE_ROOT_PATH', 'SCREEN_CONFIG'];
 // Tool-global constants that stay frozen per install (private root is fixed):
 const BAKED_BARE = ['TOOL_ROOT', 'PRIVATE_ROOT', 'DRIVERS_ROOT', 'SYNC_TIMESTAMP'];
 

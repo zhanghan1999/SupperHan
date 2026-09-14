@@ -1,5 +1,5 @@
 ---
-description: 数据源登记的唯一入口。当用户要给本项目新增 / 修改 / 删除 / 查看一个外部数据源（注册表 drivers.<槽位>）时用本命令。槽位名由用户定（L1 不再有固定四种源），登记时必须带人话描述 desc，能改动源那一侧数据的动作必须显式声明 writes（confirm = 先把要发出去的载荷给用户看、拿到明确同意再执行；deny = 直接拒、不提供询问）。流程：解析项目 → list 看现状 → 描述充分性门禁（说不清"从哪里进去"就问回来，不许先写个含糊描述占位）→ 分流（实现已存在就直接登记 / 否则派 supperH-driver-author（驱动编写） 先写驱动）→ 写能力归类（action=other 时问用户归类并记原话）→ driver-registry.mjs 落盘（探活不通退 20，不在盘上留一个取不到数的源）→ validate 复核。只想注册项目本体（code / 模块 / 构建 / 菜单来源）请改用 /supperH-init。
+description: 数据源登记的唯一入口。当用户要给本项目新增 / 修改 / 删除 / 查看一个外部数据源（注册表 drivers.<槽位>）时用本命令。槽位名由用户定（L1 不再有固定四种源），登记时必须带人话描述 desc，能改动源那一侧数据的动作必须显式声明 writes（confirm = 先把要发出去的载荷给用户看、拿到明确同意再执行；deny = 直接拒、不提供询问）。流程：解析项目 → list 看现状 → 描述充分性门禁（说不清"从哪里进去"就问回来，不许先写个含糊描述占位）→ 分流（实现已存在就直接登记 / 否则派 supperH-driver-author（驱动编写） 先写驱动）→ 写能力归类（action=other 时问用户归类并记原话）→ driver-registry.mjs 落盘（探活不通退 20，不在盘上留一个取不到数的源）→ validate 复核。只想注册项目本体（code / 模块 / 构建 / 页面发现器）请改用 /supperH-init。
 mode: primary
 permission:
   edit: allow                # 仅用于写临时 --values JSON；projects/<code>.yaml 只能由 driver-registry.mjs 改

@@ -173,11 +173,11 @@ function readProjectFile(file) {
   }
 }
 
-// Read one menu-source config file (<PRIVATE_ROOT>/menus/<code>.yaml),
-// tolerating missing/broken files (returns null). Menu config is an independent
+// Read one screen-archive config file (<PRIVATE_ROOT>/screens/<code>.yaml),
+// tolerating missing/broken files (returns null). Screen config is an independent
 // sidecar of the project; its absence is a legitimate state (the runtime gate
-// decides whether that blocks /supperH-learn's menu mode).
-function readMenuFile(file) {
+// decides whether that blocks /supperH-learn's screen mode).
+function readScreenFile(file) {
   try {
     let text = fs.readFileSync(file, 'utf8');
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
@@ -358,9 +358,14 @@ function buildBinding(entry, ctx) {
   const roots = resolveRootPaths(data, { privateRoot: ctx.privateRoot, toolRoot: ctx.toolRoot, code });
   const contextRoot = roots.contextRoot;
   const tasksRoot   = roots.tasksRoot;
-  // Menu-source sidecar: path is always returned (may not exist); `menu` is the
-  // parsed object or null. Menu mode of /supperH-learn gates on `menu == null`.
-  const menuConfigFile = toNative(path.join(ctx.privateRoot, 'menus', code + '.yaml'));
+  // Screen-archive sidecar: path is always returned (may not exist); `screen` is
+  // the parsed object or null. Screen mode of /supperH-learn gates on `screen == null`.
+  // 旧 `menu` 时代残留检测（F-15b §8）：不留别名，检测到旧配置文件就报 staleScreenConfig，
+  // 由 init/learn 退错提示 `--reinit`，绝不静默当成未配置。
+  const screenConfigFile = toNative(path.join(ctx.privateRoot, 'screens', code + '.yaml'));
+  const staleMenuConfigFile = toNative(path.join(ctx.privateRoot, 'menus', code + '.yaml'));
+  const staleScreenConfig =
+    fs.existsSync(staleMenuConfigFile) ? staleMenuConfigFile : null;
   return {
     ok: true,
     code,
@@ -372,8 +377,9 @@ function buildBinding(entry, ctx) {
     driversRoot: localCtx.driversRoot,
     contextRoot,
     tasksRoot,
-    menuConfigFile,
-    menu: readMenuFile(menuConfigFile),
+    screenConfigFile,
+    staleScreenConfig,
+    screen: readScreenFile(screenConfigFile),
     codeRoot: data?.codeRoot,
     effectiveRoot: data?.effectiveRoot ?? data?.codeRoot,
     packageRoot: data?.packageRoot,

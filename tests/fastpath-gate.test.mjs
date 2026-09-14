@@ -217,11 +217,11 @@ test('G1–G4 + 否决表：退出码逐项命中', () => {
   assert.equal(noCommit && gate(noCommit, 'POST /api/v1/order/create').gates.G2_dataReady, 'pass', 'G2 仍应通过');
 });
 
-test('G2 数据就绪：CURRENT / index.md / 格式漂移 / menu 分区 一律 32', () => {
+test('G2 数据就绪：CURRENT / index.md / 格式漂移 / screens 分区 一律 32', () => {
   assert.equal(gate(makeContext(indexDoc(), { withCurrent: false }), 'POST /api/v1/order/create').status, EXIT.NO_INDEX);
   assert.equal(gate(makeContext(indexDoc(), { withIndex: false }), 'POST /api/v1/order/create').status, EXIT.NO_INDEX);
   assert.equal(gate(makeContext('散文，无表'), 'POST /api/v1/order/create').status, EXIT.NO_INDEX);
-  assert.equal(gate(makeContext(indexDoc({ kind: 'menu' })), 'POST /api/v1/order/create').status, EXIT.NO_INDEX, 'menu 分区不参与快路径');
+  assert.equal(gate(makeContext(indexDoc({ kind: 'screens' })), 'POST /api/v1/order/create').status, EXIT.NO_INDEX, 'screens 分区不参与快路径');
   // 缺 module 是调用方入参不成对，不是"数据未就绪"：单独给 36，两者在 jsonl 里不得混淆
   assert.equal(gate(ok0(), 'POST /api/v1/order/create', '', HEAD, { module: undefined }).status,
     EXIT.INCOMPLETE, '缺 module 入参 → 36（门禁无法求值）');

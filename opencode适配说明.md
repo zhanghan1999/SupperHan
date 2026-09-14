@@ -75,9 +75,9 @@ node "<工具仓库路径>\scripts\setup.mjs" --target opencode --dest "<当前�
 |------|------|
 | `/supperH-setup` | 一键适配：探测 IDE + 把产物装到加载目录 |
 | `/supperH-bootstrap` | 冷启动：建私有根**骨架**（五个子目录 + `prefs.md`）+ 处置 legacy 单文件。不写任何注册条目——按工作区注册项目用 `/supperH-init` |
-| `/supperH-init` | 当前工作区注册：落 `projects/<code>.yaml` + `menus/<code>.yaml`（exit 10 打回时跑它）|
+| `/supperH-init` | 当前工作区注册：落 `projects/<code>.yaml` + `screens/<code>.yaml`（exit 10 打回时跑它）|
 | `/supperH-bug` | Bug 全流程主入口 |
-| `/supperH-learn` | 代码/菜单/流程学习入口 |
+| `/supperH-learn` | 代码/页面/流程学习入口 |
 | `/supperH-driver` | 数据源登记：往已注册条目里加 / 改 / 删 / 看一个外部数据源（槽位名由用户定）|
 
 ---
@@ -185,8 +185,8 @@ Qoder 侧红线四件套（`.qoder/rules/00-layers.md` / `10-redlines.md` / `20-
 | 东西 | 存在哪 | 跟 IDE 有关吗 |
 |------|--------|---------------|
 | 项目注册条目 | `<私有根>/projects/<code>.yaml` | 无 |
-| 菜单注册条目 | `<私有根>/menus/<code>.yaml` | 无 |
-| 学习包（代码/菜单/流程） | `<私有根>/context/<code>/...` + `CURRENT` 指针 | 无 |
+| 页面档案配置 | `<私有根>/screens/<code>.yaml` | 无 |
+| 学习包（代码/页面/流程） | `<私有根>/context/<code>/...` + `CURRENT` 指针 | 无 |
 | 任务台账 | `<私有根>/tasks/<code>/*.jsonl` | 无 |
 | 自有驱动 | `<私有根>/drivers/<code>/` | 无 |
 | 个人偏好 | `<私有根>/prefs.md` | 无 |
@@ -247,6 +247,6 @@ node "<工具仓库路径>\scripts\resolve-private-root.mjs"    # 看 privateRoo
 | 红线 rules | 不做拷贝件：`opencode.json` 的 `instructions` 指向 `<工具仓>/.qoder/rules/*.md` | `plugin.json` 声明 `rules/`，随插件装载（拷件） |
 | 配置文件 | `opencode.json` + `opencode.jsonc` 都加载；supperH 只写前者 | 插件目录内 `.mcp.json`，不碰用户配置 |
 | 陈旧产物 | 按 `supperh-installed.json` 清单清理，用户自放文件不动 | 整目录重建（`sync-assets.mjs` 覆写插件缓存目录） |
-| 数据层 | **完全共用**：私有根 `projects/ menus/ context/ tasks/ drivers/` | 同上（见§跟 Qoder 共用同一份数据） |
+| 数据层 | **完全共用**：私有根 `projects/ screens/ context/ tasks/ drivers/` | 同上（见§跟 Qoder 共用同一份数据） |
 | 生效 | 重开 opencode；改 `instructions` 目标文件内容无需重装 | 完全退出后重开 |
 | 详见 | — | 同目录 `qoder适配说明.md` |

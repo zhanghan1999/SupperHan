@@ -17,9 +17,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 // 私有根的子目录清单。只建目录，不建任何内容文件：条目归 /supperH-init。
-// 为什么只能有一处定义：两边各写一份时漂移过一次 —— 迁移脚本建的根缺 menus/，
-// 直到菜单学习首次写盘才撞上 ENOENT（距离成因三个环节）。
-export const PRIVATE_SUBS = ['projects', 'menus', 'drivers', 'context', 'tasks'];
+// 为什么只能有一处定义：两边各写一份时漂移过一次 —— 建的根缺 screens/，
+// 直到页面学习首次写盘才撞上 ENOENT（距离成因三个环节）。
+export const PRIVATE_SUBS = ['projects', 'screens', 'drivers', 'context', 'tasks'];
 
 /** mkdir -p 幂等补齐骨架。返回本次真正新建的子目录名（已存在的不进列表）。 */
 export function ensurePrivateSkeleton(privateRoot, { dryRun = false } = {}) {

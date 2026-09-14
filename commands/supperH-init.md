@@ -1,5 +1,5 @@
 ---
-description: 当用户在一个尚未注册的工作区里首次要跑 /supperH-bug 或 /supperH-learn，或解析器返回 exit 10（本目录未注册）时，推荐用本命令。它扫描当前工作区自动预填结构字段（build.tool / packageRoot / modules / branches / codeRoot / code），只向用户询问无法扫描的私密连接（DB host/port/user 等），**不摆外部源名单**（有几个源、各自叫什么全由用户定，本命令只问“现在要不要先接一个”，日常加源走 /supperH-driver），并首次强制采集菜单学习来源（database | code，缺省以退出码 22 拦截、不可 --force 绕过），跑 driver --health 做“至少一个连通才落盘”门禁，最后写 projects/<code>.yaml + menus/<code>.yaml 并验证解析器命中。若私有根本身还不存在（第一次 clone、连 supper-Han-private 目录都没有），应改用 /supperH-bootstrap。用户要的若是“撤掉已注册这个状态、回到未注册重来一遍”（而不是把配置重刷一遍），走本命令的 `--reinit`：默认只出只读计划，`--purge` 才执行，撤销 = 把 init 生成过的东西搬进 `_retired/` 隔离区（不删，可照 manifest.json 回滚）；学习数据非空时必须有 `--confirm <code>`，否则退出码 23。
+description: 当用户在一个尚未注册的工作区里首次要跑 /supperH-bug 或 /supperH-learn，或解析器返回 exit 10（本目录未注册）时，推荐用本命令。它扫描当前工作区自动预填结构字段（build.tool / packageRoot / modules / branches / codeRoot / code），只向用户询问无法扫描的私密连接（DB host/port/user 等），**不摆外部源名单**（有几个源、各自叫什么全由用户定，本命令只问“现在要不要先接一个”，日常加源走 /supperH-driver），并首次强制采集页面发现器（`screen.discovery` 至少一项：database / driver / code / artifact，可组合；缺省以退出码 22 拦截、不可 --force 绕过），跑 driver --health 做“至少一个连通才落盘”门禁，最后写 projects/<code>.yaml + screens/<code>.yaml 并验证解析器命中。若私有根本身还不存在（第一次 clone、连 supper-Han-private 目录都没有），应改用 /supperH-bootstrap。用户要的若是“撤掉已注册这个状态、回到未注册重来一遍”（而不是把配置重刷一遍），走本命令的 `--reinit`：默认只出只读计划，`--purge` 才执行，撤销 = 把 init 生成过的东西搬进 `_retired/` 隔离区（不删，可照 manifest.json 回滚）；学习数据非空时必须有 `--confirm <code>`，否则退出码 23。
 mode: primary
 permission:
   edit: allow
@@ -24,7 +24,7 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --scan --cwd "<你的工作区绝�
 - 命令本身能跑通 → 私有根已就绪（扫描不依赖私有根）→ 进入步骤 1。
 - 落盘阶段若返回 `error: no-private-root` → 停止，输出“私有根缺失，请先跑 `/supperH-bootstrap`”，不降级。
 
-> `<你的工作区绝对路径>` 用你当前 Qoder/OpenCode 打开的工作区根目录（与 `/supperH-bug` 门禁同源）。扫描 JSON 里的 `code / codeRoot / build / packageRoot / modules / branches` 都是**已推得**的候选值；`menuCandidates` 是菜单定义文件的探测候选（供步骤 3 参考）。
+> `<你的工作区绝对路径>` 用你当前 Qoder/OpenCode 打开的工作区根目录（与 `/supperH-bug` 门禁同源）。扫描 JSON 里的 `code / codeRoot / build / packageRoot / modules / branches` 都是**已推得**的候选值；`screenCandidates` 是页面发现（`via: code` 那一支）可引用的仓内文件候选（供步骤 3 参考）。
 >
 > 三组字段是「探到了什么」与「敢不敢当事实用」的分界，回显时必须照抄：
 > - `modulePlans[]`：每个模块自己的 `entryPattern`（形如 `demo-base/src/main/java/**/controller/*.java`）。pattern 在 `effectiveRoot`（= codeRoot，一个仓只有一个根）下求值，所以**多模块仓必须带模块目录前缀**；`controllersSeen=false` 的模块（只有 pom、无源码，如依赖聚合模块）给 `**/*.java` 超集而不是空匹配。
@@ -54,7 +54,7 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --scan --cwd "<你的工作区绝�
 > 这个项目要接入外部数据源吗？
 >
 > - **不接**（纯代码模式）：只用代码仓库做分析与修复。这是最常见的合法答案，而且**不是一锤子买卖** —— 之后随时可加。
-> - **接数据库**：DB 取证、写保护、以及（若菜单来源选 `database`）菜单数据的通道。
+> - **接数据库**：DB 取证、写保护、以及（若 `screen.discovery` 含 `via: database`）从菜单表发现页面的通道。
 > - **还要接别的源**（日志检索、外部平台……）：本命令不替用户列名单。建议现在先把库接上，其它源随后逐个走 `/supperH-driver` —— 那条命令才是登记入口，可多次运行，带描述充分性门禁、探活、以及“驱动文件还不存在就先写驱动”的分流。
 
 **2.2 只对被选中的东西采字段**
@@ -69,32 +69,28 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --scan --cwd "<你的工作区绝�
 
 - **落盘形态由接入决定**：`--values` 里给 `connect: [<槽位名>...]`（或直接给若干 `db.*` 值 = 隐式声明要接库）。接了的段由脚本按真值**整段生成**；不接的段**整段不写**（不是写空值、不是留 `example_*`）。`db.schemas.*` 三个库名只做两件事：`--env` 的环境名→库名映射、SQL 工件第 1 段的目标标注 —— 它们不再决定拦不拦，拦是守卫无条件做的事（不看库名）。把没接的假值留在盘上、或旧条目里还带着已退役的 `db.writableUser` / `db.forbidWriteSchemas`，`node scripts/validate-project.mjs` 以退出码 2 拦下并点名怎么删。
 - **`connect` 不是一张名单**：任意合法标识符都收（`crm`、`jjstools` 这种用户自己起的名完全合法）；不合 `connectNaming.pattern` 的（带空格、以数字或符号开头、超长）退 2 并点名，不被静默忽略。**`role: database` 全项目最多一个**：给了 `db.*` 又声明了若干槽位却没给其中任何一个标 `role: database` → 退 2 问回来（“哪个通道发 SQL”不能靠猜名字）。
-- **纯代码模式的后果要在进下一步前告知用户**（一句话说清，不要渲染成失败）：`/supperH-bug` 的 DB 取证步骤无数据可用（连 SQL 工件也写不出：目标库名没有出处）；`resolve-project.mjs --env <环境>` 会以 **36** 退出（环境标签只对“从某个库取回的数据”成立，代码侧永远相对 HEAD）；步骤 3 的菜单来源因此只能选 `code`。告知里顺带一句：想补上任何一个源，跑 `/supperH-driver`，不必重跑本命令。
+- **纯代码模式的后果要在进下一步前告知用户**（一句话说清，不要渲染成失败）：`/supperH-bug` 的 DB 取证步骤无数据可用（连 SQL 工件也写不出：目标库名没有出处）；`resolve-project.mjs --env <环境>` 会以 **36** 退出（环境标签只对“从某个库取回的数据”成立，代码侧永远相对 HEAD）；步骤 3 的发现器因此不能选 `via: database`（那要数据库通道），可用 `via: code` / `artifact` / 非库的 `driver`。告知里顺带一句：想补上任何一个源，跑 `/supperH-driver`，不必重跑本命令。
 - 收集到的值写入一个临时 JSON（`{"connect":[...],"db.host":...,"db.port":...}`），供下一步 `--values` 使用。**不要把值 echo 到聊天正文**，只说“已采集 N 个字段；本次接入：<列出的槽位名> / 未接入任何外部源”。
 - 连通门禁只对**已登记的驱动**求值：一个驱动都没配时门禁没有可探对象，会放行但附一句 `gateNote` 说明“本次是未接入，不是接入后全部可达”。
 
-## 步骤 3 · 首次强制采集菜单来源（硬门禁）
+## 步骤 3 · 首次强制采集页面发现器（硬门禁）
 
-**首次注册必须指定菜单来源**——无默认值、不可跳过。先看扫描 JSON 的 `menuCandidates`（仓库内探测到的菜单定义文件候选，仅预填参考），再用 `question` 让用户二选一：
+**首次注册必须至少给一个页面发现器（`screen.discovery`）**——无默认值、不可跳过。它不再是“database / code 二选一”：`discovery` 是**数组**、可组合（例：`database` 给页面中文名 + `code` 给路由清单），每项用 `via` 标介质，共四类 `database` | `driver` | `code` | `artifact`。先看扫描 JSON 的 `screenCandidates`（可作 `via: code` 清单来源的仓内文件候选，仅预填参考），再用 `question` 逐项采集：
 
-- **`database`** — 菜单数据来自数据库表（典型：`sys_menu`，表内已存页面指向路径）。依次采集：
-  1. `menu.database.table` — 菜单表名（如 `sys_menu`）
-  2. `menu.database.columns.path` — **页面指向路径列（必填）**
-  3. `menu.database.columns.id` / `parentId` / `name`（`order` 可选）
-  4. `menu.database.source` — driver 逻辑源名（默认 `menu`，须已在数据库槽位（`role: database`）的 `config.sources` 声明）
-  5. `menu.database.slot` — 复用哪个驱动槽位（**缺省 = 数据库通道**，即 `role: database` 那个槽位；名字归用户，不得写死成 `database`）。**拿不准就不答**：脚本会删掉这一行而不是沿用一个示例名字
-  6. `menu.database.rootParentId`（可选）/ `menu.database.extraFilter`（可选，仅 SELECT 的 WHERE 片段）/ `menu.database.limit`（可选，默认 5000）
-- **`code`** — 菜单数据来自代码文件（`menuCandidates` 里的候选可直接引用）。依次采集：
-  1. `menu.code.path` — 菜单定义文件位置（绝对路径，或相对 codeRoot）
-  2. `menu.code.format` — `json | sql | properties | router`
+- **`via: database`** — 页面清单来自数据库里的菜单表（典型：`sys_menu`）；四类里**唯一需要外部通道**的一支。必填 `table` + `columns`；`columns` 必填 `id`/`parentId`/`name`/**`path`（页面指向路径列，缺它一切无从可达）**，可选 `type` + `typeValues`（哪个值=页面/按钮/目录/占位符——目录与占位行必须滤掉，否则成百上千假页）、`perms`（权限标识列）、`order`。可选键 `source`（逻辑源名，须在该库槽位 `config.sources` 声明）、`slot`（**缺省 = 数据库通道**即 `role: database` 那个槽位；名字归用户不得写死；拿不准就不答，脚本删行不沿用示例名）、`rootParentId`、`extraFilter`（仅 SELECT 的 WHERE 片段）、`limit`（默认 5000）。
+- **`via: driver`** — 清单由某接口下发（旧模型完全表达不了的一类）。必填 `slot`（已登记的槽位名），可选 `source` / `query` / `columns`。
+- **`via: code`** — 清单从代码里的路由声明/菜单定义文件读出来，**不经任何外部通道**（一个驱动都没接的项目也能学到入口/模板/按钮/下钻四段，只是没有页面中文名）。必填 `path`（绝对或相对 codeRoot）+ `format`（`json | sql | properties | router | java | xml | other`）；`format: other` **必须补 `userPhrase`** 说清它是什么、怎么解析（否则退 2）；可选 `profile`、`rules`（每项 `desc`+`match`+`capture`）、`columns`。`screenCandidates` 里的候选可直接引用。
+- **`via: artifact`** — 低代码下发 / 构建产物（不是源码也不是表）。必填 `kind`（工件族名，如 `uischema`/`openapi`/`manifest`）；可选 `path` / `profile` / `userPhrase` / `rules` / `columns`。
+
+`hops`（route→视图名→模板文件那几跳）、`extract`（从模板抽 actions/dataSources/drilldowns）、`budget`（`maxDepth`/`maxScreens`/`sameAppRule`）是 v2 的**可写段**：本次不采也能落盘（先学①段清单足够），用户要一并写就按 `schemas/screens.schema.yaml` 形状并入。
 
 规则：
 
-- **首次注册必须给出 `menu.source`（`database` | `code`）**；缺省 → 落盘阶段以**退出码 22** 拦下（见步骤 4），**`--force` 不绕过**。
-- **选了哪一支，那支的必填项逐项要值**：`database` 要 `table` + `columns.id/parentId/name/path`，`code` 要 `path` + `format`。缺任一项 → 落盘阶段以退出码 **2**（`menu-choices-incomplete`）拦下并逐项点名。脚本不沿用模板示例值：那些值（`sys_menu` / `menu_id` …）结构合法、过 schema，而菜单这一路没兼容网（`validate-project.mjs` 不读 `menus/*.yaml`），写错不是“学不到”而是“学到错的菜单索引”。
-- **盘上只留被选中的那一支**：未被选中的整段不写（不是注释掉、不是写空值），可选键没答也不写。以后换菜单来源是改这个文件（见 `docs/architecture.md` §10.12 末“换菜单来源”行）—— 留下一段假的只会让那次改照着假值改。
-- 采集值并入步骤 2 的 `--values` JSON（`menu.source` / `menu.database.*` / `menu.code.*`）。
-- **禁止**自动猜菜单来源或表名/列名（必须来自用户输入，或用户在 `menuCandidates` 里显式选定）；**禁止**把 DB 表名/列名 dump 到聊天正文（只回显“已采集菜单来源”）。
+- **首次注册必须给出 `screen.discovery`（至少一项）**；一项都没答 → 落盘阶段以**退出码 22**（`screen-discovery-required`）拦下（见步骤 4），**`--force` 不绕过**。
+- **每一项按它那一类的必填逐项要值**（`database`：`table` + `columns` 的 `id/parentId/name/path`；`driver`：`slot`；`code`：`path` + `format`；`artifact`：`kind`）。缺任一项 → 退出码 **2**（`screen-choices-incomplete`）逐项点名；`format: other` 缺 `userPhrase` 判为 **2**（`screen-config-invalid`）。脚本不沿用示例值：那些值（`sys_menu` / `menu_id` …）结构合法、过 schema，写错不是“学不到”而是“学到错的页面索引”。
+- **v2 直接按用户答的对象装配再 `YAML.stringify` 落 `screens/<code>.yaml`**：没答的可选键不写、未选的 `via` 整项不落盘（彻底告别“未选分支留一套假列名”）。换发现方式以后就是改这份文件（见 `docs/architecture.md` §10.12 末“换页面发现器”行）。
+- 采集值并入步骤 2 的 `--values` JSON 的 **`screen` 对象**：`{"screen":{"discovery":[{...},{...}]}}`（嵌套数组，不再是 `menu.source` / `menu.database.*` 那套扁平键）。
+- **禁止**自动猜发现器或表名/列名（必须来自用户输入，或用户在 `screenCandidates` 里显式选定）；**禁止**把 DB 表名/列名 dump 到聊天正文（只回显“已采集页面发现器 N 项”）。
 
 ## 步骤 4 · 落盘 + 连通门禁
 
@@ -106,11 +102,12 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --write --cwd "<工作区绝对路
 
 观察退出码（**这是确定性硬门禁，不是你的判断**）：
 
-- `0` → 已写 `projects/<code>.yaml` + `menus/<code>.yaml` + 建好 `context/<code>/`、`tasks/<code>/`，且解析器已命中。进步骤 5 报成功。
+- `0` → 已写 `projects/<code>.yaml` + `screens/<code>.yaml` + 建好 `context/<code>/`、`tasks/<code>/`，且解析器已命中。进步骤 5 报成功。
 - `20` → **连通门禁失败**：配置的 driver 无一 `--health` 通过（这些 `healthCheck` 都是**协议级**探活：DB 真连一次 / HTTP 拿任意状态行，所以这个码是证据，不是猜测）。原样输出 JSON 里的 `probes`（哪个 slot / channel / impl、exit、detail 首行）。给用户两条路：① 根据 `probes[].detail` 里的**目标端点 + 错误原文**请用户提供可连接环境（“请在能访问 `<host>:<port>` 的网络里重跑本命令” / “请先刷新登录凭据”），然后重跑；② 若确认可离线先注册，重跑时加 `--force`（降级为仅警告，仍落盘）。**不猜 VPN / 网络状态，不替用户自动重试，不要擅自加 `--force`。**
 - `21` → 落盘了但解析器仍未命中 cwd（绑定异常）。输出 `resolved.message`，提示检查 `identity.workspaces` 与 `codeRoot` 是否等于工作区路径。
-- `22` → **菜单来源未指定**：首次注册缺 `menu.source`。**停止并要求用户补 `menu.source`（database | code）；不允许加 `--force` 绕过。** 补齐后重跑本命令。
-- `2` → 参数/模板错误（含菜单配置结构校验失败），贴 stderr。**含 `connection-choices-incomplete`**：声明接了某个外部源但字段给齐不了，`problems[]` 会逐项点名缺什么。**含 `menu-choices-incomplete`**：菜单来源选了某一支但那一支的必填项没答齐（同上：逐项点名，不补默认值）。两者都是“把清单递给用户，要么补真值重跑，要么改选项”，不是“脚本坏了”。
+- `25` → **检测到旧版页面配置**：私有根里还留着 `menus/<code>.yaml`（`menu` 分区已整体改名 `screens`、不留别名）。**停止**，提示用户跑 `/supperH-init --reinit`（清场会连旧 `menus/` 残留一并搬进 `_retired/`）后重新注册；**绝不静默当成未配置、也不搬运旧配置到新位置**。
+- `22` → **页面发现器未指定**：首次注册缺 `screen.discovery`。**停止并要求用户补 `screen.discovery`（至少一项 database | driver | code | artifact）；不允许加 `--force` 绕过。** 补齐后重跑本命令。
+- `2` → 参数/模板错误（含页面配置结构校验失败），贴 stderr。**含 `connection-choices-incomplete`**：声明接了某个外部源但字段给齐不了，`problems[]` 会逐项点名缺什么。**含 `screen-choices-incomplete`**：某个发现器项的必填项没答齐（逐项点名，不补默认值）。**含 `screen-config-invalid`**：schema/跨字段校验失败（如 `via: code` 的 `format: other` 没带 `userPhrase`），`errors[]` 点名。这些都是“把清单递给用户，要么补真值重跑，要么改选项”，不是“脚本坏了”。
 
 ### 通道结论（与门禁同一次跑完，不给模型判断）
 
@@ -143,7 +140,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<工作区绝对路径>"
 | 他要的 | 用哪个 | 为什么不能混 |
 |---|---|---|
 | 按当前模板/契约把条目重刷一遍（注册状态与学习数据都留着） | `--write`（步骤 4） | 它只覆盖自己生成的那些段，旧文件自动转 `.bak` |
-| 撤掉“已注册”这个状态，回到未注册重来一遍 | `--reinit`（本节） | `--write` 撤不掉条目本身、撤不掉 `menus/<code>.yaml`；硬套只会留下半新半旧 |
+| 撤掉“已注册”这个状态，回到未注册重来一遍 | `--reinit`（本节） | `--write` 撤不掉条目本身、撤不掉 `screens/<code>.yaml`（含旧 `menus/` 残留）；硬套只会留下半新半旧 |
 
 **第一步永远是只读计划**（一个字节都不动），且必须先向用户复述、拿到同意，才允许执行：
 
@@ -170,8 +167,8 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --reinit --cwd "<工作区绝对�
 - **禁止**覆盖已有 `projects/<code>.yaml` 而不留 `.bak`（脚本已自动备份，不得绕过脚本手改）。
 - **禁止**把私密字段值 dump 到终端/聊天（只回显字段名与门禁结果）。
 - **禁止**自动猜 `db.*` / 各源的端点 / 凭据——这些必须来自用户输入。
-- **禁止**自动猜菜单来源（`menu.source`）或菜单表名/列名——必须来自用户输入，或用户在 `menuCandidates` 里显式选定。
-- **禁止**把菜单表名/列名 dump 到聊天正文（只回显“已采集菜单来源”）。
+- **禁止**自动猜页面发现器（`screen.discovery`）或菜单表名/列名——必须来自用户输入，或用户在 `screenCandidates` 里显式选定。
+- **禁止**把菜单表名/列名 dump 到聊天正文（只回显“已采集页面发现器 N 项”）。
 - **禁止**替用户改 `kind` / `fallback`，也禁止拿 `channelDecisions` 的结论去作任何分流判断（MCP 无退出码）——回写只由脚本自己完成，本命令只转述结果。
 - 结构字段（code/packageRoot/modules/branches）扫描值是**候选**，用户改则以用户为准：`--values` 里的 `code` / `packageRoot` / `modules` / `branches.*` 由脚本回写覆盖（`modules` 用逗号分隔字符串或数组），用户提供的分支不算“猜的”（`branchesDetected` 同步转 true）。**禁止**把未覆盖的未检出默认值当成事实向用户复述。
 - **禁止**把 `--reinit --purge` 当删除用：它只做 `rename` 进 `_retired/`，且必须先跑过只读计划、把 `movableCount` 与 `learningFiles` 念给用户；`learningFiles > 0` 时未拿到用户明确同意，**禁止**加 `--confirm <code>`。

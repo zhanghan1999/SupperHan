@@ -44,7 +44,7 @@ node scripts/setup.mjs --check           # 只体检不写入
 | 层 | 内容 | 存放位置 | git |
 |----|------|---------|-----|
 | **L1 通用行为层** | 角色职责、派发协议、分批算法、原子切换、降级策略、完成判定 | 本仓库 `agents/` `commands/` `skills/` `.qoder/rules/` | ✅ 上传 |
-| **L2 项目契约层** | codeRoot、DB schema、驱动路径、分支、模块清单、包名 | `../supper-Han-private/projects/<code>.yaml`（+ `menus/<code>.yaml`）| ❌ 私有 |
+| **L2 项目契约层** | codeRoot、DB schema、驱动路径、分支、模块清单、包名 | `../supper-Han-private/projects/<code>.yaml`（+ `screens/<code>.yaml`）| ❌ 私有 |
 | **L3 个人习惯层** | 日志详略、常用笔记、确认强度 | `../supper-Han-private/prefs.md` | ❌ 私有 |
 
 **驱动契约层**（L1/L2 中间）：
@@ -77,9 +77,9 @@ git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
 |------|---------|------|
 | `/supperH-setup` | `commands/supperH-setup.md` | **一键适配**：探测 Qoder / OpenCode → 拷 dist 到对应加载目录 → 打印下一步 |
 | `/supperH-bootstrap` | `commands/supperH-bootstrap.md` | 新用户引导：**只**初始化私有根骨架（五个子目录 + `prefs.md`，幂等）+ 处置 legacy 单文件。不写任何注册条目、不跑 sync——条目由 `/supperH-init` 扫描后产生 |
-| `/supperH-init` | `commands/supperH-init.md` | 工作区级注册：扫描仓库预填结构字段 → 外部源**由用户多选**（全不选 = 纯代码模式，`db`/`drivers` 两段整段不写）→ 落 `projects/<code>.yaml` + `menus/<code>.yaml`；连通门禁 + driver 通道（`kind`）探测在此机械写定。要“回到未注册重来一遍”则用 `--reinit`（只读计划）/ `--purge`（执行）：撤销 = 搬进 `_retired/` 隔离区不删，学习数据非空时必须有 `--confirm <code>`（否则退 23）|
+| `/supperH-init` | `commands/supperH-init.md` | 工作区级注册：扫描仓库预填结构字段 → 外部源**由用户多选**（全不选 = 纯代码模式，`db`/`drivers` 两段整段不写）→ 落 `projects/<code>.yaml` + `screens/<code>.yaml`；连通门禁 + driver 通道（`kind`）探测在此机械写定。要“回到未注册重来一遍”则用 `--reinit`（只读计划）/ `--purge`（执行）：撤销 = 搬进 `_retired/` 隔离区不删，学习数据非空时必须有 `--confirm <code>`（否则退 23）|
 | `/supperH-bug` | `commands/supperH-bug.md` | Bug 全流程主入口：解析→DB 门禁→学习模块检查→派 subagent 修复→验证→终判 |
-| `/supperH-learn` | `commands/supperH-learn.md` | 学习入口：代码学习 / 菜单学习 / 流程学习 |
+| `/supperH-learn` | `commands/supperH-learn.md` | 学习入口：代码学习 / 页面学习 / 流程学习 |
 | `/supperH-driver` | `commands/supperH-driver.md` | 数据源登记的唯一入口：槽位名由用户定（L1 不写死固定四种源）→ 描述充分性门禁 → 分流（驱动已有就直接登记 / 否则派 `supperH-driver-author`（驱动编写） 先写）→ 写能力归类（`writes` + `confirm`/`deny` 由用户定）→ `driver-registry.mjs` 落盘 |
 
 **二期再补**：`/supperH-flow`、`/supperH-package`、`/supperH-test`
@@ -134,7 +134,7 @@ supper-Han-java/
 ```
 ../supper-Han-private/
 ├── projects/<code>.yaml   按项目短码注册的 L2 契约（/supperH-init 写入）
-├── menus/<code>.yaml      菜单学习来源配置
+├── screens/<code>.yaml    页面发现器配置
 ├── prefs.md               L3 个人习惯（骨架自带，存在则永不覆盖）
 ├── drivers/               用户自开发的内网驱动（含 <code>/adapter.py）
 ├── tasks/                 任务态数据

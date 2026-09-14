@@ -62,7 +62,22 @@
 
 **命名补记（同一条理由管到段名）**：段名 `render`（呈现）已被改名 **`template`**（模板工件）—— "render" 是服务端渲染的
 词，前端路由表项目里没有"渲染"这一跳，它有的是"路由指向组件文件"。`template` 对 JSP、`.vue`、layout XML、下发的 UI
-schema **四种形态都成立**。`menu` 保留为 legacy 别名 + 只发警告（见 §8）。
+schema **四种形态都成立**。
+
+**`menu` 不留别名（用户定夺，推翻本文早先的"legacy 别名 + 只发警告"方案）**：改名必须一次改干净，
+双名并存必然产生"菜单学习 / 页面学习"两种说法的歧义。成本窗口就是现在：尚无任何存量学习产物
+（实测私有根 `context/` 为空），错过这个窗口就要永远背着两个名字。**不留别名不等于静默忽略**
+（旧配置 / 旧目录检测到就报错，逐条见 §8）。
+
+**"菜单"一词的保留边界**（改名时必须逐处判，不得批量替换）：
+
+| 指代对象 | 用词 |
+|---|---|
+| **我们的**模块 / 动作 / 分区 / 配置文件 / 旗标 | 一律 `screen`、"页面学习"，`menu` **零残留** |
+| **被学习的那个东西**（项目里真存在的导航菜单：`sys_menu` 表、菜单项、菜单中文名） | 保留"菜单"二字 |
+
+理由：把"菜单表"也改成"页面表"，得到的是一句读不懂且**与项目里真实存不存在的那张表对不上**的话 ——
+歧义不只会从"两个名字"来，也会从"一个名字指两种东西"来。
 
 **对外称呼一览**（写进命令层与文档，避免"菜单 / 页面 / 档案"三种说法混用）：
 
@@ -406,21 +421,29 @@ drilldowns（树形，编号只活在正文，§4.6 ④）:
 |---|---|---|
 | `skills/supperH-driver-contract/SKILL.md` §菜单查询 | 首句"菜单学习复用**数据库通道**"没有前提限定语 —— 它整节讲的是 `via: database` 这一支，但读者（含模型）会读成全局断言。本轮已有人被它带偏一次 | 补限定："当 `discovery[].via == database` 时……"，并明确另一句"接口型来源走该 discovery 项登记的 driver 槽位，`via: code` 型不经任何外部通道" |
 | `validate-project.mjs` **不读** `menus/*.yaml` | `source: database` 但项目没有 `role: database` 槽位 → 写盘时无人拦，只有运行期撞上"不得猜一个驱动先跑着"才停。`architecture.md` L470 已认账："这一**跳文件**一致性目前无人机械拦" | v2 落地时把 `screens/<code>.yaml` 纳入 validate：`via: database/driver` 引用了不存在的槽位或未标 `role` 的槽位 → **警告**（纯代码模式合法，不阻断）；`config.sources` 里没声明所引用的逻辑源名 → 同样警告；**键依赖不闭合 → 同样警告** |
-| `menu` 与 `screen` 两个词并存 | 迁移期会出现"菜单学习"与"页面学习"两种说法 | 命令层统一说**页面学习**；`--menu` 旗标保留为别名并提示改用 `--screen`；`/supperH-learn` 的模式表里 `menu` 行整行改写 |
+| 两词并存本身就是歧义源 | 只要 `--menu` 与 `--screen`、"菜单学习"与"页面学习"同时存在，命令层与产物就会两套说法混用 | **不并存**（用户定夺）：命令层只说**页面学习**，旗标只有 `--screen`，模式表 `menu` 行整行改写；旧名一律不再接受（处理见 §8）|
 
 ---
 
-## 8. `menu` 这五处硬编码怎么处理
+## 8. `menu` 这六处硬编码怎么除干净
 
-早前已定过一条决策：不能简单 rename，因为 `menu` 至少硬编码在五处。逐条落实：
+早前已定过一条决策：不能简单 rename，因为 `menu` 至少硬编码在五处（现已核到六处）。**因用户要求不留别名，
+下表从"如何共存"改为"如何除净"**：
 
 | 处 | 现值 | 处理 |
 |---|---|---|
-| 保留分区名 `module: "menu"` | `commands/supperH-learn.md` L68 | 新增并列保留分区 `screens`；`menu` 分区**只读兼容**（老产物照样能读），新学习一律写 `screens` |
-| 首次注册硬门禁 **22** | `init-project.mjs` 的 `menu-source-required` | 语义放宽为"**发现器至少一项，但可以是 `via: code`**"：一项都没答 → 仍退 22（旧版那句"可为空"已在 §4.1 作废）；答"从代码路由表发现、没有中文名" → 合法通过 |
-| driver 保留源名 `menu` | `driver-contract` §菜单查询 | 不变（它仍是 `via: database` 那一类的默认逻辑源名）；只是不再是唯一选项 |
-| `CONTEXT_ROOT` 分区 | `resolve-project.mjs` 路径解析 | 加一个 `screens` 子分区，与 `menu` 并列；`paths.*` 覆写与 F-14 清场的 `LEARNING_KINDS` 同步扩（**否则清场会漏搬 `screens/`，那是 F-14 已经踩过一类的坑**）|
-| G2 特判 | `fastpath-gate.mjs` L677 `kind === 'menu'` → fail | 一期照搬到 `kind === 'screens'`（**不参与快路径**）；放开它是 F-15e 单独评估，且判据按 §4.4 走 `evidence: static` + 可反查 `path:line`，**不按段名**（按段名会让门禁判据随新增段漂移） |
+| 保留分区名 `module: "menu"` | `commands/supperH-learn.md` L68 | 改为保留分区名 `screens`。**`menu` 分区不再存在**，不并列、不映射 |
+| 首次注册硬门禁 **22** | `init-project.mjs` 的 `menu-source-required` | 语义放宽为"**发现器至少一项，但可以是 `via: code`**"：一项都没答 → 仍退 22（旧版那句"可为空"已在 §4.1 作废）；答"从代码路由表发现、没有中文名" → 合法通过。措辞去 `menu` |
+| driver 保留源名 `menu` | `driver-contract` §菜单查询 | 改为 `screen`（它仍是 `via: database` 那一类的默认逻辑源名，只是不再是唯一选项）。已核：`driver-registry.mjs` 与 mcp-skeleton 侧**无 `menu` 硬编码**，改的只是契约文档与 init 提示 |
+| `CONTEXT_ROOT` 子分区 + 私有根 `menus/` | `resolve-project.mjs` L363 / `resolve-private-root.mjs` 的 **SUBDIRS 单点** | 均改为 `screens`。⚠ SUBDIRS 只能有一处定义（两边各写一份时漂移过一次，迁移脚本建的根缺目录，直到首次写盘才撞 ENOENT）；且与 F-14 清场的 `LEARNING_KINDS` 同步改 —— **否则清场会漏搬旧目录，那是 F-14 已经踩过一类的坑** |
+| `resolve-project` 输出键 `menu` / `menuConfigFile` / `readMenuFile` | 同上 L176-180、L361-376 | 改 `screen` / `screenConfigFile` / `readScreenFile`。输出键名也必须中立（R6），否则下游 prompt 一看到 `menu` 就回到旧假设 |
+| G2 特判 | `fastpath-gate.mjs` L677 `kind === 'menu'` → fail | 一期照搬到 `kind === 'screens'`（**不参与快路径**），语义一字不动。放开它是 F-15e 单独评估，且届时改按 §4.4 的 `evidence: static` + 可反查 `path:line` 判，**不按段名也不按分区名**（按名字判会让门禁随新增段漂移）|
+
+**不做 1→2 迁移器**（用户原话："不用管现有的项目……后面还需要 init 重新走一次"）。但不许因此静默：
+
+- 检测到旧物（`menus/<code>.yaml` 或 `menu/` 产物目录）→ **init 与 learn 均退错**，并指出手动处置（跑 `--reinit`）；
+- 绝不许"读不到就当没配"然后学出一个空壳 —— 本仓在"参数缺失被当成没请求从而返回成功码"上已亏过一次；
+- 也不许默默在新位置重建一份旧配置（那等于把旧的错误假设搬运一遍）。
 
 ---
 
@@ -429,9 +452,9 @@ drilldowns（树形，编号只活在正文，§4.6 ④）:
 | 期 | 范围 | 依赖 | 验收判据 |
 |---|---|---|---|
 | **F-15a** | 纯文本纠偏：§7 三处旧账的前两处与第三处（契约限定语、命令层说法）。**不动 schema、不动行为** | — | `sync --check` 全绿；无测试变化 |
-| **F-15b** | schema v2（`screens.schema.yaml`）+ 渲染器 + `/supperH-init` 采集改造（discovery 数组化含 `via: code`、`hops` 可写、`parser: other` 泄压阀）+ 1→2 迁移器 + validate 纳入该文件 | — | ① 真跑 CLI 用例：老 `menus/<code>.yaml` 能机械升 v2；`parser: other` 无 `userPhrase` 退 2；未被选中的 `via` 整项不写。② **通用性判据：拿两个形状相反的项目（服务端渲染 + 数据库菜单表 / 前端路由表）跑同一个 L1，各自只改 `screens/<code>.yaml`、L1 一行不动，两边都能出产物**；任一边需要 L1 加分支 → 本期不通过。③ §5 那两条 profile 测试 |
+| **F-15b** | schema v2（`screens.schema.yaml`）+ 渲染器 + `/supperH-init` 采集改造（discovery 数组化含 `via: code`、`hops` 可写、`parser: other` 泄压阀）+ 六处硬编码除名（§8）+ validate 纳入该文件。**迁移器不做**（用户授权） | — | ① 真跑 CLI 用例：`parser: other` 无 `userPhrase` 退 2；未被选中的 `via` 整项不写；**旧 `menus/<code>.yaml` 存在时必须报错并提示 `--reinit`，不得静默当成未配置**；全仓 `menu` 除名后 grep 只剩"被学习物"用法。② **通用性判据：拿两个形状相反的项目（服务端渲染 + 数据库菜单表 / 前端路由表）跑同一个 L1，各自只改 `screens/<code>.yaml`、L1 一行不动，两边都能出产物**；任一边需要 L1 加分支 → 本期不通过。③ §5 那两条 profile 测试 |
 | **F-15c** | **② 段**：`entry → 代码位置 → 模板工件` 这几跳的 hop 执行器（含 `prefixFrom` 读取）+ **两段式探测**（§4.8：probe pass → `questions.md` → resolve pass）。纯代码，不碰 DB | b（需要 `hops` 槽位存在） | ① 命中率矩阵能自动定下情形①②（只差前缀后缀），定不下来的写进 `questions.md` 而不是猜；② 在一个真服务端渲染型项目上解出的模板文件**存在率**如实报告（不承诺 100%）；③ `questions.md` 非空时返回 `needs_user`，不得静默继续 |
-| **F-15d** | **③④ 段**：按 L2 规则从模板工件里抽 actions / dataSources / drilldowns，**并对下钻目标做闭包展开**（四道闸门，§4.6） | c（先有工件才知道去哪抽） | ① 每条抽取结果带 `path:line`；② 自引用图不重复展开也不死循环（构一个 A↔B 环的用例）；③ 到预算/深度线时 `truncated` 落正文与计数；④ 跨应用目标落 `outOfScope` **不落** `incomplete`；⑤ 无规则时该段为空并报"未配置规则"，不报错 |
+| **F-15d** | **③④ 段**：按 L2 规则从模板工件里抽 actions / dataSources / drilldowns，**并对下钻目标做树形展开**（去重 + 环停线 + 两个预算，§4.6） | c（先有工件才知道去哪抽） | ① 每条抽取结果带 `path:line`；② 自引用图不重复展开也不死循环（构一个 A↔B 环的用例）；③ 到预算/深度线时 `truncated` 落正文与计数；④ 跨应用目标落 `outOfScope` **不落** `incomplete`；⑤ 重复页只出现一份正文、其余为 `-> see` 引用（构一例"两个顶级菜单都能到同一页"）；⑥ 无规则时该段为空并报"未配置规则"，不报错 |
 | **F-15e** | 分区与门禁：`screens` 分区落地 + **评估**是否让 `evidence: static` 且可反查的段进 G2 锚点 | d | 评估结论必须有 jsonl 真实样本支撑，否则维持"不参与"。**默认不放开** —— 放宽锚点门禁是 fail-open 方向，不能用设计漂亮来换 |
 
 b/c/d 各自都要：schema + 校验 + 命令文本 + 走真实命令行的测试 + `architecture.md` 台账一条。**渲染类行为一律要有 `spawnSync` 真实 CLI 用例，只测渲染层等于没测**（这条已在这仓亏过一次）。

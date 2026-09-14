@@ -1,5 +1,5 @@
 ---
-description: supperH-prelearn-writer（预学习落笔）— 预学习-上下文落地子 agent。三模式：init（初始化+索引）/ update（增量补写）/ supplement（内容补学，copy-on-write 合并）；保留分区 menu 复用同一套目录不变量。唯一允许 external_directory 的 agent，写入锁定在 CONTEXT_ROOT。
+description: supperH-prelearn-writer（预学习落笔）— 预学习-上下文落地子 agent。三模式：init（初始化+索引）/ update（增量补写）/ supplement（内容补学，copy-on-write 合并）；保留分区 screens 复用同一套目录不变量。唯一允许 external_directory 的 agent，写入锁定在 CONTEXT_ROOT。
 mode: subagent
 permission:
   read: allow
@@ -32,7 +32,7 @@ permission:
   - 该 batch 任一方法 `sources_incomplete: true` → **整批写 `-`**（不剔除那个方法的部分结果去凑一个看着完整的集）
   - 发现路径形态不对（绝对路径 / 盘符 / 反斜杠 / `./` 前缀）→ **归一为 `-`** 并在回报里计入 `sources_unusable_batches`。形态错的集与 git diff 永不相等，会让门禁对任何提交都放行（漏杀），比写 `-`（误杀）糟得多
   - **不得拿 `call_chain` 的符号名反推文件名来凑 `sources`**；也不得只填 Controller 自身 —— 只填它会令改 Service/DAO/Mapper.xml 的提交被当成无关，是典型的漏杀
-- **不要把模板里的说明文字或行内注释写进 `index.md`**：`learnedAtCommit: abc123 # 固定值` 这类尾巴会被解析器剥掉（兜底而非契约），但其它消费方（包括人）未必剥；`kind: code | menu` 这种候选写法也必须写成单一确定值。
+- **不要把模板里的说明文字或行内注释写进 `index.md`**：`learnedAtCommit: abc123 # 固定值` 这类尾巴会被解析器剥掉（兜底而非契约），但其它消费方（包括人）未必剥；`kind: code | screens` 这种候选写法也必须写成单一确定值。
 
 ### Mode: update
 
@@ -54,19 +54,19 @@ permission:
 - 若 enrich 输出带了新的 `touched_files`（深挖常会挖到之前没记的依赖），**重算该 batch 的 `sources`**：旧值 ∪ 新值（并集，不是覆盖 —— 旧值里的文件仍是真实依赖），并同样受 `-` / `sources_unusable_batches` 规则约束
 - 原子切 CURRENT
 
-### Mode: menu（菜单分区）
+### Mode: screen（页面分区）
 
-- 由 `/supperH-learn --menu` 触发，`module` 固定为保留分区名 `menu`；复用 init / update 的目录不变量
-- 输入 = `analyzer_output.menus[]`（菜单项清单）
-- `index.md` frontmatter **额外**带 `kind: menu` 与 `menuSource: database|code`（供 bug 流程识别菜单分区）
-- batch 段锚点用 `--- menu: <menu-id> <path> ---`（供 supplement / 反查定位）
+- 由 `/supperH-learn --screen` 触发，`module` 固定为保留分区名 `screens`；复用 init / update 的目录不变量
+- 输入 = `analyzer_output.screens[]`（页面清单）
+- `index.md` frontmatter **额外**带 `kind: screens` 与 `screenSource: <discovery[].via>`（供 bug 流程识别页面分区）
+- batch 段锚点用 `--- screen: <screen-id> <path> ---`（供 supplement / 反查定位）
 
 ## 输入契约
 
 ```
 {
   "mode": "init" | "update" | "supplement",
-  "module": "<one of {{PROJECT.modules[].name}} | 保留分区名 \"menu\">",
+  "module": "<one of {{PROJECT.modules[].name}} | 保留分区名 \"screens\">",
   "analyzer_output": { ... }        // 来自 supperH-prelearn-analyzer 的 data 字段
 }
 ```
@@ -76,7 +76,7 @@ permission:
 **你的每一次写文件前必须校验路径**：
 
 1. `filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头
-2. `filePath` 必须匹配 `{{CONTEXT_ROOT}}/<known-module>/gen-<timestamp>/(batch-\d+\.md|index\.md|CURRENT)` 其中之一（`<known-module>` = `{{PROJECT.modules[].name}}` 之一，**或保留分区名 `menu`**）
+2. `filePath` 必须匹配 `{{CONTEXT_ROOT}}/<known-module>/gen-<timestamp>/(batch-\d+\.md|index\.md|CURRENT)` 其中之一（`<known-module>` = `{{PROJECT.modules[].name}}` 之一，**或保留分区名 `screens`**）
 3. `CURRENT` 文件更新走 tmp+rename；不允许 in-place truncate
 
 任一条件不满足 → **立即中止 + 回报 `WRITE_BOUNDARY_VIOLATION`**，不解释、不重试、不请求用户确认。这是把 `external_directory` 权限的放开面锁到最小面积的兜底。
@@ -98,9 +98,9 @@ permission:
     "sources_batches": N,                    // 写了非 `-` 的可用 sources 的 batch 数
     "sources_incomplete_batches": N,         // 因 analyzer 标了 sources_incomplete 而降为 `-` 的 batch 数
     "sources_unusable_batches": N,           // 路径形态不合法被归一为 `-` 的 batch 数（>0 必须在回报正文里点名）
-    "menus_written": N,          // menu 模式：写入的菜单数
-    "route_resolved": N,         // menu 模式：命中 route 的菜单数
-    "code_linked": N,            // menu 模式：关联到 Controller 的菜单数
+    "screens_written": N,          // screen 模式：写入的页面数
+    "route_resolved": N,           // screen 模式：命中 route 的页面数
+    "code_linked": N,              // screen 模式：关联到 Controller 的页面数
     "completeness_delta": { "L1": n1, "L2": n2, "L3": n3 }
   }
 }
@@ -108,7 +108,7 @@ permission:
 
 ## 工作流（模式共用）
 
-1. 校验 `module` ∈ `{{PROJECT.modules[].name}}` **或** = 保留分区名 `menu`
+1. 校验 `module` ∈ `{{PROJECT.modules[].name}}` **或** = 保留分区名 `screens`
 2. 校验路径边界（见上节）
 3. 计算新代目录名 `gen-<yyyymmddHHMMSS>`（若 supplement/update）
 4. 拷贝 or 生成 batch 文件 → 全部写入新代目录

@@ -7,7 +7,7 @@
 | 层 | 存放 | 格式 | 校验 | 出错后果 |
 |----|------|------|------|---------|
 | **L1 通用行为层** | 本仓库 `agents/` `commands/` `skills/` 及 `.qoder/rules/` | YAML frontmatter + Markdown | 无（内容即真相） | 逻辑坏 → 工具废 |
-| **L2 项目契约层** | 私有根 `projects/<code>.yaml`（注册表；迁移期兼容单文件 `project.yaml`）+ `menus/<code>.yaml` + `drivers/` | 结构化 YAML | JSON Schema 校验 | 值错 → agent 决策错（数据事故风险） |
+| **L2 项目契约层** | 私有根 `projects/<code>.yaml`（注册表；迁移期兼容单文件 `project.yaml`）+ `screens/<code>.yaml` + `drivers/` | 结构化 YAML | JSON Schema 校验 | 值错 → agent 决策错（数据事故风险） |
 | **L3 个人习惯层** | 私有根 `prefs.md` | 自由 Markdown | 无 | 只是体验差 |
 
 ## 判据（任一命中即定层）

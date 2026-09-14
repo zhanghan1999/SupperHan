@@ -185,8 +185,8 @@ function stepEnsurePrivateRoot(opts) {
   // “就绪”的判据是**注册表里有项目条目**（resolvePrivateRoot().ok = projects/*.yaml 非空，
   // 或迁移前的 legacy project.yaml 存在），不是“legacy 文件存在”。
   if (info.privateRootExists && info.ok) {
-    // 骨架子目录仍然补齐（mkdir -p 幂等）：真实机器上出现过“只有 projects/ 没有 menus/”的私有根
-    // （迁移脚本造的），菜单学习写盘时才会撞上 ENOENT。补目录不会改变任何已定结论。
+    // 骨架子目录仍然补齐（mkdir -p 幂等）：真实机器上出现过“只有 projects/ 没有 screens/”的私有根，
+    // 页面学习写盘时才会撞上 ENOENT。补目录不会改变任何已定结论。
     // 子目录清单不在本文件里写：它住在 resolve-private-root.mjs，与 /supperH-bootstrap 共用一份。
     const sk = ensurePrivateSkeleton(info.privateRoot, { dryRun: !!opts.dryRun });
     if (sk.created.length) log(`private root skeleton +${sk.created.join('/')}${opts.dryRun ? ' (dry-run, not created)' : ''}`);

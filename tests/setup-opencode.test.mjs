@@ -113,7 +113,7 @@ test('首次安装：资产落位 + mcp/instructions 合并 + 私有根不造 le
   assert.deepEqual(doc.instructions, [RULES_GLOB], '红线走 instructions 指向工具仓，不生成拷贝件');
 
   // 私有根：只建骨架，绝不把 example 拷成 project.yaml（那会把 F-7 干掉假值重新造出来）
-  for (const d of ['projects', 'menus', 'drivers', 'context', 'tasks']) {
+  for (const d of ['projects', 'screens', 'drivers', 'context', 'tasks']) {
     assert.ok(fs.statSync(path.join(priv, d)).isDirectory(), 'missing private root dir: ' + d);
   }
   assert.ok(!fs.existsSync(path.join(priv, 'project.yaml')), 'setup 不得在私有根造 legacy project.yaml');
@@ -253,7 +253,7 @@ test('命令清单与文案一致：写进 next steps 的 /supperH-* 真的都�
 
 test('私有根已有条目时：只补齐缺失骨架目录，绝不碰条目内容', (t) => {
   const { priv, dest } = mkSandbox(t, 'supperh-oc7-');
-  // mkSandbox 只建了 projects/；放一个已注册条目让 ok=true（本机真实情形：迁移脚本造的私有根缺 menus/）
+  // mkSandbox 只建了 projects/；放一个已注册条目让 ok=true（本机真实情形：迁移脚本造的私有根缺 screens/）
   const entry = path.join(priv, 'projects', 'fx-code.yaml');
   const entryText = 'schemaVersion: 1\nidentity:\n  code: fx-code\n';
   fs.writeFileSync(entry, entryText, 'utf8');
@@ -261,7 +261,7 @@ test('私有根已有条目时：只补齐缺失骨架目录，绝不碰条目�
   const r = install(priv, dest);
   assert.equal(r.status, 0, r.allOutput);
   assert.match(r.allOutput, /private root ok: .*\(1 project\(s\) registered\)/);
-  for (const d of ['menus', 'drivers', 'context', 'tasks']) {
+  for (const d of ['screens', 'drivers', 'context', 'tasks']) {
     assert.ok(fs.statSync(path.join(priv, d)).isDirectory(), '应补齐: ' + d);
   }
   assert.equal(fs.readFileSync(entry, 'utf8'), entryText, '已注册条目一个字节都不能动');

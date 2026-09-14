@@ -63,9 +63,9 @@ node scripts/sync-assets.mjs   # 产出 dist 并自动安装 Qoder 插件到全�
 |------|------|
 | `/supperH-setup` | 一键适配：探测 IDE + 把产物装到加载目录 |
 | `/supperH-bootstrap` | 建私有根**骨架**（五个子目录 + `prefs.md`）。不写任何注册条目，也不跑 sync |
-| `/supperH-init` | 当前工作区注册：落 `projects/<code>.yaml` + `menus/<code>.yaml`（exit 10 未注册时跑它）|
+| `/supperH-init` | 当前工作区注册：落 `projects/<code>.yaml` + `screens/<code>.yaml`（exit 10 未注册时跑它）|
 | `/supperH-bug` | Bug 全流程主入口 |
-| `/supperH-learn` | 代码/菜单/流程学习入口 |
+| `/supperH-learn` | 代码/页面/流程学习入口 |
 | `/supperH-driver` | 数据源登记：往已注册条目里加 / 改 / 删 / 看一个外部数据源（槽位名由用户定）|
 
 ---
@@ -149,7 +149,7 @@ Qoder 是 **全局优先、项目可覆盖** 的模型：
 
 ## 两边共用同一份数据（Qoder ↔ OpenCode）
 
-所有**可变态**都在私有根，不在 IDE 侧：`projects/<code>.yaml`、`menus/<code>.yaml`、`context/<code>/`（学习包）、`tasks/<code>/*.jsonl`、`drivers/<code>/`、`prefs.md`。命令正文里的 `{{CONTEXT_ROOT}}` 一类 token 在 sync 时被改写成 `${SUPPERH.*}`，由主 agent 步骤 0 跑 `scripts/resolve-project.mjs` 按当前工作区现填 —— 不依赖任何 IDE 变量。所以：
+所有**可变态**都在私有根，不在 IDE 侧：`projects/<code>.yaml`、`screens/<code>.yaml`、`context/<code>/`（学习包）、`tasks/<code>/*.jsonl`、`drivers/<code>/`、`prefs.md`。命令正文里的 `{{CONTEXT_ROOT}}` 一类 token 在 sync 时被改写成 `${SUPPERH.*}`，由主 agent 步骤 0 跑 `scripts/resolve-project.mjs` 按当前工作区现填 —— 不依赖任何 IDE 变量。所以：
 
 - Qoder 里 `/supperH-learn` 学出来的模块，OpenCode 里 `/supperH-bug` 直接能读（反之亦同）；
 - 一边跑过 `/supperH-init`，另一边不需重做；
@@ -169,6 +169,6 @@ Qoder 是 **全局优先、项目可覆盖** 的模型：
 | MCP 注册 | 插件自带 `.mcp.json`，零手工配置 | 写进 `<目标目录>/opencode.json` 的 `mcp` 块（portable 只打印待粘贴片段）|
 | 配置文件 | 不碰用户配置 | `opencode.json` / `opencode.jsonc` 都加载；supperH 只写前者，.jsonc 永不改写 |
 | 陈旧产物 | 整目录重建（rm + copy，用户放进插件目录的东西会被抹） | 按 `supperh-installed.json` 清单只删自己放的，用户文件不动 |
-| 数据层 | **完全共用**：私有根 `projects/ menus/ context/ tasks/ drivers/` | 同上 |
+| 数据层 | **完全共用**：私有根 `projects/ screens/ context/ tasks/ drivers/` | 同上 |
 | 生效 | 完全退出后重开 | 重开 opencode CLI / 面板 |
 | 详见 | — | 同目录 `opencode适配说明.md` |

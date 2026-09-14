@@ -674,7 +674,7 @@ export function evaluateFastPath(o = {}) {
   if (!parsed.rows.length) {
     return fail(EXIT.NO_INDEX, 'G2_dataReady', `index.md 格式漂移：${parsed.drift || '反查表不可用'}`);
   }
-  if (fm.kind === 'menu') return fail(EXIT.NO_INDEX, 'G2_dataReady', 'menu 保留分区不参与 bug 快路径');
+  if (fm.kind === 'screens') return fail(EXIT.NO_INDEX, 'G2_dataReady', 'screens 保留分区不参与 bug 快路径');
   gates.G2_dataReady = 'pass';
 
   // ---- G4a 新鲜度·仓库级（先于 G1：全等就无需碰反查表，最快也最省）----

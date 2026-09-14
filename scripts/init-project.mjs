@@ -20,7 +20,7 @@
 //                                      生成过的东西”逐项列出（在不在、目录里几个文件），
 //                                      不搬不改。执行态见 --purge。
 //   --reinit ... --purge [--confirm <code>]
-//                                      执行清场：把注册条目 / 菜单配置 / context+tasks 两个
+//                                      执行清场：把注册条目 / 页面档案配置 / context+tasks 两个
 //                                      目录 rename 进 <PRIVATE_ROOT>/_retired/<UTC 戳>/<code>/
 //                                      并留 manifest.json。本模式**不删任何东西**；学习数据
 //                                      非空时 --confirm <code> 是必填入参。撤完后校解析器。
@@ -36,8 +36,11 @@
 //   20 connectivity gate FAILED (>=1 configured driver unreachable) — rerun with
 //      --force to downgrade to a warning
 //   21 wrote but resolver still does not match cwd (binding bug)
-//   22 menu source missing on FIRST registration (values['menu.source'] empty
-//      and menus/<code>.yaml absent) — NOT bypassable by --force
+//   22 screen discovery missing on FIRST registration (values['screen']['discovery']
+//      empty/absent and screens/<code>.yaml absent) — NOT bypassable by --force
+//   25 stale screen config detected: a legacy menus/<code>.yaml still sits in the private
+//      root (F-15b removed `menu` with no alias). init/learn refuse and point at --reinit;
+//      never silently treated as "not configured"
 //   23 reinit: context/ 或 tasks/ 下有文件而未给 --confirm <code>（学习成果只能重学，
 //      不能跟着一次清场顺手没了）；`--force` 不能绕过它——那是写模式的降级旗标，与清场无关
 //   24 reinit: 搬完了但解析器仍命中同一个 code（撤销不彻底，manifest.json 里有逐条原路径）
@@ -53,7 +56,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import YAML from 'yaml';
 import { resolvePrivateRoot } from './resolve-private-root.mjs';
 import { resolveProject, expandDrivers, resolveRootPaths } from './resolve-project.mjs';
-import { validateAgainstSchema } from './validate-project.mjs';
+import { validateAgainstSchema, screenRuleIssues } from './validate-project.mjs';
 
 const TOOL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -209,15 +212,17 @@ function detectPackageRootCandidates(cwd, mods) {
   };
 }
 
-// ---- best-effort menu-source candidates (prefill only; user still confirms) ----
-function detectMenuCandidates(cwd) {
+// ---- best-effort screen-discovery candidates (prefill only; user still confirms) ----
+// 产的都是 `via: code` 一类候选（清单从仓内文件读出来）：数据库表不在仓里扫不到，
+// 只能问用户。命中一个就递一条候选给命令层预填，不替用户定。
+function detectScreenCandidates(cwd) {
   const out = [];
   const seen = new Set();
   function add(format, full) {
     const rel = path.relative(cwd, full).replace(/\\/g, '/');
     if (seen.has(rel)) return;
     seen.add(rel);
-    out.push({ kind: 'code', path: rel, format });
+    out.push({ via: 'code', path: rel, format });
   }
   function walk(dir, depth) {
     if (depth > 6) return;
@@ -227,7 +232,7 @@ function detectMenuCandidates(cwd) {
       const full = path.join(dir, e.name);
       if (e.isDirectory()) { walk(full, depth + 1); continue; }
       const lower = e.name.toLowerCase();
-      if (/^(menu|menus).*\.json$/.test(lower)) { add('json', full); continue; }
+      if (/^(menu|menus|screens).*\.json$/.test(lower)) { add('json', full); continue; }
       if (lower.endsWith('.sql')) {
         try { if (/\bsys_menu\b/i.test(fs.readFileSync(full, 'utf8'))) add('sql', full); } catch { /* unreadable */ }
         continue;
@@ -319,7 +324,7 @@ export function scanProject(cwd) {
     // 旧形态只有 needsUserInput，且它在 commands/supperH-init.md 里被读成了"必答清单"——
     // 语义本来是"禁止脚本猜"，但字段名分不清"必须问"与"必须有"，于是"不接"这个合法答案
     // 只能落成 db.example.internal / example_prod 这种看着像配置的假值。
-    // 这里曾经返回 connectSlots: [四个写死的名字]，命令层照着摆菜单 —— 那等于把"一个项目最多
+    // 这里曾经返回 connectSlots: [四个写死的名字]，命令层照着摆选项 —— 那等于把"一个项目最多
     // 接四种外部源"当成了通用契约，第五种源在 schema 阶段就被拒。init 现在只回答两件事：
     // 名字怎么起算合法、库信息挂到哪个槽位。真要加源走 /supperH-driver（可多次添加）。
     connectNaming: { pattern: SLOT_KEY_RE.source, maxLength: 40, dbSlotDefault: DB_SLOT_NAME },
@@ -328,9 +333,10 @@ export function scanProject(cwd) {
     driverFieldsIfConnected: ['desc', 'impl', 'healthCheck'],   // 每个自定义槽位至少要这三项
     // 兼容旧字段名（命令层若还在读它，语义 = 接 database 时禁止脚本猜的字段）
     needsUserInput: DB_VALUE_KEYS.slice(),
-    // menu-learning source: always ask on first registration (no default, not skippable)
-    menuCandidates: detectMenuCandidates(abs),
-    menuNeedsUserInput: ['menu.source'],
+    // screen 发现器：首次注册必答（至少一项，可以只是 via: code）。无默认、不可跳过。
+    // 探到的仓内候选先递上去，命令层预填后用户仍要确认；探不到就只问。
+    screenCandidates: detectScreenCandidates(abs),
+    screenNeedsUserInput: ['screen.discovery'],
   };
 }
 
@@ -514,25 +520,47 @@ export function planConnections(values) {
 }
 
 /**
- * 菜单来源的完整性关（与 planConnections 同纪律）：光问“选了哪一支”不够，
- * 选了 database 却不答表名/列名时，模板里那套 `sys_menu` / `menu_id` / `path` 会原样留在
- * 落盘文件里 —— 结构合法、过 schema、没人读得出它从未被回答过（F-7 的同形缺陷）。
- * 而菜单这一路没有兼容网：`validate-project.mjs` 不读 `menus/*.yaml`，模板残留扫描也只盖 projects 条目。
- * 可选键（slot / order / rootParentId / extraFilter）不进必填清单：没答 = 删行 = 走缺省，不会留假值。
+ * 页面发现器的完整性关（与 planConnections 同纪律）：`discovery` 是数组，每一项都得
+ * 把它那一类的必填字段答全 —— 光交个空壳或半截项，落出来就是“结构合法、过 schema、
+ * 没人读得出它从没被回答过”（F-7 同形缺陷）。`format=other` 必须带 `userPhrase` 这类
+ * 跳字段硬约束不在这里判（交给 buildScreenConfig 里的 screenRuleIssues，同样退 2）。
+ * 值的形态：values.screen = { discovery: [ {via, ...}, ... ], hops?, extract?, budget? }。
+ * 可选键（slot / order / rootParentId / extraFilter）不进必填清单：没答 = 不写该键 = 走缺省。
  */
-export function planMenuChoices(values) {
-  const v = values || {};
-  const src = isGiven(v['menu.source']) ? String(v['menu.source']).trim() : null;
-  if (!src) return { needed: false, ok: true, missing: [] };
-  if (src !== 'database' && src !== 'code') {
-    return { needed: true, ok: false, badSource: src, missing: [] };
-  }
-  const need = src === 'database'
-    ? ['menu.database.table', 'menu.database.columns.id', 'menu.database.columns.parentId',
-       'menu.database.columns.name', 'menu.database.columns.path']
-    : ['menu.code.path', 'menu.code.format'];
-  const missing = need.filter((k) => !isGiven(v[k]));
-  return { needed: true, ok: !missing.length, source: src, missing };
+const SCREEN_DISCOVERY_REQUIRED = {
+  database: ['via', 'table', 'columns'],
+  driver:   ['via', 'slot'],
+  code:     ['via', 'path', 'format'],
+  artifact: ['via', 'kind'],
+};
+function isBlankVal(x) {
+  if (x === undefined || x === null) return true;
+  if (typeof x === 'string') return !x.trim();
+  if (Array.isArray(x)) return x.length === 0;
+  if (typeof x === 'object') return Object.keys(x).length === 0;
+  return false;
+}
+/** 取 values 里的 discovery 数组：优先 values.screen.discovery（嵌套），兼容 values['screen.discovery']（可为 JSON 串）。 */
+export function screenDiscovery(values) {
+  const s = (values || {}).screen;
+  if (s && typeof s === 'object' && s.discovery !== undefined) return s.discovery;
+  const flat = (values || {})['screen.discovery'];
+  if (typeof flat === 'string') { try { return JSON.parse(flat); } catch { return flat; } }
+  return flat;
+}
+export function planScreenChoices(values) {
+  const disc = screenDiscovery(values);
+  if (disc === undefined || disc === null) return { needed: false, ok: true, count: 0, problems: [] };
+  if (!Array.isArray(disc)) return { needed: true, ok: false, badDiscovery: true, count: 0, problems: ['screen.discovery 必须是数组'] };
+  const problems = [];
+  disc.forEach((item, i) => {
+    const via = item && typeof item === 'object' ? item.via : null;
+    if (!via) { problems.push(`discovery[${i}] 缺 via`); return; }
+    const need = SCREEN_DISCOVERY_REQUIRED[via];
+    if (!need) { problems.push(`discovery[${i}].via 非法：${via}（只认 database | driver | code | artifact）`); return; }
+    for (const k of need) if (isBlankVal(item[k])) problems.push(`discovery[${i}]（via=${via}）缺必填：${k}`);
+  });
+  return { needed: true, ok: !problems.length, count: disc.length, problems };
 }
 
 // 未提供的值写空串而不是 'undefined'：空串被 schema 的 minLength:1 拦下（进而是 validate 退 2），
@@ -694,104 +722,35 @@ export function renderConfig(exampleText, plan, values) {
   return out;
 }
 
-// ---- build the menus/<code>.yaml text from menu.example + scan + values ----
-// NOTE: uses EXACT-indent matching (unlike renderConfig's whitespace-tolerant
-// regex) because `path` / `source` recur at different indent levels and a
-// shallower indent anchored with `\s*` would swallow a deeper line.
-//
-// 两条“缺席即语义”规矩（与 §10.12 / §10.15 同纪律，都是 setLine “没答就不改写” 的推论）：
-//  1) 未被选中的分支**整段删除**。旧实现只改写选中的那些行，于是 `source: code` 的项目
-//     会把模板里完整的 database 段（sys_menu / menu_id / …）带回家；日后按 architecture.md
-//     「换菜单来源只改这个文件」翻成 database 时，拿到的是一个长得像填好了、其实从没被回答过的表名列名。
-//  2) 可选键没答就**删行**，不留模板示例值。最要紧的是 `menu.database.slot`：F-10 之后库槽位名
-//     归用户，烤一个 `slot: database` 进去会让 /supperH-learn 去查一个本项目不存在的槽位（不报错，只是查不到）。
-//     有明示缺省的键（`limit` = 5000、`database.source` = menu）不在删行之列 —— 那不是假值，是文档里的缺省。
-const MENU_DROP_IF_ABSENT = [
-  { key: 'slot', indent: '  ' },
-  { key: 'order', indent: '    ' },
-  { key: 'rootParentId', indent: '  ' },
-  { key: 'extraFilter', indent: '  ' },
-];
+// ---- build + self-validate the screens/<code>.yaml text (v2 contract) ----
+// v2 形状是一棵树（discovery 数组 / hops 数组 / extract / budget），不再从 example 逐行套模板
+// （行套行对数组里的对象无能为力，且正是“未被选中的分支留在盘上”那类缺陷的成因）。
+// 这里改成**直接按用户答的对象装配 + YAML.stringify**：只写用户真答过的段，未选的 via 天然不落盘。
+// schema 管形状，screenRuleIssues 管 schema 表达不了的跨字段硬约束（format=other 无 userPhrase → 退 2）。
+function buildScreenConfig(plan, values) {
+  const schemaFile = path.join(TOOL_ROOT, 'schemas', 'screens.schema.yaml');
+  if (!fs.existsSync(schemaFile)) return { ok: false, exitCode: 2, error: 'screen-schema-missing' };
+  const s = (values && values.screen) || {};
+  const config = { schemaVersion: 2, project: plan.code, discovery: screenDiscovery(values) };
+  if (Array.isArray(s.hops) && s.hops.length) config.hops = s.hops;
+  if (s.extract && typeof s.extract === 'object' && Object.keys(s.extract).length) config.extract = s.extract;
+  if (s.budget && typeof s.budget === 'object' && Object.keys(s.budget).length) config.budget = s.budget;
 
-/** 删除一个顶格密钥所属的**整段**（含段内缩进行与属于它的注释行）。 */
-function dropTopBlock(text, key) {
-  const eol = /\r\n/.test(text) ? '\r\n' : '\n';
-  const out = [];
-  let skipping = false;
-  for (const line of text.split(/\r?\n/)) {
-    if (/^[^\s#]/.test(line)) skipping = line.startsWith(key + ':');
-    if (!skipping) out.push(line);
-  }
-  return out.join(eol);
-}
-
-function renderMenuConfig(exampleText, plan, values) {
-  const v = values || {};
-  const setLine = (text, key, val, indent) => {
-    if (val === undefined || val === null || val === '') return text;
-    const ind = indent || '';
-    const esc = String(val).replace(/"/g, '\\"');
-    return text.replace(new RegExp(`^(${ind}${key}[ \\t]*:[ \\t]*).*?$`, 'm'), `$1"${esc}"`);
-  };
-  const dropLine = (text, key, indent) => {
-    const ind = indent || '';
-    return text.replace(new RegExp(`^${ind}${key}[ \\t]*:.*?\\r?\\n`, 'm'), '');
-  };
-  let out = exampleText;
-  // identity + source
-  out = setLine(out, 'project', plan.code, '');
-  out = setLine(out, 'source',  v['menu.source'], '');
-  // database branch
-  out = setLine(out, 'slot',   v['menu.database.slot'],   '  ');
-  out = setLine(out, 'source', v['menu.database.source'], '  ');
-  out = setLine(out, 'table',  v['menu.database.table'],  '  ');
-  out = setLine(out, 'id',       v['menu.database.columns.id'],       '    ');
-  out = setLine(out, 'parentId', v['menu.database.columns.parentId'], '    ');
-  out = setLine(out, 'name',     v['menu.database.columns.name'],     '    ');
-  out = setLine(out, 'path',     v['menu.database.columns.path'],     '    ');
-  out = setLine(out, 'order',    v['menu.database.columns.order'],    '    ');
-  out = setLine(out, 'rootParentId', v['menu.database.rootParentId'], '  ');
-  out = setLine(out, 'extraFilter',  v['menu.database.extraFilter'],  '  ');
-  if (v['menu.database.limit'] !== undefined && v['menu.database.limit'] !== null && v['menu.database.limit'] !== '') {
-    out = out.replace(/^(  limit[ \t]*:[ \t]*).*$/m, `$1${Number(v['menu.database.limit']) || v['menu.database.limit']}`);
-  }
-  // code branch
-  out = setLine(out, 'path',   v['menu.code.path'],   '  ');
-  out = setLine(out, 'format', v['menu.code.format'], '  ');
-  // ---- 缺席即语义：没答的可选键删行，未被选中的分支删段 ----
-  const optionalOf = {
-    slot:         'menu.database.slot',
-    order:        'menu.database.columns.order',
-    rootParentId: 'menu.database.rootParentId',
-    extraFilter:  'menu.database.extraFilter',
-  };
-  for (const { key, indent } of MENU_DROP_IF_ABSENT) {
-    const val = v[optionalOf[key]];
-    if (val === undefined || val === null || String(val).trim() === '') out = dropLine(out, key, indent);
-  }
-  const src = v['menu.source'];
-  if (src === 'database') out = dropTopBlock(out, 'code');
-  else if (src === 'code') out = dropTopBlock(out, 'database');
-  return out;
-}
-
-// ---- build + self-validate the menus/<code>.yaml text ----
-function buildMenuConfig(plan, values) {
-  const exampleFile = path.join(TOOL_ROOT, 'schemas', 'menu.example.yaml');
-  const schemaFile  = path.join(TOOL_ROOT, 'schemas', 'menu.schema.yaml');
-  if (!fs.existsSync(exampleFile) || !fs.existsSync(schemaFile)) {
-    return { ok: false, exitCode: 2, error: 'menu-template-missing' };
-  }
-  let exampleText = fs.readFileSync(exampleFile, 'utf8');
-  if (exampleText.charCodeAt(0) === 0xFEFF) exampleText = exampleText.slice(1);
-  const text = renderMenuConfig(exampleText, plan, values);
-  let data;
-  try { data = YAML.parse(text); }
-  catch (e) { return { ok: false, exitCode: 2, error: 'menu-config-yaml-invalid: ' + e.message }; }
   const schema = YAML.parse(fs.readFileSync(schemaFile, 'utf8'));
-  const errors = validateAgainstSchema(data, schema);
-  if (errors.length) return { ok: false, exitCode: 2, error: 'menu-config-schema-invalid', errors };
-  return { ok: true, text, data };
+  const errors = validateAgainstSchema(config, schema);
+  const rule = screenRuleIssues(config);
+  const allErrors = [...errors, ...rule.errors];
+  if (allErrors.length) return { ok: false, exitCode: 2, error: 'screen-config-invalid', errors: allErrors };
+
+  const header = [
+    '# ════════════════════════════════════════════════════════════',
+    `# screens/${plan.code}.yaml —— L2「页面档案」配置（/supperH-init 生成）。`,
+    '# 声明 /supperH-learn 页面模式怎么发现页面、解析到代码工件、抽取页面事实。',
+    '# 形状与取值见 schemas/screens.schema.yaml；换发现方式只改这一份文件。',
+    '# ════════════════════════════════════════════════════════════',
+    '',
+  ].join('\n');
+  return { ok: true, text: header + YAML.stringify(config), data: config };
 }
 
 // ---- connectivity gate: run --health for each configured driver whose impl exists ----
@@ -979,28 +938,36 @@ export function initWrite({ cwd, values, force = false } = {}) {
   let exampleText = fs.readFileSync(exampleFile, 'utf8');
   if (exampleText.charCodeAt(0) === 0xFEFF) exampleText = exampleText.slice(1);
 
-  // ---- menu-source HARD gate (FIRST registration only; NOT bypassable by --force) ----
-  const menuTarget = path.join(info.privateRoot, 'menus', plan.code + '.yaml');
-  const menuExists = fs.existsSync(menuTarget);
-  if (!menuExists && !v['menu.source']) {
+  // ---- 旧物检测：`menu` 不留别名，检测到旧配置文件就退 25，继不静默（§8）----
+  const staleMenuFile = path.join(info.privateRoot, 'menus', plan.code + '.yaml');
+  if (fs.existsSync(staleMenuFile)) {
     return {
-      ok: false, exitCode: 22, error: 'menu-source-required',
-      code: plan.code, menuConfigFile: menuTarget, scan: plan,
-      hint: 'first registration must specify menu.source (database|code) via --values; --force does not bypass this.',
+      ok: false, exitCode: 25, error: 'stale-screen-config',
+      code: plan.code, staleMenuFile, scan: plan,
+      hint: `检测到旧版页面配置 ${staleMenuFile}：menu 分区已整体改名 screens 且不留别名。` +
+        `先跑 \`node scripts/init-project.mjs --reinit --code ${plan.code} --purge [--confirm ${plan.code}]\` 把旧物搬进 _retired，再重新 /supperH-init。`,
     };
   }
-  // 选了哪一支 → 那支的必填项必须逐条有值（脚本不补默认值，因为模板里那些值看着完全合法）。
-  const menuPlan = planMenuChoices(v);
-  if (!menuPlan.ok) {
+  // ---- screen 发现器 HARD 门禁（仅首次注册；--force 不能绕过）：discovery 至少一项，可以只是 via: code ----
+  const screenTarget = path.join(info.privateRoot, 'screens', plan.code + '.yaml');
+  const screenExists = fs.existsSync(screenTarget);
+  const screenPlan = planScreenChoices(v);
+  if (!screenExists && !(screenPlan.needed && screenPlan.count >= 1)) {
     return {
-      ok: false, exitCode: 2, error: 'menu-choices-incomplete', code: plan.code,
-      menuConfigFile: menuTarget, scan: plan,
-      problems: menuPlan.badSource
-        ? [`menu.source 非法：${menuPlan.badSource}（只认 database | code）`]
-        : [`菜单来源选了 ${menuPlan.source}，但这些值没给：${menuPlan.missing.join(', ')}`],
-      hint: '不答就换一个选项（选 code 只需菜单定义文件路径与格式）：禁止沿用模板示例值。' +
-        '这些字段会决定 /supperH-learn 跑哪条 SELECT、查哪个列名，写错不是“学不到”而是“学到错的菜单索引”。' +
-        '（`menu.database.slot` 可省：不写 = 用数据库通道，那个槽位叫什么由你定。）',
+      ok: false, exitCode: 22, error: 'screen-discovery-required',
+      code: plan.code, screenConfigFile: screenTarget, scan: plan,
+      hint: 'first registration must specify screen.discovery (>=1 item; may be as small as one `via: code` entry) via --values; --force does not bypass this.',
+    };
+  }
+  // 交了 discovery → 每项的必填项必须逐条有值（脚本不补默认值，因为示例值看着完全合法）。
+  if (!screenPlan.ok) {
+    return {
+      ok: false, exitCode: 2, error: 'screen-choices-incomplete', code: plan.code,
+      screenConfigFile: screenTarget, scan: plan,
+      problems: screenPlan.problems,
+      hint: 'discovery 每项都要答全它那一类的必填字段（选 code 只需 path 与 format）：禁止沿用示例值。' +
+        '这些字段决定 /supperH-learn 去哪发现页面、把哪个列当路由，写错不是“学不到”而是“学到错的页面索引”。' +
+        '（via: database 的 slot 可省：不写 = 用数据库通道，那个槽位叫什么由你定。）',
     };
   }
 
@@ -1011,15 +978,15 @@ export function initWrite({ cwd, values, force = false } = {}) {
   const target = path.join(info.privateRoot, 'projects', plan.code + '.yaml');
   const exists = fs.existsSync(target);
 
-  // ---- menu config: build + self-validate, then persist (<PRIVATE_ROOT>/menus/<code>.yaml) ----
-  let menuWritten = false;
-  if (v['menu.source']) {
-    const built = buildMenuConfig(plan, v);
+  // ---- screen config: build + self-validate, then persist (<PRIVATE_ROOT>/screens/<code>.yaml) ----
+  let screenWritten = false;
+  if (screenPlan.needed) {
+    const built = buildScreenConfig(plan, v);
     if (!built.ok) return { ok: false, exitCode: built.exitCode || 2, error: built.error, errors: built.errors };
-    fs.mkdirSync(path.join(info.privateRoot, 'menus'), { recursive: true });
-    if (menuExists) fs.copyFileSync(menuTarget, menuTarget + '.bak');
-    fs.writeFileSync(menuTarget, built.text, 'utf8');
-    menuWritten = true;
+    fs.mkdirSync(path.join(info.privateRoot, 'screens'), { recursive: true });
+    if (screenExists) fs.copyFileSync(screenTarget, screenTarget + '.bak');
+    fs.writeFileSync(screenTarget, built.text, 'utf8');
+    screenWritten = true;
   }
 
   // connectivity gate — script channel only. Entries marked `gate: false` (the MCP
@@ -1060,7 +1027,7 @@ export function initWrite({ cwd, values, force = false } = {}) {
 
   const result = {
     ok: true, code: plan.code, configFile: target, existed: exists,
-    menuConfigFile: menuTarget, menuWritten,
+    screenConfigFile: screenTarget, screenWritten,
     // 接入决定入结果：命令层要能原样告诉用户“本次没接任何外部源”，而不是沉默退 0
     connections: {
       declared: conn.connect, dbConfigured: conn.dbConfigured, dbSlot: conn.dbSlot ?? null,
@@ -1102,7 +1069,7 @@ export function initWrite({ cwd, values, force = false } = {}) {
 //      回滚就是把每条 to 移回 from。隔离区就在私有根内，所以 rename 不跨卷（不存在 EXDEV 那种半路失败）。
 //   ② 学习数据非空时必须显式 --confirm <code>（退 23）：context/ 下的学习记录只能由
 //      /supperH-learn 重出来，一次清场顺手吃掉它，代价与“撤个配置”完全不成比例。
-//   ③ 只动本命令生成过的东西：注册条目、菜单配置、context/tasks 两个目录。驱动文件属
+//   ③ 只动本命令生成过的东西：注册条目、页面档案配置（含旧 `menu` 残留）、context/tasks 两个目录。驱动文件属
 //      /supperH-driver（槽位名与个数归用户），本命令不撤，只在报告里说清它还在盘上。
 const RETIRED_SUB = '_retired';
 // 算“学习成果”的目录种类：默认布局与自定义布局都要算，否则“条目改了路径”会变成绕过门禁的后门。
@@ -1269,9 +1236,14 @@ export function reinit({ cwd, code, purge = false, confirm } = {}) {
   const configFile = entry?.file ?? path.join(pr, 'projects', resolvedCode + '.yaml');
   addItem('entry', configFile, '注册条目（本命令 --write 生成）');
   for (const bak of sidecarFiles(configFile)) addItem('entry-sidecar', bak, '条目覆盖备份（--write 自动留的 sidecar）');
-  const menuFile = path.join(pr, 'menus', resolvedCode + '.yaml');
-  addItem('menu', menuFile, '菜单来源配置（本命令 --write 生成）');
-  for (const bak of sidecarFiles(menuFile)) addItem('menu-sidecar', bak, '菜单配置覆盖备份');
+  const screenFile = path.join(pr, 'screens', resolvedCode + '.yaml');
+  addItem('screens', screenFile, '页面档案配置（本命令 --write 生成）');
+  for (const bak of sidecarFiles(screenFile)) addItem('screens-sidecar', bak, '页面档案配置覆盖备份');
+  // 旧 `menu` 时代残留：不留别名，但清场必须能把它搬走，否则退 25 后用户无从处置
+  // （F-14 踩过“清场漏搬旧目录”这一类的坑：LEARNING_KINDS 与子目录清单不同步就搬不干净）。
+  const legacyMenuFile = path.join(pr, 'menus', resolvedCode + '.yaml');
+  addItem('legacy-menu', legacyMenuFile, '旧版菜单配置（menu 分区已整体改名 screens）');
+  for (const bak of sidecarFiles(legacyMenuFile)) addItem('legacy-menu-sidecar', bak, '旧菜单配置覆盖备份');
   addItem('context', roots.contextRoot, '学习数据目录（/supperH-learn 的成果）', roots.contextRootSource);
   addItem('tasks', roots.tasksRoot, '任务产物目录（修复报告 / SQL 工件）', roots.tasksRootSource);
   // `--write` 是无条件 mkdir 默认布局的（它当时还不知道条目会自定义路径）：写了自定义
@@ -1323,7 +1295,7 @@ export function reinit({ cwd, code, purge = false, confirm } = {}) {
 
   const plan = {
     ok: true, status: 0, mode, code: resolvedCode, privateRoot: pr,
-    configFile, menuConfigFile: menuFile, contextRoot: roots.contextRoot, tasksRoot: roots.tasksRoot,
+    configFile, screenConfigFile: screenFile, legacyMenuFile, contextRoot: roots.contextRoot, tasksRoot: roots.tasksRoot,
     viaCwd, items, movableCount: movable.length, learningFiles, notTouched,
     unparseableEntries: unparseableEntries(pr),
   };

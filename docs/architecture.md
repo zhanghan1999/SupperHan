@@ -56,7 +56,7 @@ npm install          # 装 yaml 依赖
       │
       ▼
 /supperH-bootstrap   # 或 node scripts/bootstrap.mjs（CLI 版）—— 只建目录，不写条目
-      │  ├─ 检测同级 supper-Han-private/ 不存在 → 创建骨架 projects/ menus/ drivers/ context/ tasks/ + prefs.md
+      │  ├─ 检测同级 supper-Han-private/ 不存在 → 创建骨架 projects/ screens/ drivers/ context/ tasks/ + prefs.md
       │  ├─ 幂等：已存在的目录与 prefs.md（L3 用户资产）一律不动；--dry-run 一个字节不写
       │  ├─ legacy 单文件 project.yaml 存在 → 只报告路径 + 指路；--migrate（= 用户点了头）才转注册表
       │  └─ 把“注册项目”交给下一步：条目只能由 /supperH-init 在目标工作区扫描后产生
@@ -65,7 +65,7 @@ npm install          # 装 yaml 依赖
 /supperH-init        # 或 node scripts/init-project.mjs --write --cwd <绝对路径>
       │  ├─ 扫结构预填 code / codeRoot / build / packageRoot / modules / branches
       │  ├─ 问“接哪些外部源”：一个都不选 = 纯代码模式，db / drivers 两段整段不写（不接是合法答案，不回落模板假值）
-      │  └─ 写 supper-Han-private/projects/<code>.yaml + menus/<code>.yaml   # 注册表模型（§10.12）
+      │  └─ 写 supper-Han-private/projects/<code>.yaml + screens/<code>.yaml   # 注册表模型（§10.12）
       │
       ▼
 node scripts/validate-project.mjs   # 独立命令；sync 不调它（旧版本文档在此处误标）
@@ -112,7 +112,7 @@ node scripts/sync-assets.mjs
 - `.qoder/rules/` 走**零配置通道** —— clone 完立即生效，**不走 sync** —— 因此 rules 里严禁 `{{...}}` 占位符
 - `agents/commands/skills` 走 **plugin 通道** —— sync 后展开绝对路径 + 项目字段，dist 自包含
 - 学习数据落在 `{{PRIVATE_ROOT}}/context/<code>/<module>/gen-*/`，与本仓库解耦；本仓库不追踪任何 context
-- 菜单来源配置落 `{{PRIVATE_ROOT}}/menus/<code>.yaml`（独立于 `projects/<code>.yaml`）；`/supperH-init` 首次注册强制采集，缺省退出 22 且不可 `--force` 绕过
+- 页面档案配置落 `{{PRIVATE_ROOT}}/screens/<code>.yaml`（独立于 `projects/<code>.yaml`）；`/supperH-init` 首次注册强制采集发现器（`discovery` 至少一项），缺省退出 22 且不可 `--force` 绕过
 - MCP 侧只有一条注册表（`supperh-drivers` 壳），内容由 sync 产出：server id + 插件相对命令 + `env_vars` **名单**，无凭据无绝对路径；壳靠 `mcp-skeleton/private-root.txt` 指回私有根，再 `importlib` 装载 `drivers/<code>/adapter.py` —— 加项目不动注册表（详 §11）
 
 ## 4. 三层各自的"变化操作"
@@ -120,7 +120,7 @@ node scripts/sync-assets.mjs
 | 场景 | 需要动 | 不需要动 |
 |------|-------|---------|
 | 换一个新 Java 项目 | 只改 L2（在**新项目工作区**跑 `/supperH-init` 多落一份 `projects/<code>.yaml`）| L1 一行不改；不重装插件 |
-| 换菜单来源（database ↔ code） | 只改 `{{PRIVATE_ROOT}}/menus/<code>.yaml` | L1 不动；不必重新注册项目 |
+| 换页面发现方式（discovery 介质：database ↔ code ↔ driver ↔ artifact） | 只改 `{{PRIVATE_ROOT}}/screens/<code>.yaml` | L1 不动；不必重新注册项目 |
 | 换一个人使用 | 只改 L3（prefs.md） | L1/L2 不动 |
 | 学完新代码 → 学习数据更新 | 只写 `{{CONTEXT_ROOT}}/` | L1 不动 |
 | 加一个新内网数据源 | 在 L2 `drivers.*` 注册 + 在 `{{DRIVERS_ROOT}}/` 写实现 | L1 的 agent 一行不改（因为它们只依赖 `supperH-driver-contract`）|
@@ -137,7 +137,7 @@ node scripts/sync-assets.mjs
 | `read` | allow | — |
 | `edit` | deny | supperH-bug-dev / supperH-bug-refactor / supperH-bug-code-optimizer / supperH-bug-code-generator / supperH-bug-mybatis-optimizer / supperH-prelearn-writer / supperH-bootstrap |
 | `bash` | deny | supperH-bug-tester / supperH-bug-analyzer / prelearn-* / bootstrap / setup / supperH-bug 主入口（**仅** `resolve-project.mjs` 这一个脚本，可按不同参数多次调用） |
-| `external_directory` | **deny** | **仅** supperH-prelearn-writer（写 `{{CONTEXT_ROOT}}`）+ supperH-driver-author（写 `{{DRIVERS_ROOT}}`）+ supperH-bootstrap（建私有根）+ supperH-init（写 `projects/` 与 `menus/` 条目）+ supperH-setup（写 IDE 加载目录）|
+| `external_directory` | **deny** | **仅** supperH-prelearn-writer（写 `{{CONTEXT_ROOT}}`）+ supperH-driver-author（写 `{{DRIVERS_ROOT}}`）+ supperH-bootstrap（建私有根）+ supperH-init（写 `projects/` 与 `screens/` 条目）+ supperH-setup（写 IDE 加载目录）|
 | `mcpServers`（取数工具） | **不绑** | **仅** 4 个只读/测试类子 agent：supperH-bug-analyzer / supperH-bug-tester / supperH-bug-test-writer / supperH-prelearn-analyzer（均只绑壳 `supperh-drivers`）|
 
 `external_directory: allow` 是**跨越 workspace 边界**的能力，全仓库只放开 **2 个 subagent + 4 个 command**。这六个的 prompt 里都写死了路径前缀自检（名单同时钉在 `tests/agent-permissions.test.mjs` —— 只改本文不改进代码里的名单，测试会先红）：
@@ -145,7 +145,7 @@ node scripts/sync-assets.mjs
 - `supperH-prelearn-writer`：`filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头 + 匹配 `<known-module>/gen-<ts>/(batch-NN.md | index.md | CURRENT)`；违反报 `WRITE_BOUNDARY_VIOLATION`
 - `supperH-driver-author`：`filePath` 必须以 `{{DRIVERS_ROOT}}/` 开头（凭据只额外允许 `.secrets/*.local.json`）；不得碰注册表 YAML、L1 仓库、代码工作区；违反同样报 `WRITE_BOUNDARY_VIOLATION`。不绑壳 server（它是造驱动的，不是用数据的）
 - `supperH-bootstrap`：只允许在 `<TOOL_ROOT>/../supper-Han-private/` 下 mkdir / 写文件；不允许在本仓库内创建私有根
-- `supperH-init`：只允许写私有根下的注册文件（`projects/<code>.yaml` + `menus/<code>.yaml`）与 `context/<code>` `tasks/<code>` 目录骨架；实际写盘动作全部在 `scripts/init-project.mjs --write` 里完成，命令本身不手改 YAML
+- `supperH-init`：只允许写私有根下的注册文件（`projects/<code>.yaml` + `screens/<code>.yaml`）与 `context/<code>` `tasks/<code>` 目录骨架；实际写盘动作全部在 `scripts/init-project.mjs --write` 里完成，命令本身不手改 YAML
 - `supperH-driver`：写盘全部经 `scripts/driver-registry.mjs`（先备份 + 先在内存过 schema + 探活不过不落盘）；临时 values JSON 也不得落到私有根之外
 - `supperH-setup`：只允许写 `~/.qoder-cn/plugins/cache/local/supper-Han-java/` + `~/.config/opencode/{agent,command,skill}/` + `<PRIVATE_ROOT>/dist-portable/`；禁止修改用户 IDE 里 supper-Han-java 以外的插件目录
 
@@ -168,7 +168,7 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 ```
 {{PRIVATE_ROOT}}/context/
   └── {{PROJECT.identity.code}}/       # 按项目 code 分区，多项目互不污染
-      └── <module>/                     # 按条目 modules[].name 分区（或保留分区名 menu）
+      └── <module>/                     # 按条目 modules[].name 分区（或保留分区名 screens）
           ├── CURRENT                   # 文本文件；内容 = 当前 gen 目录名
           ├── gen-20240101120000/       # 上一代
           │   ├── index.md
@@ -183,7 +183,7 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 
 - 每次重学 → 新代目录（copy-on-write） → 原子切 `CURRENT`（tmp + rename）
 - 保留最近 2 代；N-2 及更早由 **supperH-prelearn 惰性 GC**（agent 切 `CURRENT` 时顺手回收 + 24h 后物理删除），**sync 不做任何 GC**（旧版本文档误标；sync 全文只把 `CONTEXT_ROOT` 当 runtime token 处理）
-- 保留分区 `menu`：菜单学习（`/supperH-learn --menu`）产物，`index.md` frontmatter 带 `kind: menu`；与业务模块分区共用同一套 CURRENT/gen 不变量
+- 保留分区 `screens`：页面学习（`/supperH-learn --screen`）产物，`index.md` frontmatter 带 `kind: screens`；与业务模块分区共用同一套 CURRENT/gen 不变量
 - 详见 `skills/supperH-prelearn/SKILL.md`
 
 ## 8. Skill vs Agent vs Command 的分工
@@ -236,10 +236,11 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 | 12 | 项目 | 私有根不存在 | 停 → 引导 `/supperH-bootstrap` | **禁止** |
 | 20 | init | 驱动已配置但全部探活失败 | 停 → 修驱动，或显式 `--force` | 需显式 |
 | 21 | init | 写完配置后解析器复验 cwd 不命中 | 停 → 修 `identity.workspaces` | 禁止 |
-| 22 | init | 菜单来源未采集（`menus/<code>.yaml` 缺） | 停 → 采集后重试 | 禁止 |
+| 22 | init | 页面发现器未采集（首次注册 `screen.discovery` 缺 / 空）| 停 → 采集后重试 | 禁止 |
+| 25 | init | 检测到旧版 `menus/<code>.yaml`（`menu` 分区已整体改名 `screens`、不留别名）| 停 → `/supperH-init --reinit` 清场后重配 | 禁止 |
 | 30 | 快路径 | 锚点不可用：类型不支持（G0）或反查零命中（G1）；也用于 `enabled=false` 整体关闭。若返回体带 `needsLookup` 则是 traceId/ticketNo，应先回 F1.4 反查 | 落完整路径，不报错 | — |
 | 31 | 快路径 | 锚点多命中歧义 | 落完整路径 + 终判记 `anchor_ambiguous` | — |
-| 32 | 快路径 | 学习数据未就绪：CURRENT/index.md 缺失、不可读、`schema` 代际不符、必需列漂移、`kind: menu` 分区 | 落完整路径（先学） | — |
+| 32 | 快路径 | 学习数据未就绪：CURRENT/index.md 缺失、不可读、`schema` 代际不符、必需列漂移、`kind: screens` 分区 | 落完整路径（先学） | — |
 | 33 | 快路径 | 否决词表命中 | 落完整路径 | — |
 | 34 | 快路径 | 目标方法完整度 < L3 | 落完整路径 + 建议 `/supperH-learn --mode update` | — |
 | 35 | 快路径 | 新鲜度过期：**仓库级** `learnedAtCommit != HEAD`（G4a）**且**该 batch 的 `sources` 与 `git diff` 相交、或无从判定（`sources` 缺失/形态不合法、diff 取不到、HEAD 取不到，G4b fail-closed） | 落完整路径（走定向重学） | — |
@@ -480,12 +481,12 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 
 命令 / agent / skill 正文**仍是拷贝件**（OpenCode 只能按目录发现它们，没有“声明指向另一个仓库”的稳定约定）—— 所以改了这三类源码必须两边各装一次。这条限制写进两份适配说明的“共用数据”一节，不让人靠猜。
 
-数据层本身天然工具无关：可变态全在私有根（`projects/ menus/ context/ tasks/ drivers/ prefs.md`），路径 token 由主 agent 步骤 0 跑 `resolve-project.mjs` 运行期现填，所以 Qoder 学出来的模块 OpenCode 直接可读（反之亦同）。
+数据层本身天然工具无关：可变态全在私有根（`projects/ screens/ context/ tasks/ drivers/ prefs.md`），路径 token 由主 agent 步骤 0 跑 `resolve-project.mjs` 运行期现填，所以 Qoder 学出来的模块 OpenCode 直接可读（反之亦同）。
 
 另两条同族纪律：
 
 - **陈旧产物按清单清理，不按目录 rm**：`setup.mjs` 在目标目录写 `supperh-installed.json`，下次安装只删清单内且落在 `OPENCODE_MAP` 目标根之下的文件（越界条目拒删）。`rm -rf` 会连用户自放文件一起抹；完全不删则改名/删掉的命令以陈旧副本继续被加载。两者都不可接受。
-- **setup / bootstrap 不生成项目条目**：旧实现在 legacy `project.yaml` 缺失时 `copyFileSync(example → project.yaml)`，把 F-7 刚消灭的模板假值重新造回私有根。现在只建骨架目录（含对“已有条目但缺 `menus/`”的幂等补齐）+ 把路指回 `/supperH-init`。`--yes` 只表示“知道没条目，仍继续装资产”。`scripts/bootstrap.mjs` 与 `commands/supperH-bootstrap.md` 同族同治，见 §10.14。
+- **setup / bootstrap 不生成项目条目**：旧实现在 legacy `project.yaml` 缺失时 `copyFileSync(example → project.yaml)`，把 F-7 刚消灭的模板假值重新造回私有根。现在只建骨架目录（含对“已有条目但缺 `screens/`”的幂等补齐）+ 把路指回 `/supperH-init`。`--yes` 只表示“知道没条目，仍继续装资产”。`scripts/bootstrap.mjs` 与 `commands/supperH-bootstrap.md` 同族同治，见 §10.14。
 
 测试旋钮 `SUPPERH_DIST_DIR`（与 `SKIP_QODER_INSTALL` 同类）：`node --test` 是文件级并发，而 `tests/mcp-manifest.test.mjs` 会真跑 sync（rmSync 后重建 `dist/`），安装测试读真 dist 就是偶发 ENOENT。并发套件里依赖共享可变产物的用例，必须自带副本。
 
@@ -739,6 +740,32 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 不会去建它也不会有人清它 —— 这是刻意的：一个自动回收"历史撤销物"的机制，本质就是延迟删除，而这条功能存在的
 理由正是不做延迟删除。要清理由由用户自己负责。
 
+### 10.20 页面档案模型：`menu` 整体改名 `screens`，不留别名、不做迁移器（F-15a + F-15b，本轮）
+
+**一句话**：把错名"菜单模块"连根换成"页面档案模块"（`screens`），一次做完不留中间态 —— 只读别名与 1→2 迁移器都被取消，检测到旧 `menus/<code>.yaml` 一律退 **25** 指回 `/supperH-init --reinit`。
+
+**为什么不留别名、不做迁移器**：用户明确放弃现有项目数据（原话"哪个项目就 init 了一下……后面还需要 init 重新走一次"），于是旧设计里"`menu` 保留只读别名 + 发警告"这套兼容失去服务对象 —— 留别名反而把"两个名字指同一个东西"的歧义固化成长期负担。改名与"取消别名 + 退 25 拦旧盘"必须同批交付，中间态不可发布（F-15a 纯文本纠偏与 F-15b 改名/schema 一起做完）。
+
+**"菜单"二字的保留边界（本轮最易整批替换出错处）**：只有指代**我们自己的模块 / 动作 / 分区 / 配置文件 / 旗标**时才改（`menu`→`screen`/`screens`、`menus/`→`screens/`、`--menu`→`--screen`、"菜单学习"→"页面学习"）；凡指代**被学习的那个东西** —— 真实存在的 `sys_menu` 表、菜单项、菜单中文名、用户口中的"学一下菜单"、IDE 的"斜杠菜单"、习语"不摆菜单" —— 一律保留原字。逐处判，不批量替换。中文术语改名要 ASCII（`menu`）与汉字（`菜单`）各 grep 一遍：只查 ASCII 会漏掉独立的中文"菜单"。
+
+**代码侧机械改名（F-15b）**：`resolve-project.mjs` 返回键 `menuConfigFile`/`menu` → `screenConfigFile`/`staleScreenConfig`/`screen`（`staleScreenConfig` 恒为键、值可为 null，检测到旧 `menus/<code>.yaml` 就回填其路径）；`SUBDIRS`、`fastpath-gate.mjs`（保留分区判定 `kind === 'screens'` 不参与 bug 快路径）、`sync-assets.mjs`、`setup.mjs` 目录清单同步改名。
+
+**v2 采集契约（`init-project.mjs`）**：首次注册强制采集发现器 —— `screen.discovery` 至少一项，四类介质各按**它那一类**的顶层必填要值（database：`table`/`columns`；driver：`slot`；code：`path`/`format`；artifact：`kind`），`planScreenChoices` 逐项判、不合并成一套全集。落盘改**直接按 `values.screen` 对象 `YAML.stringify`**，不再从 example 逐行 `setLine` —— 未选的 via 天然不落盘，init 也不注入 `slot`/`source`/`limit` 等任何默认值。装配后过 `validateAgainstSchema` + `screenRuleIssues`（跨字段约束如 `format: other` 必带 `userPhrase`；本仓最小校验器不支持 not/if-then/allOf，故这类规则写在代码里）。
+
+**退出码（门禁顺序 connection→stale→discovery→choices→写盘，connection 检查仍在最前故不受影响）**：
+
+| 码 | label | 触发 |
+|---|---|---|
+| **22** | `screen-discovery-required` | 首次注册未答 `screen.discovery`（缺或空数组），不可 `--force` 绕过 |
+| **25** | `stale-screen-config` | 检测到旧 `menus/<code>.yaml` —— 退错提示 `--reinit`，绝不静默、不自动搬 |
+| **2** | `screen-choices-incomplete` / `screen-config-invalid` | 逐项必填缺 / schema 或跨字段不通过 |
+
+**schema**：新增 `schemas/screens.schema.yaml`（顶层 `schemaVersion: const 2`、`discovery` `minItems: 1`、`items` oneOf 四支、全层 `additionalProperties: false`）+ `screens.example.yaml`；删 `menu.schema.yaml` / `menu.example.yaml`；`validate-project.mjs` 纳入 screens 校验。
+
+**文档与资产**：契约限定语（`data.screens`、`module: screens`、`mode: screen`、`screenSource`）、命令层（learn / init 步骤 3）、writer / analyzer / prelearn SKILL、README、两份适配说明、`.qoder/rules/` 全部改名。对外称呼：学习对象 = `screen`，产物分区名 / frontmatter `kind` = `screens`，配置文件 = `screens/<code>.yaml`，对人描述 = "页面学习"。
+
+**取代关系**：本节落地取代 §10.12 / §10.14 / §10.16 / §10.19 中 `menu` / `menus/` / `菜单配置` / `--menu` 的旧措辞，以及 §10.16 里 `renderMenuConfig` 逐行 `setLine` 的采集机制描述（v2 已改直接装配 + `YAML.stringify`）。那些是 dated 台账，按 append-only 保留原文不删，**以本节为准**。**F-15 的 F-15c–e（六段产物骨架 / 键依赖图 hops / `evidence` 轴门禁 / 下钻树形与探测优先纪律）仍待做**，本轮只落"改名 + v2 discovery 采集 + schema"这一格；全文见 `docs/screen-partition.md`。
+
 ---
 ## 11. 一期范围与二期规划
 
@@ -776,12 +803,13 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 - supperH-auto-fix 的 CLI 化实现（一期只出协议骨架）
 - **快路径 P1 未完部分**：A1 锚点反查的**实际内网 driver 实现**（由用户经 `/supperH-driver` 逐个登记；L1 不规定它叫什么名字、也不假设有几个）——代码/契约/退出码已全部就位，缺的只是驱动本体；驱动未就绪时 F1.4 自动退回完整路径
 - **快路径 P2**：按 §10.6 的 jsonl 真实样本校准 `DEFAULTS`/`HARD_CAPS`；评估 A2（异常栈）在完整度 ≥ 某水位后放行；评估 analyzer 多维度并行 fan-out
-- **页面档案模型（F-15，设计已定稿、代码一行未动）**：菜单模块错把"页面路径"当学习终点，而真实的链是「表或接口给入口 → Controller 给视图工件 → 模板文件里才有按钮、权限标识与页内数据接口」。现有 `menu.schema.yaml` 三处叠加使这条链无处表达：`source` 是 2 值**互斥**枚举（`oneOf`）、`columns` 固定 4+1 列且 `additionalProperties: false`、顶层同样禁第三个键 —— 于是"多来源结合"与"装下按钮"都是结构性不可能。**通道层早就中立了**（`drivers.<槽位>` 什么源都能接），是菜单来源层的枚举没跟上 F-10/F-11 的中立化。重设计：学习对象改 `screen`（页面）六段 `identity / entry / template / actions / dataSources / drilldowns`，`menu` 降级为**发现器**（`discovery`，四类介质 code / database / driver / artifact）之一并只读兼容，视图与抽取规则整块归 L2（L1 只规定"必须有规则、必须命名、结果必须带 `path:line`、未命中不许造"）。**两轮修订**：① 通用性 —— 六段从"固定顺序的链"改成**键依赖图**（每一跳声明 `requires`/`produces`，缺上游即如实 `incomplete`），来源不做枚举而改用 **`evidence` 轴**（static/generated/runtime/doc，门禁落点按证据类别而非段名），并立一条不变式**「L1 可以内置能力，不可以内置唯一出口」**；② 下钻形状定稿为**「存的是图、呈现的是树」**：一页的下钻挂在自己下面成 `1 / 1.1` 的树，**弹层不算独立 screen**（其按钮归父页 `actions`），重复页面只写一行引用而不复制正文 —— 于是有两条必须机械定住：**canonical 归属不得由遍历顺序决定**（否则产物随学习顺序抖动、反查失去唯一性），**去重键用归一化 route 而非"接口相同"**（后者会同时朝"丢一整支"与"满树同页"两个方向错）。四道终止闸门（去重 / 环停线 / `maxDepth` / `maxScreens`），且跨应用的边标 `outOfScope`、**不得**混作 `incomplete`。另立**探测优先**纪律：形态类问题先由机器算命中率矩阵，**只有零命中 / 歧义（最高次高差 <10 个百分点）/ 语义不可判三种情形才写成 `questions.md` 交给用户**，非空即 `needs_user` 且必须原样呈现 —— 判据一句话：**能自己试出来的，不准问**。分五期 F-15a–e。全文见 `docs/screen-partition.md`
+- **页面档案模型（F-15，分五期 F-15a–e；F-15a 纯文本纠偏 + F-15b 模型改名/schema 已落地，F-15c–e 待做）**：菜单模块错把"页面路径"当学习终点，而真实的链是「表或接口给入口 → Controller 给视图工件 → 模板文件里才有按钮、权限标识与页内数据接口」。现有 `menu.schema.yaml` 三处叠加使这条链无处表达：`source` 是 2 值**互斥**枚举（`oneOf`）、`columns` 固定 4+1 列且 `additionalProperties: false`、顶层同样禁第三个键 —— 于是"多来源结合"与"装下按钮"都是结构性不可能。**通道层早就中立了**（`drivers.<槽位>` 什么源都能接），是菜单来源层的枚举没跟上 F-10/F-11 的中立化。重设计：学习对象改 `screen`（页面）六段 `identity / entry / template / actions / dataSources / drilldowns`，菜单降级为**发现器**（`discovery`，四类介质 code / database / driver / artifact）之一（**F-15b 已把 `menu` 整体改名 `screens`、不留别名、不做 1→2 迁移器**：检测到旧 `menus/<code>.yaml` 一律退 25 指回 `--reinit`），视图与抽取规则整块归 L2（L1 只规定"必须有规则、必须命名、结果必须带 `path:line`、未命中不许造"）。**两轮修订**：① 通用性 —— 六段从"固定顺序的链"改成**键依赖图**（每一跳声明 `requires`/`produces`，缺上游即如实 `incomplete`），来源不做枚举而改用 **`evidence` 轴**（static/generated/runtime/doc，门禁落点按证据类别而非段名），并立一条不变式**「L1 可以内置能力，不可以内置唯一出口」**；② 下钻形状定稿为**「存的是图、呈现的是树」**：一页的下钻挂在自己下面成 `1 / 1.1` 的树，**弹层不算独立 screen**（其按钮归父页 `actions`），重复页面只写一行引用而不复制正文 —— 于是有两条必须机械定住：**canonical 归属不得由遍历顺序决定**（否则产物随学习顺序抖动、反查失去唯一性），**去重键用归一化 route 而非"接口相同"**（后者会同时朝"丢一整支"与"满树同页"两个方向错）。四道终止闸门（去重 / 环停线 / `maxDepth` / `maxScreens`），且跨应用的边标 `outOfScope`、**不得**混作 `incomplete`。另立**探测优先**纪律：形态类问题先由机器算命中率矩阵，**只有零命中 / 歧义（最高次高差 <10 个百分点）/ 语义不可判三种情形才写成 `questions.md` 交给用户**，非空即 `needs_user` 且必须原样呈现 —— 判据一句话：**能自己试出来的，不准问**。分五期 F-15a–e。全文见 `docs/screen-partition.md`
 
 ## 12. 版本演进策略
 
 - `package.json` 里的 `version` 决定插件版本
 - `schemas/project.schema.yaml` 顶层 `schemaVersion: const 1` —— 破坏性变更时 +1；sync 会做兼容检查
+- `schemas/screens.schema.yaml` 顶层 `schemaVersion: const 2`（F-15b）：旧的 `menu` 分区配置（version 1）不再接受，读到即退 25 指回 `/supperH-init --reinit`，不做 1→2 迁移器
 - `driver-response.schema.json` 里 `meta.schemaVersion` —— 同上
 - 三层版本解耦：L1 迭代不动 L2 schema；L2 schema 迭代不动 L3；L3 无版本概念
 - **退出码是对外契约**：新增码（如本轮的 33、36，以及后来的 37、**40**）属 additive，但**旧提示词副本不认识新码** —— `{{TOOL_ROOT}}` 被烤成绝对路径后，脚本从仓库工作副本直接执行（改动即时生效），而 command/agent/rules 文本从插件安装目录加载（必须 sync + 重启才生效）。两边代际不一致时，新码会落到旧文本的未定义分支。所以：**改退出码集合必须与 sync + 重启同步交付**。

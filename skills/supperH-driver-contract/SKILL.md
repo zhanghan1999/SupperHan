@@ -82,23 +82,26 @@ description: supperH-driver-contract（驱动契约）— 驱动契约 skill。�
 - `--params` 指向 JSON 文件；文件路径必须在 `{{PRIVATE_ROOT}}` 或用户 home 之下，driver 侧校验（防被指到 `/etc/passwd`）
 - `--dry-run` 可选支持；不支持时忽略而非报错
 
-### 菜单查询保留源 `menu`
+### 发现器 `via: database` 的保留源 `screen`
 
-菜单学习（`/supperH-learn --menu`）复用**数据库通道**（`role: database` 那个槽位；名字归用户，不写死），但固定以**保留源名 `menu`** 调用（即 `--source menu`）。调用方通过 `--filter` 传入表名与列名，driver 负责**安全拼装 SELECT**：
+**仅当 `discovery[].via == database` 时**，页面学习（`/supperH-learn --screen`）复用**数据库通道**（`role: database` 那个槽位；名字归用户，不写死），固定以**保留源名 `screen`** 调用（即 `--source screen`）。调用方通过 `--filter` 传入表名与列名，driver 负责**安全拼装 SELECT**：
 
 ```
-<db-impl> --project <code> --source menu \
+<db-impl> --project <code> --source screen \
   --filter table=<表名> \
   --filter id=<列> --filter parentId=<列> --filter name=<列> --filter path=<列> \
+  [--filter type=<列>] [--filter perms=<列>] \
   [--filter where=<SELECT-only WHERE 片段>] \
   --limit <N>
 ```
 
 - driver **必须**对 `table` / 列名做标识符引用（防注入），**只**拼 `SELECT`；`--filter where` 若提供，须经 `SELECT_only_guard` 复核（禁写关键字）
 - `--limit` 必须生效，`meta.truncated` 如实回填
-- 返回**标准 envelope**（`data.columns` 至少含 `id/parentId/name/path`，可选 `order`；`data.rows` 与之对齐）
-- `menu` 源**必须**在数据库通道（`role: database` 那个槽位）的 `config.sources` 里显式声明（同其它 source）
+- 返回**标准 envelope**（`data.columns` 至少含 `id/parentId/name/path`，可选 `order/type/perms`；`data.rows` 与之对齐）
+- `screen` 源**必须**在数据库通道（`role: database` 那个槽位）的 `config.sources` 里显式声明（同其它 source）
 - 凭据仍**只**走 env / `{{DRIVERS_ROOT}}/.secrets/`（见下"环境变量"节）
+
+**另两支不走这条 SELECT**：`via: driver`（接口下发页面清单）用该 discovery 项登记的 driver 槽位、按它自己的查询协议取数；`via: code` / `via: artifact`（清单从代码声明或仓内工件读出来）**不经任何外部通道** —— 一个驱动都没登记的项目，也能学 `entry / template / actions / dataSources` 四段（全在代码仓里，纯静态解析），只是没有页面中文名。
 
 ### 环境变量（凭据装载）
 

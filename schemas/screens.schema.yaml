@@ -1,0 +1,253 @@
+# ═══════════════════════════════════════════════════════════════════
+# screens.schema.yaml
+# L2「页面档案」配置文件（<PRIVATE_ROOT>/screens/<code>.yaml）的 JSON Schema。
+# 取代 menu.schema.yaml —— 不留 menu 别名（见 docs/screen-partition.md §8），
+# 本文件与 screens.example.yaml 是唯一合法形状；旧文件存在时 init/learn 退 25。
+#
+# 与 project.schema.yaml 平级：一个项目一份，换发现方式只改此文件。
+# 校验子集与 scripts/validate-project.mjs 一致（type/required/enum/const/oneOf/
+# additionalProperties:false/pattern/minLength/minimum/minItems/uniqueItems/$ref），
+# **不使用 not / if-then / allOf / anyOf** —— 跨字段约束（键依赖闭合、other 必须带
+# 泄压阀、每条 hop 至少一种动作）由 validate-project.mjs 的 screenRuleIssues() 判。
+#
+# 三段式形状（设计依据 docs/screen-partition.md §4）：
+#   discovery  页面清单从哪些介质发现（数组！可组合，至少一项）
+#   hops       把一个键变成下一个键的跳（条数与顺序由项目形状定，可缺省）
+#   extract    从模板工件里抽什么（actions / dataSources / drilldowns）
+# ═══════════════════════════════════════════════════════════════════
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "https://example.invalid/supper-han-java/screens.schema.yaml"
+title: "L2 Screen Archive Contract (v2)"
+description: "How /supperH-learn screen mode discovers pages, resolves them to code artifacts, and extracts page facts."
+type: object
+additionalProperties: false
+required:
+  - schemaVersion
+  - project
+  - discovery
+
+properties:
+  schemaVersion:
+    type: integer
+    const: 2
+    description: "Structure version; mismatch blocks read. 1 = legacy menu config, no longer accepted."
+
+  project:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{1,30}$"
+    description: "Must equal the project identity.code; filename is <project>.yaml."
+
+  # ── 发现器：页面清单从哪来。数组，至少一项；多项 = 组合（如 database 给中文名 + code 给路由）──
+  discovery:
+    type: array
+    minItems: 1
+    description: "Where the page inventory comes from. At least one entry; entries may be combined."
+    items:
+      oneOf:
+        - # 关系库里的菜单表：需要 role: database 通道（只读），是唯一需要外部通道的形态
+          type: object
+          additionalProperties: false
+          required: [via, table, columns]
+          properties:
+            via: { const: database }
+            slot:
+              type: string
+              minLength: 1
+              description: "Absent means the project's role: database slot (resolved per-project, NOT a slot literally named 'database')."
+            source:
+              type: string
+              minLength: 1
+              description: "Driver logical source name; must appear in that slot's config.sources."
+            table: { type: string, minLength: 1, description: "Menu table name in the target project (e.g. sys_menu)." }
+            columns: { $ref: "#/definitions/columns" }
+            rootParentId: { type: string, description: "Optional: filter to a root parent id." }
+            extraFilter:  { type: string, description: "Optional: SELECT-only WHERE fragment." }
+            limit:        { type: integer, minimum: 1, description: "Explicit default lives in screens.example.yaml (5000); that is a documented default, not a fabricated value." }
+        - # 接口型来源：走该项目登记的 driver 槽位（槽位名归用户，L1 不规定叫什么）
+          type: object
+          additionalProperties: false
+          required: [via, slot]
+          properties:
+            via: { const: driver }
+            slot:   { type: string, minLength: 1, description: "Existing driver slot name declared in projects/<code>.yaml." }
+            source: { type: string, minLength: 1 }
+            query:  { type: string, description: "Free-form selector handed to that driver." }
+            columns: { $ref: "#/definitions/columns" }
+        - # 代码本身：清单从路由声明/菜单定义文件里读出来。**不经任何外部通道**，所以一个驱动
+          # 都没接的项目也能学到入口/模板/按钮/下钻四段（screen-partition.md §4.1）
+          type: object
+          additionalProperties: false
+          required: [via, path, format]
+          properties:
+            via: { const: code }
+            path:   { type: string, minLength: 1, description: "Absolute path, or relative to codeRoot." }
+            format: { enum: [json, sql, properties, router, java, xml, other] }
+            profile: { $ref: "#/definitions/profile" }
+            userPhrase: { $ref: "#/definitions/userPhrase" }
+            rules:
+              type: array
+              minItems: 1
+              items: { $ref: "#/definitions/rule" }
+            columns: { $ref: "#/definitions/columns" }
+        - # 构建产物 / 后端下发的 UI schema（低代码那类）：不是源码也不是表，是生成出来的工件
+          type: object
+          additionalProperties: false
+          required: [via, kind]
+          properties:
+            via: { const: artifact }
+            kind: { type: string, minLength: 1, description: "Artifact family, e.g. uischema / openapi / manifest." }
+            path: { type: string, minLength: 1 }
+            profile: { $ref: "#/definitions/profile" }
+            userPhrase: { $ref: "#/definitions/userPhrase" }
+            rules:
+              type: array
+              minItems: 1
+              items: { $ref: "#/definitions/rule" }
+            columns: { $ref: "#/definitions/columns" }
+
+  # ── 跳：把上游一个键变成下游一个键（如 route → viewName → templateFile）──
+  # 六段是固定的产物骨架，**跳数与跳序不固定**：服务端渲染有三跳，SPA 没有
+  # "Controller 返回视图名"那一跳。缺上游键 → 下游段如实 incomplete（不猜）。
+  hops:
+    type: array
+    description: "Optional key-resolution steps. Order is irrelevant; L1 checks requires/produces closure."
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, requires, produces]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9_-]{1,60}$"
+          description: "Stable name for this hop; it appears in the archive so a reader can trace which hop produced a key."
+        requires:
+          type: array
+          minItems: 1
+          items: { type: string, minLength: 1 }
+          uniqueItems: true
+          description: "Keys this hop consumes. Must be produced by discovery columns, another hop, or be a documented built-in (route)."
+        produces:
+          type: array
+          minItems: 1
+          items: { type: string, minLength: 1 }
+          uniqueItems: true
+        profile: { $ref: "#/definitions/profile" }
+        userPhrase: { $ref: "#/definitions/userPhrase" }
+        rules:
+          type: array
+          minItems: 1
+          items: { $ref: "#/definitions/rule" }
+        template:
+          type: string
+          minLength: 1
+          description: "Path assembly: placeholders in {braces} are filled from requires-keys; the rest is literal, including any project-specific directory."
+        prefixFrom:
+          type: object
+          additionalProperties: false
+          required: [rules]
+          properties:
+            profile: { $ref: "#/definitions/profile" }
+            userPhrase: { $ref: "#/definitions/userPhrase" }
+            rules:
+              type: array
+              minItems: 1
+              items: { $ref: "#/definitions/rule" }
+        onMiss:
+          enum: [incomplete, skip]
+          description: "Absent means incomplete. 'skip' is only for optional enrichment hops; it never means 'invent a value'."
+        evidence: { $ref: "#/definitions/evidence" }
+
+  # ── 抽取：从模板工件里读出页面事实。每条都必须带 desc（人话），无规则 = 该段如实为空 ──
+  extract:
+    type: object
+    additionalProperties: false
+    properties:
+      actions:
+        type: array
+        items: { $ref: "#/definitions/rule" }
+      dataSources:
+        type: array
+        items: { $ref: "#/definitions/rule" }
+      drilldowns:
+        type: array
+        items: { $ref: "#/definitions/rule" }
+
+  # ── 下钻树预算（§4.6 ③）：两个数管两件不同的事，且**只能收紧不能放宽** ──
+  budget:
+    type: object
+    additionalProperties: false
+    properties:
+      maxDepth:
+        type: integer
+        minimum: 1
+        maximum: 6
+        description: "Tree path length (indent levels). L1 default 3; values above the cap are clamped, never honoured."
+      maxScreens:
+        type: integer
+        minimum: 1
+        maximum: 2000
+        description: "How many canonical page bodies one run may expand (真正展开的页面数). L1 default 200."
+      sameAppRule:
+        type: string
+        minLength: 1
+        description: "How to decide a drilldown target still belongs to this app (§4.7). L1 cannot guess: same host with a different context path is one app in some systems and another in the rest."
+
+definitions:
+  # 一条抽取/解析规则。desc 是硬性要求：没有它，一段正则为什么有效就只剩写它的人知道。
+  rule:
+    type: object
+    additionalProperties: false
+    required: [desc, match]
+    properties:
+      desc:   { type: string, minLength: 2, description: "Human-readable reason this pattern exists (L1 hard requirement, §4.5)." }
+      match:  { type: string, minLength: 1, description: "Regex applied to the artifact text." }
+      capture:
+        type: object
+        description: "Group index per produced key, e.g. { route: 1 }."
+        additionalProperties: { type: integer, minimum: 1 }
+      evidence: { $ref: "#/definitions/evidence" }
+
+  # 列映射：发现器每一项都要能把"它的字段"翻译成骨架键。typeValues/perms 是新增的
+  # （v1 只有 4+1 列，装不下"哪个值是页面哪个值是按钮"与"这个动作的权限标识"）。
+  columns:
+    type: object
+    additionalProperties: false
+    required: [id, parentId, name, path]
+    properties:
+      id:       { type: string, minLength: 1 }
+      parentId: { type: string, minLength: 1 }
+      name:     { type: string, minLength: 1 }
+      path:     { type: string, minLength: 1, description: "The column that carries the page route. Mandatory: without it nothing else is reachable." }
+      type:       { type: string, minLength: 1, description: "Optional: column distinguishing page / button / directory node." }
+      typeValues:
+        type: object
+        description: "Which values of `type` mean a page, a button, and a directory node (directory rows must be filtered out or they become hundreds of fake pages)."
+        additionalProperties: false
+        properties:
+          page:     { type: string, minLength: 1 }
+          button:   { type: string, minLength: 1 }
+          directory: { type: string, minLength: 1 }
+          placeholder:
+            type: array
+            minItems: 1
+            items: { type: string }
+            description: "Values meaning 'no route here' (e.g. #, -, 0). Rows carrying these are dropped, never turned into pages."
+      perms:    { type: string, minLength: 1, description: "Optional: permission-identifier column; the only string anchoring front-end button and back-end annotation at once." }
+      order:    { type: string }
+
+  # 剖面名：L1 内置的可选加速器。选它不是必需，去掉它必须仍能靠 rules 出产物（§5 不变式）。
+  profile:
+    type: string
+    minLength: 1
+    description: "Optional L1 profile name — an accelerator, never the only path. Removing it must still leave a working config."
+
+  # 泄压阀：任何封闭枚举取值不够时，other 必须配一句人话说明这是什么（否则等于没扩展）。
+  userPhrase:
+    type: string
+    minLength: 2
+    description: "Required when the chosen enum value is `other` or a profile cannot be named: what it actually is, in the user's words."
+
+  # 证据类别：门禁落点只看它，不看段名也不看分区名（§4.4）。新增形态落进这四类之一，L1 不改。
+  evidence:
+    enum: [static, generated, runtime, doc]
+    description: "static = mechanically traceable to an editable artifact (eligible for anchors); generated = emitted by a build or a backend schema; runtime = only known by running it (corpus only); doc = human-written (corpus only)."

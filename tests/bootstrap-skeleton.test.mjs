@@ -2,7 +2,7 @@
 // /supperH-bootstrap 与 scripts/bootstrap.mjs 的职责边界（F-9）：
 // bootstrap **只**建私有根骨架 + prefs.md，绝不生成任何项目条目。
 // 旧形态从 schemas/project.example.yaml 复制一份写 <私有根>/project.yaml（legacy 单文件），
-// 于是"注册项目"有两个入口：一个有扫描/门禁/菜单采集，一个什么都没有。
+// 于是"注册项目"有两个入口：一个有扫描/门禁/页面发现器采集，一个什么都没有。
 // 两个入口并存时用户不知道该跑哪个，跑完还多出一个待迁移文件 —— 这里锁死新边界。
 // 落盘类 CLI 必须真跑命令行（只测函数等于没测），所以全部走 spawnSync。
 import test from 'node:test';
@@ -108,7 +108,7 @@ test('legacy project.yaml 存在：默认只报告并指路，加 --migrate 才�
 test('骨架清单只有一处定义：bootstrap 与 setup 不会各写一份而漂移', () => {
   const src = fs.readFileSync(path.join(ROOT, 'scripts', 'setup.mjs'), 'utf8');
   assert.ok(!/const PRIVATE_SUBS\s*=/.test(src),
-    'setup.mjs 不得再自带一份子目录清单（历史上漂移过一次：迁移出来的根缺 menus/）');
+    'setup.mjs 不得再自带一份子目录清单（历史上漂移过一次：迁移出来的根缺 screens/）');
   assert.match(src, /ensurePrivateSkeleton/);
-  assert.deepEqual(PRIVATE_SUBS, ['projects', 'menus', 'drivers', 'context', 'tasks']);
+  assert.deepEqual(PRIVATE_SUBS, ['projects', 'screens', 'drivers', 'context', 'tasks']);
 });

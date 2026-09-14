@@ -35,7 +35,7 @@ let root, privateRoot, workspace;
 // `dbDriver` 排在 `drivers` 之后：它是从 drivers 派生的别名（按 role 解），不是注册表里的 YAML 路径。
 const GOLD_KEYS = [
   'ok', 'code', 'displayName', 'configFile', 'registryLegacy', 'toolRoot', 'privateRoot',
-  'driversRoot', 'contextRoot', 'tasksRoot', 'menuConfigFile', 'menu', 'codeRoot',
+  'driversRoot', 'contextRoot', 'tasksRoot', 'screenConfigFile', 'staleScreenConfig', 'screen', 'codeRoot',
   'effectiveRoot', 'packageRoot', 'db', 'drivers', 'dbDriver', 'project'
 ].join('|');
 

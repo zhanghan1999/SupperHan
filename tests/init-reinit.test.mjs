@@ -2,7 +2,7 @@
 // 锁死 `init-project.mjs --reinit`（清场重配）的四件事。全部走真实命令行 + 临时私有根：
 // 「落盘类行为一律要有走命令行的用例，只测渲染层等于没测」（§11 一期记录的原话）。
 //   ① 计划模式真的只读：整个私有根逐文件字节比对，跑完必须一字不差。
-//   ② 撤销不删任何东西：条目/菜单/context/tasks 全部 rename 进 _retired/<戳>/<code>/，
+//   ② 撤销不删任何东西：条目/页面档案/context/tasks 全部 rename 进 _retired/<戳>/<code>/，
 //      且 manifest.json 里每条 from→to 都能对上真实文件 —— 回滚要能机械执行，不是靠记忆。
 //   ③ 学习数据非空时 --confirm <code> 是硬门禁（退 23），而且拦下时一个文件都没动。
 //      --force 不适用（它是写模式的降级旗标），所以这里没有绕过路径。
@@ -21,7 +21,9 @@ const TOOL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const INIT   = path.join(TOOL_ROOT, 'scripts', 'init-project.mjs');
 const RESOLVE = path.join(TOOL_ROOT, 'scripts', 'resolve-project.mjs');
 
-const MENU_CODE = { 'menu.source': 'code', 'menu.code.path': 'menu.json', 'menu.code.format': 'json' };
+// v2 页面档案：--values 里是嵌套的 screen.discovery 数组（不再是 menu.* 扁平键）。
+// path 指的 menu.json 是被学习项目自己的文件（真存在的旧物），不属我们的模块命名，保留。
+const SCREEN_CODE = { screen: { discovery: [{ via: 'code', path: 'menu.json', format: 'json' }] } };
 
 function w(file, text = '') {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -67,7 +69,7 @@ function snapshot(root) {
 }
 const registered = (t, priv, repo, code) => {
   const vf = path.join(priv, `values-${code}.json`);
-  fs.writeFileSync(vf, JSON.stringify({ code, packageRoot: 'com.acme', ...MENU_CODE }), 'utf8');
+  fs.writeFileSync(vf, JSON.stringify({ code, packageRoot: 'com.acme', ...SCREEN_CODE }), 'utf8');
   const r = runInit(t, priv, ['--write', '--cwd', repo, '--values', vf]);
   assert.equal(r.status, 0, `前置：注册 ${code} 必须成功，实退 ${r.status}：${r.stderr.slice(0, 400)}${r.stdout.slice(0, 400)}`);
 };
@@ -87,8 +89,8 @@ test('--reinit 不带 --purge：只出计划，整棵私有根一字不差', (t)
   assert.equal(j.mode, 'plan');
   assert.equal(j.code, 'ri-plan');
   assert.equal(j.ok, true);
-  // 条目 + 菜单 + context + tasks 四项都该被点名为"将搬走"
-  for (const kind of ['entry', 'menu', 'context', 'tasks']) {
+  // 条目 + 页面档案 + context + tasks 四项都该被点名为"将搬走"
+  for (const kind of ['entry', 'screens', 'context', 'tasks']) {
     const it = has(j, kind);
     assert.ok(it, `计划里必须列出 ${kind}：${JSON.stringify(j.items.map((x) => x.kind))}`);
     assert.equal(it.exists, true, `${kind} 应当存在于盘上`);
@@ -110,7 +112,9 @@ test('--purge 撤空项目：搬走而非删除，manifest 逐条可回滚，解
   // init 自留的 sidecar（<code>.yaml.bak）该一起走；手工命名形状（<code>.备注.bak）不走
   w(entryFile(priv, 'ri-purge') + '.bak', 'schemaVersion: 1\n');
   w(path.join(priv, 'projects', 'ri-purge.手工备注.bak'), '手工留的，内容不明\n');
-  w(path.join(priv, 'menus', 'ri-purge.yaml.bak'), 'menu: old\n');
+  // 旧 menu 时代残留（F-15b 已整体改名、不留别名）：清场也必须一并搬走
+  w(path.join(priv, 'menus', 'ri-purge.yaml'), 'schemaVersion: 1\nmenu: old\n');
+  w(path.join(priv, 'menus', 'ri-purge.yaml.bak'), 'legacy sidecar\n');
 
   const r = runInit(t, priv, ['--reinit', '--cwd', repo, '--purge']);
   assert.equal(r.status, 0, `撤一场必须成功，实退 ${r.status}：${r.stderr.slice(0, 300)}${JSON.stringify(r.json)}`);
@@ -119,7 +123,8 @@ test('--purge 撤空项目：搬走而非删除，manifest 逐条可回滚，解
   assert.equal(j.learningFiles, 0, '两个目录是空的，不该触发确认门');
 
   // 原地全没了
-  for (const p of [entryFile(priv, 'ri-purge'), path.join(priv, 'menus', 'ri-purge.yaml'),
+  for (const p of [entryFile(priv, 'ri-purge'), path.join(priv, 'screens', 'ri-purge.yaml'),
+    path.join(priv, 'menus', 'ri-purge.yaml'), path.join(priv, 'menus', 'ri-purge.yaml.bak'),
     path.join(priv, 'context', 'ri-purge'), path.join(priv, 'tasks', 'ri-purge'),
     entryFile(priv, 'ri-purge') + '.bak']) {
     assert.ok(!fs.existsSync(p), `${p} 应已被搬走`);
@@ -258,12 +263,12 @@ test('清场后 /supperH-init 能当首次注册重跑（这是本功能存在�
   // 二次注册前留下的 .bak 来自上一次 --write：清场把它一起撤走，所以这次不该再有 .bak 混淆首次判定
   const again = runInit(t, priv, ['--write', '--cwd', repo, '--values', (() => {
     const vf = path.join(priv, 'values-again.json');
-    fs.writeFileSync(vf, JSON.stringify({ code: 'ri-cycle', packageRoot: 'com.acme', ...MENU_CODE }), 'utf8');
+    fs.writeFileSync(vf, JSON.stringify({ code: 'ri-cycle', packageRoot: 'com.acme', ...SCREEN_CODE }), 'utf8');
     return vf;
   })()]);
   assert.equal(again.status, 0, `清场后必须能当首次注册重跑，实退 ${again.status}：${again.stderr.slice(0, 300)}`);
-  assert.equal(again.json.existed, false, '菜单/条目都不在盘上 → --write 报的是"首次注册"');
-  assert.equal(again.json.menuWritten, true);
+  assert.equal(again.json.existed, false, '页面档案/条目都不在盘上 → --write 报的是"首次注册"');
+  assert.equal(again.json.screenWritten, true);
   const rr = runResolve(t, priv, repo);
   assert.equal(rr.status, 0, '解析器必须重新命中');
   assert.equal(rr.json.code, 'ri-cycle', '解析器命中的必须还是同一个短码（learning 目录重建后才能接着用）');

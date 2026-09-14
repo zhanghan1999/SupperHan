@@ -25,7 +25,7 @@ import YAML from 'yaml';
 
 import {
   scanProject, applyStructuralOverrides, entryPatternOf, renderConfig, planConnections,
-  applyBranchSection, branchMappingOf, planMenuChoices,
+  applyBranchSection, branchMappingOf, planScreenChoices,
 } from '../scripts/init-project.mjs';
 import { loadSchema, validateAgainstSchema } from '../scripts/validate-project.mjs';
 
@@ -369,14 +369,13 @@ function runInit(privateRoot, repo, values) {
   try { json = JSON.parse(r.stdout); } catch { /* 让断言去报 stderr */ }
   return { status: r.status, json, stderr: r.stderr };
 }
-const MENU_CODE = {
-  'menu.source': 'code', 'menu.code.path': 'menu.json', 'menu.code.format': 'json',
-};
+// v2 页面档案：--values 里是嵌套的 screen.discovery 数组（不再是 menu.* 扁平键）。
+const SCREEN_CODE = { screen: { discovery: [{ via: 'code', path: 'menu.json', format: 'json' }] } };
 
 test('CLI 不接外部源：退 0 且落盘文件里没有 db / drivers 两段', (t) => {
   const repo = buildMultiModule(t);
   const priv = tmpPrivateRoot(t);
-  const r = runInit(priv, repo, { code: 'cli-a', packageRoot: 'com.a', ...MENU_CODE });
+  const r = runInit(priv, repo, { code: 'cli-a', packageRoot: 'com.a', ...SCREEN_CODE });
   assert.equal(r.status, 0, `init --write 必须成功，实退 ${r.status}：${r.stderr.slice(0, 400)}`);
   assert.equal(r.json.connections.mode, 'code-only', '接入决定要能原样回报给用户，不是沉默退 0');
   // F-8：一个分支都没检出也没人答 → 整段不写，但这件事必须被说出来（不是静默缺席）
@@ -396,7 +395,7 @@ test('CLI 不接外部源：退 0 且落盘文件里没有 db / drivers 两段',
 test('CLI 接一半：写盘前退 2，缺项逐项点名，且 projects/<code>.yaml 不存在', (t) => {
   const repo = buildMultiModule(t);
   const priv = tmpPrivateRoot(t);
-  const r = runInit(priv, repo, { code: 'cli-b', packageRoot: 'com.a', 'db.host': 'db.internal', ...MENU_CODE });
+  const r = runInit(priv, repo, { code: 'cli-b', packageRoot: 'com.a', 'db.host': 'db.internal', ...SCREEN_CODE });
   assert.equal(r.status, 2);
   assert.equal(r.json.error, 'connection-choices-incomplete');
   const problems = JSON.stringify(r.json.problems || []);
@@ -450,83 +449,135 @@ test('branchMappingOf：declared / undeclared / note 三态都递得出文本', 
   assert.match(empty.note, /未登记任何分支映射/, '一个都没登记时必须有一句可复述的读法');
 });
 
-// ---------- 菜单来源配置：同样讲“缺席即语义” ----------
-// 模板 schemas/menu.example.yaml 带着**活值**（slot: database / table: sys_menu / 列名映射），
-// 而 setLine 的语义是“没答就不改写”。两件事合起来：用户没答的字段在盘上长得和真答过一样。
-// F-10 之后库槽位名归用户，`slot: database` 从“凑巧能用”变成“查一个本项目不存在的槽位”（不报错，只是查不到）。
-test('planMenuChoices：选了哪一支就逐项要值，不答齐退 2 并点名', () => {
-  const dbPartial = planMenuChoices({
-    'menu.source': 'database', 'menu.database.table': 't_menu',
-    'menu.database.columns.id': 'i', 'menu.database.columns.parentId': 'p', 'menu.database.columns.name': 'n',
-  });
-  assert.equal(dbPartial.ok, false);
-  assert.deepEqual(dbPartial.missing, ['menu.database.columns.path'], '只缺点名的那一项，不是“不完整”三个字');
+// ---------- 页面档案（screen.discovery）：同样讲“缺席即语义” ----------
+// v2 不再从 example 逐行套模板（schemas/menu.example.yaml 已删）：init 直接按用户答的
+// screen.discovery 数组装配 + YAML.stringify。于是“未选中的那一支天然不落盘”，且 init
+// 不注入任何示例默认值（slot / source / limit）—— 那些缺省属运行期语义，烤进盘会让下一次
+// 换发现方式时把旧值当成“已答”。schema 管形状，screenRuleIssues 管跨字段硬约束。
+test('planScreenChoices：discovery 逐项按它那一类的顶层必填要值，不答齐点名', () => {
+  // database：顶层必填 via/table/columns（列级 id/path… 的完整性归 schema，不在这道）
+  const dbNoColumns = planScreenChoices({ screen: { discovery: [{ via: 'database', table: 't_menu' }] } });
+  assert.equal(dbNoColumns.ok, false);
+  assert.ok(dbNoColumns.problems.some((p) => /columns/.test(p)), `只点名缺的那一项，不是“不完整”三个字：${JSON.stringify(dbNoColumns.problems)}`);
 
-  const dbFull = planMenuChoices({
-    'menu.source': 'database', 'menu.database.table': 't_menu',
-    'menu.database.columns.id': 'i', 'menu.database.columns.parentId': 'p',
-    'menu.database.columns.name': 'n', 'menu.database.columns.path': 'path',
-  });
-  assert.equal(dbFull.ok, true, '可选键（slot / order / rootParentId / extraFilter）不得被列入必问');
+  const dbFull = planScreenChoices({ screen: { discovery: [{
+    via: 'database', table: 't_menu', columns: { id: 'i', parentId: 'p', name: 'n', path: 'pa' },
+  }] } });
+  assert.equal(dbFull.ok, true, '答齐顶层必填即放行（可选键 slot/order/limit 不得进必问）');
+  assert.equal(dbFull.count, 1);
 
-  const bad = planMenuChoices({ 'menu.source': 'db' });
+  const bad = planScreenChoices({ screen: { discovery: [{ via: 'db' }] } });
   assert.equal(bad.ok, false);
-  assert.equal(bad.badSource, 'db');
+  assert.ok(bad.problems.some((p) => /via 非法/.test(p)), `via 越界要点名：${JSON.stringify(bad.problems)}`);
 
-  assert.equal(planMenuChoices({ packageRoot: 'com.a' }).needed, false, '没提 menu.source 时不参与（由退出码 22 那道管）');
+  const noVia = planScreenChoices({ screen: { discovery: [{ path: 'menu.json' }] } });
+  assert.equal(noVia.ok, false);
+  assert.ok(noVia.problems.some((p) => /缺 via/.test(p)));
+
+  const notArr = planScreenChoices({ screen: { discovery: 'x' } });
+  assert.equal(notArr.ok, false);
+  assert.equal(notArr.badDiscovery, true, 'discovery 不是数组是形状错，另判一支');
+
+  assert.equal(planScreenChoices({ packageRoot: 'com.a' }).needed, false, '没提 screen.discovery 时不参与（由退出码 22 那道管）');
 });
 
-test('落盘的 menus/<code>.yaml 不留未被选中的那一段，也不留没答的可选键', (t) => {
+test('落盘的 screens/<code>.yaml：只装用户答过的 discovery，schemaVersion=2 且不落模板假值', (t) => {
   const repo = buildMultiModule(t);
   const priv = tmpPrivateRoot(t);
-  const r = runInit(priv, repo, { code: 'cli-menu-code', packageRoot: 'com.a', ...MENU_CODE });
+  const r = runInit(priv, repo, { code: 'cli-screen-code', packageRoot: 'com.a', ...SCREEN_CODE });
   assert.equal(r.status, 0, `init --write 必须成功：${r.stderr.slice(0, 400)}`);
-  const text = fs.readFileSync(path.join(priv, 'menus', 'cli-menu-code.yaml'), 'utf8');
-  const vals = valueText(text);
-  assert.ok(!/^database:/m.test(vals), '选 code 时模板的 database 段必须整段不写（日后改 source 会把它当已答值读）');
-  assert.ok(!/sys_menu|menu_id|parent_id/.test(vals), '模板假表名/列名不得进盘');
-  assert.equal(YAML.parse(text).code.path, 'menu.json');
-  assert.equal(YAML.parse(text).project, 'cli-menu-code');
-});
-
-test('接库且不答 menu.database.slot：落盘不得有 slot 键（缺省 = 按 role 解出的数据库通道）', (t) => {
-  const repo = buildMultiModule(t);
-  const priv = tmpPrivateRoot(t);
-  const values = {
-    code: 'cli-menu-db', packageRoot: 'com.a', ...FULL_DB, connect: ['main_db'],
-    'drivers.main_db.role': 'database',
-    'drivers.main_db.desc': '业务主库', 'drivers.main_db.impl': '{{DRIVERS_ROOT}}/x/main_db.py',
-    'drivers.main_db.healthCheck': '{{DRIVERS_ROOT}}/x/main_db.py --health',
-    'menu.source': 'database', 'menu.database.table': 't_menu',
-    'menu.database.columns.id': 'i', 'menu.database.columns.parentId': 'p',
-    'menu.database.columns.name': 'n', 'menu.database.columns.path': 'path',
-    'menu.code.path': 'should-be-dropped.json',   // 选错了也不得落在盘上
-  };
-  const r = runInit(priv, repo, values);
-  assert.equal(r.status, 0, `init --write 必须成功（实退 ${r.status}）：${JSON.stringify(r.json).slice(0, 400)}${r.stderr.slice(0, 300)}`);
-  const text = fs.readFileSync(path.join(priv, 'menus', 'cli-menu-db.yaml'), 'utf8');
+  assert.equal(r.json.screenWritten, true);
+  const text = fs.readFileSync(path.join(priv, 'screens', 'cli-screen-code.yaml'), 'utf8');
   const doc = YAML.parse(text);
-  assert.equal(doc.database.slot, undefined, '没答就不能写：一个示例槽位名会让菜单学习查一个不存在的源');
-  assert.equal(doc.code, undefined, '未被选中的分支不写（就算用户误给了值）');
-  assert.equal(doc.database.table, 't_menu');
-  assert.equal(doc.database.limit, 5000, '有明示缺省的键保留：那不是假值');
-  assert.equal(doc.database.source, 'menu', '同上：命令文书里写明的默认逻辑源名');
-  assert.ok(!/should-be-dropped\.json/.test(valueText(text)));
+  assert.equal(doc.schemaVersion, 2);
+  assert.equal(doc.project, 'cli-screen-code');
+  assert.equal(doc.discovery.length, 1, '只有一支 via=code');
+  assert.equal(doc.discovery[0].via, 'code');
+  assert.equal(doc.discovery[0].path, 'menu.json');
+  const vals = valueText(text);
+  assert.ok(!/sys_menu|menu_id|parent_id/.test(vals), '模板假表名/列名不得进盘');
+  assert.ok(!/^database:/m.test(vals), '未选 database 就不该出现 database 段（未选中的 via 天然不落盘）');
 });
 
-test('菜单选了 database 但不答列名：退 2 menu-choices-incomplete，两个文件都不落盘', (t) => {
+test('database 发现器不答 slot/source/limit：落盘按用户原样，init 不注入任何默认值', (t) => {
   const repo = buildMultiModule(t);
   const priv = tmpPrivateRoot(t);
   const r = runInit(priv, repo, {
-    code: 'cli-menu-partial', packageRoot: 'com.a',
-    'menu.source': 'database', 'menu.database.table': 't_menu',
+    code: 'cli-screen-db', packageRoot: 'com.a',
+    screen: { discovery: [{ via: 'database', table: 't_menu',
+      columns: { id: 'i', parentId: 'p', name: 'n', path: 'pa' } }] },
   });
-  assert.equal(r.status, 2, '不答齐就拦下，而不是拿模板值写一份“看着完整”的配置');
-  assert.equal(r.json.error, 'menu-choices-incomplete');
-  const problems = JSON.stringify(r.json.problems || []);
-  for (const k of ['menu.database.columns.id', 'menu.database.columns.parentId',
-    'menu.database.columns.name', 'menu.database.columns.path'])
-    assert.ok(problems.includes(k), `problems 得点名 ${k}，实际：${problems}`);
-  assert.ok(!fs.existsSync(path.join(priv, 'menus', 'cli-menu-partial.yaml')), '拦截必须发生在写盘之前');
-  assert.ok(!fs.existsSync(path.join(priv, 'projects', 'cli-menu-partial.yaml')));
+  assert.equal(r.status, 0, `init --write 必须成功（实退 ${r.status}）：${JSON.stringify(r.json).slice(0, 400)}${r.stderr.slice(0, 300)}`);
+  const doc = YAML.parse(fs.readFileSync(path.join(priv, 'screens', 'cli-screen-db.yaml'), 'utf8'));
+  const item = doc.discovery[0];
+  assert.equal(item.via, 'database');
+  assert.equal(item.table, 't_menu');
+  assert.equal(item.slot, undefined, '没答就不能写：一个示例槽位名会让页面学习查一个不存在的源');
+  assert.equal(item.source, undefined, 'v2 不注入默认逻辑源名：缺省在运行期按 role 解数据库通道');
+  assert.equal(item.limit, undefined, '明示缺省也不由 init 烤进盘（limit 默认属 schema 语义）');
+  assert.deepEqual(item.columns, { id: 'i', parentId: 'p', name: 'n', path: 'pa' });
+});
+
+test('database 发现器不答 columns：退 2 screen-choices-incomplete，两个文件都不落盘', (t) => {
+  const repo = buildMultiModule(t);
+  const priv = tmpPrivateRoot(t);
+  const r = runInit(priv, repo, { code: 'cli-screen-partial', packageRoot: 'com.a',
+    screen: { discovery: [{ via: 'database', table: 't_menu' }] } });
+  assert.equal(r.status, 2, '不答齐它那一类的顶层必填就拦下，而不是拿示例值写一份“看着完整”的配置');
+  assert.equal(r.json.error, 'screen-choices-incomplete');
+  assert.ok(JSON.stringify(r.json.problems || []).includes('columns'), `problems 得点名缺的 columns，实际：${JSON.stringify(r.json.problems)}`);
+  assert.ok(!fs.existsSync(path.join(priv, 'screens', 'cli-screen-partial.yaml')), '拦截必须发生在写盘之前');
+  assert.ok(!fs.existsSync(path.join(priv, 'projects', 'cli-screen-partial.yaml')));
+});
+
+test('code 发现器 format: other 不补 userPhrase：退 2 screen-config-invalid（跨字段约束走 JS 不是 schema）', (t) => {
+  const repo = buildMultiModule(t);
+  const priv = tmpPrivateRoot(t);
+  const r = runInit(priv, repo, { code: 'cli-screen-other', packageRoot: 'com.a',
+    screen: { discovery: [{ via: 'code', path: 'routes.txt', format: 'other' }] } });
+  assert.equal(r.status, 2, 'format: other 必须补 userPhrase，否则下次还得靠模型现场猜一次');
+  assert.equal(r.json.error, 'screen-config-invalid');
+  assert.ok((r.json.errors || []).some((e) => /userPhrase/.test(String(e))), `errors 要点名 userPhrase：${JSON.stringify(r.json.errors)}`);
+  assert.ok(!fs.existsSync(path.join(priv, 'screens', 'cli-screen-other.yaml')), 'schema 级缺陷也得拦在写盘前');
+  assert.ok(!fs.existsSync(path.join(priv, 'projects', 'cli-screen-other.yaml')));
+});
+
+test('旧 menus/<code>.yaml 残留：init --write 退 25 stale-screen-config，绝不静默也不搬旧配置', (t) => {
+  const repo = buildMultiModule(t);
+  const priv = tmpPrivateRoot(t);
+  const legacy = path.join(priv, 'menus', 'cli-stale.yaml');
+  w(legacy, 'schemaVersion: 1\nmenu:\n  source: code\n');   // 旧形状
+  const r = runInit(priv, repo, { code: 'cli-stale', packageRoot: 'com.a', ...SCREEN_CODE });
+  assert.equal(r.status, 25, `检测到旧 menu 配置必须退 25，实退 ${r.status}：${JSON.stringify(r.json)}`);
+  assert.equal(r.json.error, 'stale-screen-config');
+  assert.ok(!fs.existsSync(path.join(priv, 'screens', 'cli-stale.yaml')), '退 25 时不写新配置');
+  assert.ok(!fs.existsSync(path.join(priv, 'projects', 'cli-stale.yaml')), '退 25 发生在任何写盘之前');
+  assert.ok(fs.existsSync(legacy), '旧文件原地保留（处置权在用户：--reinit --purge 才搬）');
+});
+
+test('首次注册不答 screen.discovery：退 22 screen-discovery-required', (t) => {
+  const repo = buildMultiModule(t);
+  const priv = tmpPrivateRoot(t);
+  const r = runInit(priv, repo, { code: 'cli-no-disc', packageRoot: 'com.a' });
+  assert.equal(r.status, 22, `首次注册必须有至少一支发现器，实退 ${r.status}：${JSON.stringify(r.json)}`);
+  assert.equal(r.json.error, 'screen-discovery-required');
+  assert.ok(!fs.existsSync(path.join(priv, 'projects', 'cli-no-disc.yaml')));
+  assert.ok(!fs.existsSync(path.join(priv, 'screens', 'cli-no-disc.yaml')));
+});
+
+test('两相反形态各写自己那份：database 与 code 两个项目的 screens 配置互不污染', (t) => {
+  const repo1 = buildMultiModule(t), repo2 = buildMultiModule(t);
+  const priv = tmpPrivateRoot(t);
+  const rDb = runInit(priv, repo1, { code: 'two-db', packageRoot: 'com.a',
+    screen: { discovery: [{ via: 'database', table: 't_menu', columns: { id: 'i', parentId: 'p', name: 'n', path: 'pa' } }] } });
+  assert.equal(rDb.status, 0, rDb.stderr.slice(0, 300));
+  const rCode = runInit(priv, repo2, { code: 'two-code', packageRoot: 'com.a',
+    screen: { discovery: [{ via: 'code', path: 'menu.json', format: 'json' }] } });
+  assert.equal(rCode.status, 0, rCode.stderr.slice(0, 300));
+  const db = YAML.parse(fs.readFileSync(path.join(priv, 'screens', 'two-db.yaml'), 'utf8'));
+  const co = YAML.parse(fs.readFileSync(path.join(priv, 'screens', 'two-code.yaml'), 'utf8'));
+  assert.equal(db.discovery[0].via, 'database');
+  assert.equal(co.discovery[0].via, 'code');
+  assert.ok(!JSON.stringify(db).includes('menu.json'), 'database 那份不得混进 code 那份的路径');
+  assert.ok(!JSON.stringify(co).includes('t_menu'), 'code 那份不得混进 database 那份的表名');
 });

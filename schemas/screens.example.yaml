@@ -1,0 +1,94 @@
+# ═══════════════════════════════════════════════════════════════════
+# screens.example.yaml
+# 页面档案配置模板（假数据）。用户 clone 后由 /supperH-init 落盘到
+#   <PRIVATE_ROOT>/screens/<code>.yaml
+# 声明 /supperH-learn 页面模式的三件事（形状由 schemas/screens.schema.yaml 定）：
+#   discovery  页面清单从哪些介质发现（数组！可组合，至少一项）
+#   hops       把一个键变成下一个键的跳（服务端渲染三跳；SPA 无"视图名"那一跳）
+#   extract    从模板工件里抽什么（actions / dataSources / drilldowns）
+# 取代旧 menu.example.yaml —— 不留 menu 别名（见 docs/screen-partition.md §8）。
+#
+# 术语边界：这里出现"菜单"二字的地方，都指被学习的那个东西（项目里真存在的
+# sys_menu 表、菜单中文名），不指我们这个模块——模块一律叫 screen / 页面学习。
+# ═══════════════════════════════════════════════════════════════════
+schemaVersion: 2
+project: example-proj        # 必须等于项目 identity.code
+
+discovery:
+  # ① 关系库里的菜单表：唯一需要外部通道的一支（走 role: database 那个槽位，只读）
+  - via: database
+    # slot 可省：不写 = 用数据库通道（role: database 那个槽位，名字归用户，别照抄本行）
+    # source: screen           # 逻辑源名，须在该槽位 config.sources 里声明；不接就删这两行
+    table: sys_menu            # 被学习的那张菜单表（表名归项目，这里只是形态示例）
+    columns:                   # 列名映射：把"它的字段"翻译成骨架键（path 列必填）
+      id: menu_id
+      parentId: parent_id
+      name: menu_name          # → identity 的 name（页面中文名）
+      path: path               # → entry 的 route（关键：页面指向路径，必填）
+      type: menu_type          # 可选：目录 / 菜单 / 按钮 的区分列
+      typeValues:              # type 列的哪个值 = 页面 / 按钮 / 目录（目录行必须滤掉）
+        page: "C"
+        button: "F"
+        directory: "M"
+        placeholder: ["#", "-"]   # 这些值 = 这行没有路由，丢掉，绝不成页
+      perms: perms             # 可选：权限标识列（动作段的主料，前后端唯一双向锚）
+      order: order_num
+    rootParentId: "0"          # 可选：根节点过滤
+    extraFilter: ""            # 可选：SELECT-only 的 WHERE 片段
+    limit: 5000                # 有明示缺省 = 文档里的默认值，不是假值
+
+  # ② 没有后端菜单表的项目：删掉上面 database 整项，只留这一支 via: code，
+  #    entry / template / actions / dataSources 四段照样纯静态学得出来，
+  #    只是没有页面中文名（identity 段为空，"每段独立可缺"在这里兑现）。
+  - via: code
+    path: "src/main/resources/config/routes.json"   # 绝对路径，或相对 codeRoot
+    format: router             # json | sql | properties | router | java | xml | other
+    # format: other 时必须补一句 userPhrase 说清它是什么、怎么解析（否则 init 退 2）
+    rules:
+      - desc: "路由表里每项的 path 字段即页面 route"
+        match: '"path"\s*:\s*"([^"]+)"'
+        capture: { route: 1 }
+
+hops:
+  # 六段骨架固定，跳数与跳序由项目形状决定：服务端渲染走满三跳，SPA 删掉
+  # "视图名"那一跳（路由直接指组件，entry 与 template 由同一条 hop 一次产出）。
+  - id: entry-from-route          # 路由 → 处理该路径的代码位置
+    requires: [route]
+    produces: [entryCode]
+    rules:
+      - desc: "Controller 上 @RequestMapping 声明该路由的方法"
+        match: '@RequestMapping\(\s*(?:value\s*=\s*)?"([^"]+)"'
+        capture: { route: 1 }
+  - id: view-name-from-controller # ★ 只存在于服务端渲染项目
+    requires: [route]
+    produces: [viewName]
+    rules:
+      - desc: "Controller 返回语句里的视图名"
+        match: 'return\s+"([^"]+)"'
+        capture: { viewName: 1 }
+    onMiss: incomplete            # 机械展开"未命中不许造"：抽不到就如实 incomplete
+  - id: template-from-view-name   # 视图名 → 模板文件路径（前缀/后缀从项目侧读，不进 L1）
+    requires: [viewName]
+    produces: [templateFile]
+    template: "{codeRoot}/src/main/webapp/WEB-INF/views/{viewName}.jsp"
+
+extract:
+  # 从 hop 解出的模板工件里抽页面事实；每条必须带 desc（人话），无规则 = 该段如实为空。
+  actions:                        # 动作（按钮 / 链接 / 批量）+ 各自权限标识
+    - desc: "带权限标识的按钮标签"
+      match: '<@perm\b[^>]*name="([^"]+)"[^>]*>([^<]+)<'
+      capture: { perms: 1, label: 2 }
+  dataSources:                    # 页面运行时打的数据接口
+    - desc: "JS 里以 url 字面量发起的异步请求"
+      match: "(?:url|\\.post|\\.get)\\s*\\(\\s*['\"]([^'\"]+)"
+      capture: { route: 1 }
+  drilldowns:                     # 下钻：某个值或按钮把用户带到另一个页面（一期只存，不进锚点）
+    - desc: "跳转型链接"
+      match: '<a\b[^>]*href="([^"]+)"'
+      capture: { route: 1 }
+
+budget:
+  # 两个数管两件不同的事，且只能被 L2 收紧不能放宽（超限则夹取，绝不照收）。
+  maxDepth: 3                     # 树的路径长度（缩进层数）
+  maxScreens: 200                 # 一次可展开的 canonical 正文条数
+  sameAppRule: "同 host 且 context path 前缀一致算同一应用，否则 outOfScope 叶子"

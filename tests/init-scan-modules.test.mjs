@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
 import {
-  scanProject, applyStructuralOverrides, entryPatternOf, renderConfig, planConnections,
+  scanProject, applyStructuralOverrides, entryPatternOf, entryCandidatesOf, renderConfig, planConnections,
   applyBranchSection, branchMappingOf, planScreenChoices,
 } from '../scripts/init-project.mjs';
 import { loadSchema, validateAgainstSchema } from '../scripts/validate-project.mjs';
@@ -85,19 +85,53 @@ test('工具目录不再被当模块，模块清单等于 pom 声明', (t) => {
     assert.ok(!plan.modules.includes(junk), `${junk} 不得成为模块`);
 });
 
-test('entryPattern 带模块目录前缀，没看到 controller 包的模块给超集而不是空匹配', (t) => {
+test('学习起点 anchor：单命中目录名定精确候选，无源码模块进 modulesNeedEntryInput 并给超集', (t) => {
   const plan = scanProject(buildMultiModule(t));
   const byName = Object.fromEntries(plan.modulePlans.map(m => [m.name, m]));
   assert.equal(byName['demo-base'].dir, 'demo-base');
-  assert.equal(byName['demo-base'].controllersSeen, true);
+  // 真正命中的目录名被记下来（旧 bug 是记布尔 controllersSeen 却一律发 controller/）
+  assert.deepEqual(byName['demo-base'].entryDirHits, ['controller']);
+  assert.equal(byName['demo-base'].entryNeedsUserInput, false, '唯一目录命中：精确且不猜，不必问');
   assert.equal(byName['demo-base'].entryPattern, 'demo-base/src/main/java/**/controller/*.java');
   assert.equal(byName['demo-biz'].entryPattern, 'demo-biz/src/main/java/**/controller/*.java');
-  // demo-dep 只有 pom（依赖聚合模块，无源码）：给 **/*.java 超集，绝不给"匹配不到任何东西"的形状
-  assert.equal(byName['demo-dep'].controllersSeen, false);
+  // demo-dep 只有 pom（依赖聚合模块，无源码）：零候选 → needsUserInput，entryPattern 落 **/*.java 超集（诚实的宽）
+  assert.deepEqual(byName['demo-dep'].entryDirHits, []);
+  assert.equal(byName['demo-dep'].entryNeedsUserInput, true);
   assert.equal(byName['demo-dep'].entryPattern, 'demo-dep/src/main/java/**/*.java');
+  assert.deepEqual(plan.modulesNeedEntryInput, ['demo-dep'], '只有零命中的模块需要问用户');
   // 每个 pattern 都相对 effectiveRoot 求值，所以必须各自带前缀
   assert.ok(plan.modulePlans.every(m => m.entryPattern.startsWith('demo-')),
     '多模块仓不允许出现 codeRoot 相对的通用 pattern');
+});
+
+test('入口包叫 web/ 时发 web/ 候选，绝不误配 controller/（实测缺陷的回归锁）', (t) => {
+  const repo = tmpRepo(t);
+  w(path.join(repo, java('src', 'main', 'java', 'com', 'a', 'order', 'web', 'OrderController')),
+    'package com.a.order.web;\n');
+  const plan = scanProject(repo);
+  assert.deepEqual(plan.modulePlans[0].entryDirHits, ['web']);
+  assert.equal(plan.modulePlans[0].entryNeedsUserInput, false);
+  assert.equal(plan.modulePlans[0].entryPattern, 'src/main/java/**/web/*.java',
+    '目录命中不标准时不得回退到硬编码 controller/');
+});
+
+test('包名乱但类名标准 → 给 *Controller.java 兜底候选且必问；多个入口目录命中 → 歧义必问', (t) => {
+  // 类名兜底：没有任何 ENTRY_DIR_RE 目录命中，但有 *Controller.java
+  const repo = tmpRepo(t);
+  w(path.join(repo, java('src', 'main', 'java', 'com', 'a', 'handlers', 'OrderController')), '');
+  const byClass = scanProject(repo).modulePlans[0];
+  assert.deepEqual(byClass.entryDirHits, []);
+  assert.ok(byClass.controllerFileCount >= 1);
+  assert.deepEqual(entryCandidatesOf(byClass).candidates, ['src/main/java/**/*Controller.java']);
+  assert.equal(byClass.entryNeedsUserInput, true, '类名派仍是“猜哪层是入口”→必问');
+  // 多入口目录命中：web + controller 并存 → 两个候选 + 歧义必问
+  const repo2 = tmpRepo(t);
+  w(path.join(repo2, java('src', 'main', 'java', 'com', 'a', 'web', 'AController')), '');
+  w(path.join(repo2, java('src', 'main', 'java', 'com', 'a', 'controller', 'BController')), '');
+  const multi = scanProject(repo2).modulePlans[0];
+  assert.equal(multi.entryDirHits.length, 2);
+  assert.equal(multi.entryNeedsUserInput, true);
+  assert.equal(multi.entryCandidates.length, 2, '多命中：每个都列候选，不选一个当结论');
 });
 
 test('单模块仓（java 源码直接挂在 codeRoot 下）仍是 codeRoot 相对 pattern', (t) => {
@@ -147,11 +181,15 @@ test('分支名没探测到时如实上报 needsUserInput，且不发明任何�
     '未检出时不得返回任何可被当事实用的字符串（旧形态在这里放 release-main / staging / develop）');
 });
 
-test('entryPatternOf：dir 与 controllersSeen 的四种组合', () => {
-  assert.equal(entryPatternOf({ dir: 'm', controllersSeen: true }), 'm/src/main/java/**/controller/*.java');
-  assert.equal(entryPatternOf({ dir: 'm', controllersSeen: false }), 'm/src/main/java/**/*.java');
-  assert.equal(entryPatternOf({ dir: null, controllersSeen: true }), 'src/main/java/**/controller/*.java');
-  assert.equal(entryPatternOf({ dir: 'a/b', controllersSeen: false }), 'a/b/src/main/java/**/*.java');
+test('entryPatternOf：dir × 入口信号的各组合（新签名 entryDirHits/controllerFileCount）', () => {
+  // 唯一目录命中 → 精确候选
+  assert.equal(entryPatternOf({ dir: 'm', entryDirHits: ['controller'], controllerFileCount: 0 }), 'm/src/main/java/**/controller/*.java');
+  // 零信号 → 超集
+  assert.equal(entryPatternOf({ dir: 'm', entryDirHits: [], controllerFileCount: 0 }), 'm/src/main/java/**/*.java');
+  assert.equal(entryPatternOf({ dir: null, entryDirHits: ['controller'], controllerFileCount: 0 }), 'src/main/java/**/controller/*.java');
+  assert.equal(entryPatternOf({ dir: 'a/b', entryDirHits: [], controllerFileCount: 0 }), 'a/b/src/main/java/**/*.java');
+  // 无目录命中但有 *Controller.java → 类名兜底候选（第一个）
+  assert.equal(entryPatternOf({ dir: 'm', entryDirHits: [], controllerFileCount: 3 }), 'm/src/main/java/**/*Controller.java');
 });
 
 test('--values 能覆盖结构字段：删掉的假模块不会又回来', () => {
@@ -159,9 +197,9 @@ test('--values 能覆盖结构字段：删掉的假模块不会又回来', () =>
     code: 'demo', codeRoot: 'C:/ws/demo', packageRoot: 'com.example.app', packageRootDetected: false,
     modules: ['demo-base', 'demo-biz', 'worktrees'],
     modulePlans: [
-      { name: 'demo-base', dir: 'demo-base', controllersSeen: true, entryPattern: 'demo-base/src/main/java/**/controller/*.java' },
-      { name: 'demo-biz', dir: 'demo-biz', controllersSeen: true, entryPattern: 'demo-biz/src/main/java/**/controller/*.java' },
-      { name: 'worktrees', dir: 'worktrees', controllersSeen: true, entryPattern: 'worktrees/src/main/java/**/controller/*.java' },
+      { name: 'demo-base', dir: 'demo-base', entryDirHits: ['controller'], controllerFileCount: 1, entryCandidates: ['demo-base/src/main/java/**/controller/*.java'], entryNeedsUserInput: false, entryPattern: 'demo-base/src/main/java/**/controller/*.java' },
+      { name: 'demo-biz', dir: 'demo-biz', entryDirHits: ['controller'], controllerFileCount: 1, entryCandidates: ['demo-biz/src/main/java/**/controller/*.java'], entryNeedsUserInput: false, entryPattern: 'demo-biz/src/main/java/**/controller/*.java' },
+      { name: 'worktrees', dir: 'worktrees', entryDirHits: ['controller'], controllerFileCount: 1, entryCandidates: ['worktrees/src/main/java/**/controller/*.java'], entryNeedsUserInput: false, entryPattern: 'worktrees/src/main/java/**/controller/*.java' },
     ],
     branches: { prod: null, uat: null, dev: null },
     branchesDetected: { prod: false, uat: false, dev: false },
@@ -184,6 +222,32 @@ test('--values 能覆盖结构字段：删掉的假模块不会又回来', () =>
   // 原对象不得被改坏（调用方可能还要复用 plan）
   assert.equal(base.packageRoot, 'com.example.app');
   assert.equal(base.branches.dev, null, '用户答案不得回灌到原 plan 的未检出键上（浅拷贝不够，branches 要单独拷）');
+});
+
+test('用户答案权威覆盖学习起点：moduleEntries / 扁平 entryPattern.<名> 都算，命中后不再 needsUserInput', () => {
+  const base = {
+    code: 'demo', codeRoot: 'C:/ws/demo', packageRoot: 'com.example.app', packageRootDetected: false,
+    modules: ['demo-base', 'demo-biz'],
+    modulePlans: [
+      { name: 'demo-base', dir: 'demo-base', entryDirHits: [], controllerFileCount: 0, entryCandidates: [], entryNeedsUserInput: true, entryPattern: 'demo-base/src/main/java/**/*.java' },
+      { name: 'demo-biz', dir: 'demo-biz', entryDirHits: ['controller'], controllerFileCount: 1, entryCandidates: ['demo-biz/src/main/java/**/controller/*.java'], entryNeedsUserInput: false, entryPattern: 'demo-biz/src/main/java/**/controller/*.java' },
+    ],
+    modulesNeedEntryInput: ['demo-base'],
+    branches: { prod: null, uat: null, dev: null },
+    branchesDetected: { prod: false, uat: false, dev: false },
+  };
+  const p = applyStructuralOverrides(base, {
+    moduleEntries: { 'demo-base': 'demo-base/src/main/java/**/web/*.java' },
+    'entryPattern.demo-biz': 'demo-biz/src/main/java/**/rest/*.java',
+  });
+  const byName = Object.fromEntries(p.modulePlans.map(m => [m.name, m]));
+  assert.equal(byName['demo-base'].entryPattern, 'demo-base/src/main/java/**/web/*.java', '用户给的反向/入口 glob 权威覆盖扫描超集');
+  assert.equal(byName['demo-base'].entryNeedsUserInput, false, '用户已答 → 不再需要问');
+  assert.equal(byName['demo-biz'].entryPattern, 'demo-biz/src/main/java/**/rest/*.java', '扁平 entryPattern.<名> 同样生效');
+  assert.deepEqual(p.modulesNeedEntryInput, [], '两个都定下来后不再有待问项');
+  // 原 plan 不得被污染（克隆对象而非浅改共享引用）
+  assert.equal(base.modulePlans[0].entryPattern, 'demo-base/src/main/java/**/*.java', '覆盖不得回灌原 plan');
+  assert.equal(base.modulePlans[0].entryNeedsUserInput, true);
 });
 
 test('落盘的 yaml：模块 pattern 各自带前缀，写 branches 不串台到 db.schemas', (t) => {

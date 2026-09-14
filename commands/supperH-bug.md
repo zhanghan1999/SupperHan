@@ -87,6 +87,7 @@ permission:
   | `route` | `POST /api/v1/order/create`、`/api/order/detail` | 可用 |
   | `fqn` | `com.x.order.controller.OrderController#create`、`OrderController#create` | 可用 |
   | `fileLine` | `OrderController.java:88` | 可用 |
+  | `codeFile`（反向 anchor） | `src/main/java/.../OrderMapper.java`、`OrderServiceImpl.java`（一个源码文件路径，**不限于 Controller**） | 可用：经 index.md 的 `sources` 列倒排反查它落在哪些 route 的可达集里（零命中→30，多命中→ 31 歧义） |
   | `traceId` / `ticketNo` | `trace_id=abc123`、工单号 `task-1024` | **需反查**：脚本会识别但判 30 出局，须先经 F1.4 用内网 driver 反查出 route 再进门禁 |
   | 异常栈 | 多帧 stacktrace | **不可用**（栈顶精确但根因常在上游帧，一期强制完整路径） |
 
@@ -182,7 +183,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 ## 步骤 1.5 · 快路径准入判定（**确定性硬门禁**）
 
-仅当步骤 1 抽到了 `route` / `fqn` / `fileLine` 类型的锚点（或步骤 1.4 反查出了唯一 `route`）时执行（同一个解析器脚本，带不同参数）。**步骤 1.6 的复述 JSON 是本次调用的必填入参**：
+仅当步骤 1 抽到了 `route` / `fqn` / `fileLine` / `codeFile` 类型的锚点（或步骤 1.4 反查出了唯一 `route`）时执行（同一个解析器脚本，带不同参数）。**步骤 1.6 的复述 JSON 是本次调用的必填入参**：
 
 ```
 node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<module>" --anchor "<锚点字面量>" --text "<用户原始描述>" --intent-json '<步骤 1.6 的复述 JSON>'

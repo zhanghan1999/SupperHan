@@ -27,7 +27,7 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --scan --cwd "<你的工作区绝�
 > `<你的工作区绝对路径>` 用你当前 Qoder/OpenCode 打开的工作区根目录（与 `/supperH-bug` 门禁同源）。扫描 JSON 里的 `code / codeRoot / build / packageRoot / modules / branches` 都是**已推得**的候选值；`screenCandidates` 是页面发现（`via: code` 那一支）可引用的仓内文件候选（供步骤 3 参考）。
 >
 > 三组字段是「探到了什么」与「敢不敢当事实用」的分界，回显时必须照抄：
-> - `modulePlans[]`：每个模块自己的 `entryPattern`（形如 `demo-base/src/main/java/**/controller/*.java`）。pattern 在 `effectiveRoot`（= codeRoot，一个仓只有一个根）下求值，所以**多模块仓必须带模块目录前缀**；`controllersSeen=false` 的模块（只有 pom、无源码，如依赖聚合模块）给 `**/*.java` 超集而不是空匹配。
+> - `modulePlans[]`：`entryPattern` 是**这个模块的“学习起点” anchor**（不是 controller 定位器）——形态由用户定：入口包目录（`web/`、`api/`、`controller/`）、类名后缀（`**/*Controller.java`）、或反向起点（DAO/Mapper/service 的 glob），L1 绝不预设“必须是 controller 包”。pattern 在 `effectiveRoot`（= codeRoot，一个仓只有一个根）下求值，所以**多模块仓必须带模块目录前缀**。扫描只产**候选**不作结论：`entryCandidates[]` 是按真正命中的信号（记下的入口目录名 / `*Controller.java` 计数）列出的候选，`entryPattern` 暂取候选首个；命中不唯一或零命中的模块名会进 `modulesNeedEntryInput[]`（`entryNeedsUserInput=true`），**必须进步骤 2 逐模块问用户**，答案经 `moduleEntries` 权威覆盖。只有 pom、无源码的模块（依赖聚合）给 `**/*.java` 超集而不是空匹配（诚实的宽 > 伪精确的错）。
 > - `branchesDetected` / `branchesNeedsUserInput`：分支名只有在 `git branch` 里真出现才算检出。未检出的值是形似名字（`release-main`/`staging`/`develop`），**写进 yaml 就会造出仓里根本不存在的分支**，而 `--env` 诊断基线只读这个字段 → 一律进步骤 2 问。
 > - `packageRootCandidates` / `packageRootCommon` / `packageRootPartial`：多顶层包并存（`com`/`org`/`cn` 同层）时 `packageRootPartial=true` 且 `common=null`，此时**不得**拿任一候选当结论，必须问用户。
 
@@ -39,7 +39,7 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --scan --cwd "<你的工作区绝�
 > - `code`（注册标识）= `<plan.code>`（来自 pom artifactId / 目录名）
 > - `codeRoot` = `<plan.codeRoot>`
 > - `build.tool` = `<plan.build.tool>`，`modules` = `<plan.modules 逗号连接>`
-> - 每个模块的 `entryPattern` = `<plan.modulePlans[].entryPattern 逐行列出>`（多模块仓带模块前缀；`dir=null` 表示源码直接挂在 codeRoot 下）
+> - 每个模块的学习起点 `entryPattern` = `<plan.modulePlans[].entryPattern 逐行列出>`（多模块仓带模块前缀；`dir=null` 表示源码直接挂在 codeRoot 下）；`modulesNeedEntryInput[]` 里的每个模块都**必须在步骤 2 问用户确认学习起点**（列出 `entryCandidates[]` 供选，也允许用户直接给别的 glob 或反向起点），未确认前不得当作事实落盘
 > - `packageRoot` = `<plan.packageRoot>`（`packageRootDetected=false` 时标注“未自动检出，用了默认值，可改”；`packageRootPartial=true` 时列出 `packageRootCandidates` 供用户挑，并说明交集不可信）
 > - `branches` = `<plan.branches>`，并逐个标注是否检出；`branchesNeedsUserInput` 里的每一项都要在步骤 2 问出来
 >
@@ -63,7 +63,7 @@ node "{{TOOL_ROOT}}/scripts/init-project.mjs" --scan --cwd "<你的工作区绝�
 - 用户主动要在这次一并登记某个源（少见）→ 每个源采 `desc` / `impl` / `healthCheck` 三项（`driverFieldsIfConnected`），**槽位名由用户自己起**（判据见 `connectNaming.pattern`：字母开头、可含数字/下划线/连字符、长度 ≤ 40）。`desc` 不可省：L1 不再知道任何槽位名，那句话是以后判定“这个源是干什么的”的唯一线索。`healthCheck` 必须真说协议（见 `schemas/project.example.yaml` 注释）：拿 `ping`/裸 TCP 当判据等于没判据。
 - 一个都不接 → **不问任何 `db.*` / `drivers.*` 字段**，直接进步骤 3。
 
-若扫描 JSON 的 `branchesNeedsUserInput` 非空，把其中每一项（`branches.prod` / `branches.uat` / `branches.dev`）一并列入提问；若 `packageRootDetected=false`，`packageRoot` 也必须问。这些值并入同一个 `--values` JSON。
+若扫描 JSON 的 `branchesNeedsUserInput` 非空，把其中每一项（`branches.prod` / `branches.uat` / `branches.dev`）一并列入提问；若 `packageRootDetected=false`，`packageRoot` 也必须问。**若 `modulesNeedEntryInput` 非空，其中的每个模块都必须逐个问用户“这个模块的学习起点是什么”**（把 `entryCandidates[]` 作为候选列出，也允许用户直接给别的 glob、一个入口包目录、甚至一个 DAO/Mapper/service 文件作反向起点）——这是“探测给零命中/歧义才问”的 F-15 分界：候选不唯一时绝不替用户猜一个落盘。答案并入同一个 `--values` JSON（`"moduleEntries": { "<模块名>": "<用户确定的 glob>" }`，脚本会用它权威覆盖对应模块的 `entryPattern`）。
 
 规则：
 

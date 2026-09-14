@@ -47,8 +47,10 @@ permission:
 
 ## 工作流
 
-1. **定位起点** — 从 `{{EFFECTIVE_ROOT}}` + 目标模块 `entryPattern` 定位 Controller 文件
-2. **递归追踪** — Controller 方法 → Service → DAO → Mapper.xml；深度上限 5 层，遇外部服务/RPC 停
+1. **定位起点** — 从 `{{EFFECTIVE_ROOT}}` + 目标模块 `entryPattern` 解析出**学习起点 anchor 命中的文件集**。`entryPattern` 是一个泛化的学习起点，**不预设它一定是 controller 包**：它可以是入口包目录（`web/`、`api/`、`controller/`）、类名后缀（`**/*Controller.java`），也可以是一个反向起点（某个 Service / DAO / Mapper 的 glob）。以**实际命中**的文件为准，不因 pattern 里没写 controller 就假定为空。
+2. **双向追踪** — 从起点既往下游也往上游走，深度上限 5 层，遇外部服务/RPC 停：
+   - **正向（下游）**：起点 → 它调用的 Service → DAO → Mapper.xml（学它依赖什么）。
+   - **反向（上游入口）**：若起点是 Service/DAO/Mapper（非 HTTP 入口本身），反查**哪些 Controller 方法调用到它**，把那些 route 也纳入本模块的反查表——这正是“指定一个 service/DAO 文件也能反查到 controller 接口”的落点。route 归属靠调用链连出来，不靠包名猜。
 3. **提取要素** — 每方法提取：路由（HTTP method+path）、参数、返回类型、调用链、关键 SQL（含表名 with 脱敏占位）、抛出的异常与文案、跨字段校验规则、事务边界、幂等性
 3.5. **登记可达文件集 `touched_files`**（快路径 G4b 的唯一依据，缺它整模块只能判过期）
    - 内容 = 步骤 2 那条调用链**沿途读到的每一个源文件**：Controller 自身 + Service 接口与其实现类 + DAO/Mapper 接口 + `*Mapper.xml` + 被 SQL 摘要引用的实体/DTO/枚举/常量类 + 事务与外部调用清单里点名的配置类。

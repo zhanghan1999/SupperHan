@@ -111,7 +111,7 @@ function isToolDir(name) {
   return SKIP_DIRS.has(name.toLowerCase());
 }
 
-// ---- controller 目录的归属模块：往上找第一个直接拥有 src/main/java 的祖先 ----
+// ---- 入口目录的归属模块：往上找第一个直接拥有 src/main/java 的祖先 ----
 // 返回值：'' = codeRoot 自己就是模块根（单模块仓）；null = 没找到归属（不当模块）。
 function ownerDirOf(ctrlDir, base) {
   const root = path.resolve(base);
@@ -124,19 +124,28 @@ function ownerDirOf(ctrlDir, base) {
   return fs.existsSync(path.join(root, 'src', 'main', 'java')) ? '' : null;
 }
 
-// ---- 模块清单：maven <modules>（权威目录名）+ 真实 controller 位置 ----
-// 返回 [{name, dir, controllersSeen}]：dir 是**相对 codeRoot 的真实目录路径**（可多级），
-// name 是它的文件名安全短码。entryPattern 必须用 dir 而不是 name —— 多模块仓的 Java 源码
-// 在 <codeRoot>/<module>/src/main/java 下，写成 codeRoot 相对的 pattern 会永远匹配不到。
+// ---- 入口目录候选信号（不是结论）----
+// 这三个名字只是“看着像 web/控制层”的目录线索，用来**产生候选**；L1 从不把其中任何一个
+// 当成“项目的 controller 包”——入口包叫 controller / web / api / rest 还是压根没有 web 层，
+// 全是 L2 事实（F-15 通用性不变式：L1 可内置探测能力，不可内置唯一出口）。真正命中的名字
+// 会被记下来用于拼候选 pattern，命中不唯一或零命中则交命令层问用户，绝不猜一个发出去。
+const ENTRY_DIR_RE = /^(controller|controllers|web)$/i;
+
+// ---- 模块清单：maven <modules>（权威目录名）+ 真实入口信号 ----
+// 返回 [{name, dir, entryDirHits: string[], controllerFileCount: number}]：dir 是**相对 codeRoot
+// 的真实目录路径**（可多级），name 是它的文件名安全短码。entryPattern 必须用 dir 而不是 name ——
+// 多模块仓的 Java 源码在 <codeRoot>/<module>/src/main/java 下，写成 codeRoot 相对的 pattern 会永远匹配不到。
+// entryDirHits = 真正命中的入口目录名（可多个，如 ['web'] 或 ['controller','rest']）；
+// controllerFileCount = 该模块下 `*Controller.java` 命中数（目录名不标准但类名标准时的兜底线索）。
 function detectModules(cwd) {
   const mods = new Map();
-  const add = (dir, controllers) => {
+  const ensure = (dir) => {
     const d = String(dir || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-    if (d && d.split('/').some(isToolDir)) return;            // 工具目录不配当模块（d 为空 = codeRoot 自己，合法）
+    if (d && d.split('/').some(isToolDir)) return null;       // 工具目录不配当模块（d 为空 = codeRoot 自己，合法）
     const name = slug(d) || (d ? 'module-' + (mods.size + 1) : 'app');  // 非 ASCII 目录名：slug 会清空，给占位短码但保留真 dir
-    const cur = mods.get(name) || { name, dir: d || null, controllersSeen: false };
-    if (controllers) cur.controllersSeen = true;
-    mods.set(name, cur);
+    let cur = mods.get(name);
+    if (!cur) { cur = { name, dir: d || null, entryDirHits: [], controllerFileCount: 0 }; mods.set(name, cur); }
+    return cur;
   };
   // 1) maven 多模块清单（<module> 可写多级相对路径）
   const pom = path.join(cwd, 'pom.xml');
@@ -147,33 +156,68 @@ function detectModules(cwd) {
       const rel = path.relative(cwd, path.resolve(cwd, String(d[1]).trim().replace(/[\\/]+$/, '')))
         .split(path.sep).join('/');
       if (!rel || rel.startsWith('..')) continue;              // 越界模块（../shared）不进清单
-      add(rel, false);
+      ensure(rel);
     }
   }
-  // 2) 真走到 controller 包：给 1) 补 controllersSeen，并兜住没有 pom 的仓
+  // 2) 真走源码采入口信号：记“命中的是哪个目录名”（不是记 boolean），并数 `*Controller.java`；
+  //    顺带兜住没有 pom 的仓（ownerDirOf 命中即建模块）。
   (function walk(dir, depth) {
     if (depth > 8) return;
     let entries; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
-      if (!e.isDirectory() || isToolDir(e.name)) continue;
+      if (isToolDir(e.name)) continue;
       const full = path.join(dir, e.name);
-      if (/^(controller|controllers|web)$/i.test(e.name)
-          && /[\\/]src[\\/]main[\\/]java[\\/]/.test(path.sep + path.relative(cwd, full))) {
+      if (e.isDirectory()) {
+        if (ENTRY_DIR_RE.test(e.name)
+            && /[\\/]src[\\/]main[\\/]java[\\/]/.test(path.sep + path.relative(cwd, full))) {
+          const owner = ownerDirOf(full, cwd);
+          if (owner !== null) {
+            const m = ensure(owner);
+            const hit = e.name.toLowerCase();
+            if (m && !m.entryDirHits.includes(hit)) m.entryDirHits.push(hit);
+          }
+        }
+        walk(full, depth + 1);
+      } else if (e.isFile() && /Controller\.java$/i.test(e.name)) {
         const owner = ownerDirOf(full, cwd);
-        if (owner !== null) add(owner, true);
+        if (owner !== null) { const m = ensure(owner); if (m) m.controllerFileCount++; }
       }
-      walk(full, depth + 1);
     }
   })(cwd, 0);
   return [...mods.values()].slice(0, 40);
 }
 
-// ---- 模块自己的入口 glob（相对 effectiveRoot = codeRoot）----
-export function entryPatternOf(m) {
+// ---- 入口 anchor 候选（相对 effectiveRoot = codeRoot）----
+// entryPattern 的语义是“这个模块的**学习起点**”，不是“controller 定位器”：起点可以是入口包目录、
+// 类名后缀、（反向学习时）DAO/Mapper 文件，形态由用户定。这里只根据**真正命中的信号**产候选：
+//   ① 恰好命中一个入口目录 → 用那个真名拼精确 glob（web/ 就发 web/，不再一律塞 controller/）——这是旧 bug 的正解；
+//   ② 命中多个入口目录 → 每个都列候选，但歧义 → needsUserInput；
+//   ③ 零目录命中但有 `*Controller.java` → 给类名兜底候选，仍属“猜哪层是入口”→ needsUserInput；
+//   ④ 什么都没有 → 无候选，needsUserInput（由 entryPatternOf 落 **/*.java 超集：诚实的宽 > 伪精确的错）。
+export function entryCandidatesOf(m) {
   const head = m.dir ? m.dir + '/' : '';
-  return m.controllersSeen
-    ? head + 'src/main/java/**/controller/*.java'   // 真看到 controller 包：精确
-    : head + 'src/main/java/**/*.java';             // 只有 pom：给超集，不给空匹配
+  const base = head + 'src/main/java/';
+  const dirs = (m.entryDirHits || []).filter(Boolean);
+  const candidates = [];
+  if (dirs.length === 1) {
+    candidates.push(base + '**/' + dirs[0] + '/*.java');      // 唯一目录命中：精确且不猜
+    return { candidates, needsUserInput: false };
+  }
+  if (dirs.length > 1) {
+    for (const d of dirs) candidates.push(base + '**/' + d + '/*.java');
+  } else if ((m.controllerFileCount || 0) > 0) {
+    candidates.push(base + '**/*Controller.java');             // 类名兜底（常见 Spring：包名乱但类名标准）
+  }
+  return { candidates, needsUserInput: true };                 // 多命中 / 类名派 / 零命中：一律问
+}
+
+// ---- 模块学习起点 anchor 的默认 glob（用户未确认时的落盘值）----
+// 取候选的第一个；无候选则给 **/*.java 超集。用户答复经 applyStructuralOverrides 权威覆盖本值。
+export function entryPatternOf(m) {
+  const { candidates } = entryCandidatesOf(m);
+  if (candidates.length) return candidates[0];
+  const head = m.dir ? m.dir + '/' : '';
+  return head + 'src/main/java/**/*.java';                    // 只有 pom / 无任何入口信号：给超集，不给空匹配
 }
 
 // ---- 多模块仓的 packageRoot 候选（只看 codeRoot 一层永远探不到）----
@@ -287,9 +331,13 @@ export function scanProject(cwd) {
   const bd = pickBranch(/^(develop|dev|feature.*)$/i);
   const detected = { prod: bp.detected, uat: bu.detected, dev: bd.detected };
 
-  // 没有 pom 也没有 controller 包时给一个兜底模块（dir=null → codeRoot 相对）
-  const modulePlans = (mods.length ? mods : [{ name: 'app', dir: null, controllersSeen: false }])
-    .map(m => ({ ...m, entryPattern: entryPatternOf(m) }));
+  // 没有 pom 也没有入口信号时给一个兜底模块（dir=null → codeRoot 相对）。
+  // 每个模块携 entryCandidates/entryNeedsUserInput（候选≠结论）；entryPattern = 候选首个，无则超集。
+  const modulePlans = (mods.length ? mods : [{ name: 'app', dir: null, entryDirHits: [], controllerFileCount: 0 }])
+    .map(m => {
+      const { candidates, needsUserInput } = entryCandidatesOf(m);
+      return { ...m, entryCandidates: candidates, entryNeedsUserInput: needsUserInput, entryPattern: entryPatternOf(m) };
+    });
   const pkgCands = packageRoot
     ? { candidates: [], common: null, partial: false }
     : detectPackageRootCandidates(abs, mods);
@@ -310,6 +358,9 @@ export function scanProject(cwd) {
     modules: modulePlans.map(m => m.name),
     modulePlans,
     modulesDetected: mods.length > 0,
+    // 入口 anchor 不确定的模块（多命中/类名派/零命中）：命令层必须逐个问“这个模块的入口在哪 / 按什么文件名”，
+    // 同 branchesNeedsUserInput/packageRootCandidates 那套“探测 vs 猜测分开、探不到就必问、绝不猜”纪律。
+    modulesNeedEntryInput: modulePlans.filter(m => m.entryNeedsUserInput).map(m => m.name),
     branches: {
       prod: bp.name,
       uat:  bu.name,
@@ -360,13 +411,37 @@ export function applyStructuralOverrides(plan, values) {
     if (list.length) {
       const known = new Map((p.modulePlans || []).map(mm => [mm.name, mm]));
       p.modulePlans = list.map(n => known.get(n) || {
-        name: n, dir: null, controllersSeen: false,
-        // 用户新给的名字：只有 codeRoot 下真存在同名目录才能拼出模块前缀
+        name: n, dir: null, entryDirHits: [], controllerFileCount: 0, entryCandidates: [], entryNeedsUserInput: true,
+        // 用户新给的名字：只有 codeRoot 下真存在同名目录才能拼出模块前缀；无入口信号 → 超集 + 待问
         entryPattern: fs.existsSync(path.join(p.codeRoot, n))
           ? n + '/src/main/java/**/*.java' : 'src/main/java/**/*.java',
       });
       p.modules = p.modulePlans.map(mm => mm.name);
     }
+  }
+  // ---- 入口 anchor 权威覆盖：用户答什么就是什么，L1 不判它像不像 controller ----
+  // 两种收法：v.moduleEntries = { 模块名: glob }，或扁平 v['entryPattern.<模块名>']。
+  // 形态自由（入口包目录 / `*Controller.java` / `*Mapper.java` 反向起点 / 某个 URL…）——这
+  // 正是把 entryPattern 从“controller 定位器”降级成“学习起点 anchor”的落点：命中不确定的模块
+  // （modulesNeedEntryInput）由命令层逐个问，答案回填这里；不直接改共享对象（浅拷贝不够，会漏污染原 plan）。
+  const entryOverrides = {};
+  if (v.moduleEntries && typeof v.moduleEntries === 'object' && !Array.isArray(v.moduleEntries)) {
+    for (const [rawName, glob] of Object.entries(v.moduleEntries)) {
+      const nm = slug(rawName);
+      if (nm && isGiven(glob)) entryOverrides[nm] = glob;
+    }
+  }
+  for (const [k, val] of Object.entries(v)) {
+    const mt = /^entryPattern\.(.+)$/.exec(k);
+    if (mt) { const nm = slug(mt[1]); if (nm && isGiven(val)) entryOverrides[nm] = val; }
+  }
+  if (Object.keys(entryOverrides).length && Array.isArray(p.modulePlans)) {
+    p.modulePlans = p.modulePlans.map(mm =>
+      isGiven(entryOverrides[mm.name])
+        ? { ...mm, entryPattern: String(entryOverrides[mm.name]).trim(), entryNeedsUserInput: false }
+        : mm);
+    p.modules = p.modulePlans.map(mm => mm.name);
+    p.modulesNeedEntryInput = p.modulePlans.filter(mm => mm.entryNeedsUserInput).map(mm => mm.name);
   }
   for (const k of BRANCH_KEYS) {
     if (v['branches.' + k]) {

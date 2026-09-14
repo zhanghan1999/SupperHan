@@ -143,6 +143,8 @@ coveredControllers: N
 
 本列 = 该 batch 所在调用链的**可达文件全集**（同一 batch 内各行的值相同，取该 batch 各方法 `touched_files` 的并集）。
 
+> **反向索引复用同一列**：`sources` 存的是正向链（route → 该链可达的文件全集）；把它**倒排**就得到反向索引（给定一个文件 → 它出现在哪些 route 的可达集里）。`/supperH-bug` 的 `codeFile` 锚点（`classifyAnchor`/`matchRows` in `scripts/fastpath-gate.mjs`）就是拿用户给的源码文件遍历各行、看 `sources` 是否含该文件来反查 route 的——**确定性、不需 AST**（AST 级精确反查另归 F-15c）。所以 writer 写全 `sources`（含起点、Controller、Service、DAO、Mapper.xml）不只是为了 G4b 新鲜度，也是反向 anchor 能反查到的前提：少写一个文件，那个文件当起点时就反查不出对应 route。反向起点（学习时入口选的是 Service/DAO）下，analyzer 已沿调用链把上游 route 连回本表，故那些 route 行的 `sources` 天然含起点的 Service/DAO 文件，倒排即命中。
+
 - **形态**：相对代码库根（`EFFECTIVE_ROOT`）的 **POSIX 路径**，`;` 分隔，无空格、无盘符、无 `./` 前缀。与 `git diff --name-only` 的输出同形，否则交集永远为空。
 - **必含 Controller 自身文件**（理由见 `agents/supperH-prelearn-analyzer.md` 步骤 3.5）。不为"省字节"剔掉它 —— 剔了等于打开漏杀口子。
 - **追不全时写 `-`（而不是写空、也不是少写几个）**。`-` = "无法安全判定" → G4b **fail-closed 直接 35**。这一条是本列存在的根基：如果"不知道"被当成"无依赖"，整个修复就是把误杀换成漏杀。

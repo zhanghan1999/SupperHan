@@ -65,7 +65,11 @@ export const DEFAULTS = Object.freeze({ maxDiffLines: 40, maxFiles: 2 });
 export const HARD_CAPS = Object.freeze({ maxDiffLines: 80, maxFiles: 4 });
 
 /** 一期允许直接参与快路径的锚点类型 */
-const SUPPORTED_KINDS = Object.freeze(['route', 'fqn', 'fileLine']);
+// codeFile：给一个源码文件路径（Controller/Service/DAO/Mapper 皆可乐），经 index.md 的
+// `sources` 列（每行 = 该 route 调用链可达文件全集）**倒排**反查它落在哪些 route 的可达集里。
+// 这是「反向 anchor」：正向是 route→文件，反向是文件→route，靠现成的 sources 列做确定性匹配，
+// 不需 AST（AST 级精确反查归 F-15c）。
+const SUPPORTED_KINDS = Object.freeze(['route', 'fqn', 'fileLine', 'codeFile']);
 
 /**
  * A1 类锚点（traceId / ticketNo）：字面量本身不含代码位置，必须先经 driver（内网驱动
@@ -121,6 +125,19 @@ function looksLikeRoute(s) {
 }
 
 /**
+ * 源码文件锚点判据：单个无空格 token、以已知源码扩展名结尾。
+ * 必须**先于 route 判**：绝对路径 `/x/y/Foo.java` 会被 looksLikeRoute 的 `/^\//` 抢走。
+ * 没有 HTTP route 会以 `.java/.kt/.xml/.sql` 等结尾（`.do/.action` 不在集内），无冲突；
+ * `Foo.java:42`（fileLine）以行号收尾、不匹配本正则，也不冲突。
+ */
+const CODE_FILE_RE = /^[^\s]+\.(?:java|kt|kts|scala|groovy|xml|sql)$/i;
+
+/** 归一化源码文件路径为匹配键：反斜杠→斜杠、剥前导 `./`、小写（Windows 路径大小写不敏感） */
+function normCodeFile(s) {
+  return String(s).replace(/\\/g, '/').replace(/^\.\/+/, '').toLowerCase();
+}
+
+/**
  * A1 锚点的形态判据。**宁可少识别也不得多识别**：两个正则都要求带上稳定的
  * 英文/中文标签（trace_id / 工单号 / #12345 等），因为把一串无标签的随机字符
  * 认成 traceId 只会污染 anchorKind 统计（它无论如何都是 30 出局，不会漏杀）。
@@ -133,6 +150,9 @@ const TICKET_RE = /^(?:#|\b(?:ticket|issue|bug|jira)\b|工单|缺陷|需求)(?:\
 export function classifyAnchor(raw) {
   const s = String(raw ?? '').replace(/^["'`]+|["'`]+$/g, '').trim();
   if (!s) return { kind: 'none', value: '', supported: false, reason: 'empty anchor' };
+
+  // codeFile 先于 route：绝对路径 `/...` 会被 looksLikeRoute 误抓（见 CODE_FILE_RE 注释）。
+  if (CODE_FILE_RE.test(s)) return { kind: 'codeFile', value: s, file: normCodeFile(s), supported: true };
 
   if (looksLikeRoute(s)) return { kind: 'route', value: normRoute(s), supported: true, route: normRoute(s) };
 
@@ -318,6 +338,17 @@ export function matchRows(rows, anchor) {
       const rc = String(r.controller).split(/[.$]/).pop().toLowerCase();
       return rc === cls && String(r.method).toLowerCase() === mtd;
     });
+  }
+  // codeFile（反向 anchor）：把用户给的源码文件经 sources 列倒排——命中任一行的可达文件集。
+  // 双向后缀匹配：用户可给仓内相对路径（stored.endsWith(want)）或绝对/长路径（want.endsWith(stored)），
+  // 也可只给文件名。sources 用 `/` 边界比对，避免 FooOrderMapper.xml 误配 OrderMapper.xml。
+  // usable=false（空/`-`/形态不对）的行 files 为空 → 天然不参与反查（与 G4b fail-closed 一致）。
+  if (anchor.kind === 'codeFile') {
+    const want = anchor.file;
+    return rows.filter((r) => (r.sources?.files || []).some((p) => {
+      const q = normCodeFile(p);
+      return q === want || q.endsWith('/' + want) || want.endsWith('/' + q);
+    }));
   }
   // fileLine：类名匹配 + 行号落在 lines 区间内（区间为 `-` 时视为可用但记低置信）
   const cls = String(anchor.className).toLowerCase();

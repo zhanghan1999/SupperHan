@@ -766,6 +766,18 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 
 **取代关系**：本节落地取代 §10.12 / §10.14 / §10.16 / §10.19 中 `menu` / `menus/` / `菜单配置` / `--menu` 的旧措辞，以及 §10.16 里 `renderMenuConfig` 逐行 `setLine` 的采集机制描述（v2 已改直接装配 + `YAML.stringify`）。那些是 dated 台账，按 append-only 保留原文不删，**以本节为准**。**F-15 的 F-15c–e（六段产物骨架 / 键依赖图 hops / `evidence` 轴门禁 / 下钻树形与探测优先纪律）仍待做**，本轮只落"改名 + v2 discovery 采集 + schema"这一格；全文见 `docs/screen-partition.md`。
 
+### 10.21 学习起点 anchor 去 controller 硬编码 + 反向 anchor（F-16，与 F-15 通用性不变式同脉）
+
+**缺陷（实测）**：某项目实际布局 `.../web/*Controller.java`，`/supperH-init` 扫描却生成 `entryPattern = .../controller/*.java`（零命中），学习数据永远空 → G0 永远出局。根因是 `init-project.mjs` 的双重硬编码：`detectModules` 认 `{controller, controllers, web}` 三种目录名都只置一个布尔 `controllersSeen=true`（把"命中的是哪个名字"这信息丢了），而 `entryPatternOf` 一律发 `controller/*.java`——L1 把"入口包必叫 controller"当成了事实。
+
+**决策（D+）**：`entryPattern` 从"controller 定位器"**降级为"这个模块的学习起点 anchor"**——形态由用户定（入口包目录 / `*Controller.java` 类名后缀 / 反向起点 DAO·Mapper·Service 的 glob），L1 不预设任何一种。三条纪律：
+
+- **记真正命中的信号，不再压成布尔**：`detectModules` 返回 `{entryDirHits: string[], controllerFileCount: number}`。恰好命中一个入口目录 → 用**那个真名**拼精确候选（`web/` 就发 `web/`，这是旧 bug 的正解）；多目录命中 → 每个都列候选但判歧义；零目录命中但有 `*Controller.java` → 类名兜底候选；什么都没有 → 无候选。
+- **探测只产候选，不作结论**：`entryCandidatesOf` 产 `entryCandidates[]`，`entryPattern` 暂取候选首个；命中不唯一/零命中的模块进 `modulesNeedEntryInput[]`（`entryNeedsUserInput=true`），命令层**必须逐模块问用户**（对齐 F-15 探测优先纪律：能自己试出的不准问，只在零命中/歧义/不可判才问）。用户答案经 `applyStructuralOverrides` 的 `moduleEntries`（或扁平 `entryPattern.<名>`）**权威覆盖**，克隆对象避免污染原 plan。零信号时落 `**/*.java` 超集——**诚实的宽 > 伪精确的错**。
+- **反向 anchor（正向 + 反向）**：`fastpath-gate.mjs` 的 `classifyAnchor` 新增 `codeFile` 类型（源码文件路径，**不限于 Controller**，判据须**先于 route**，否则绝对路径 `/...` 被 `looksLikeRoute` 抢走）；`matchRows` 用 index.md 的 `sources` 列**倒排**反查"给定文件 → 它出现在哪些 route 的可达集"（双向后缀匹配、`/` 边界比对避免 `FooController` 误配 `Controller`）。`sources` 列本就是正向链文件全集，倒排即得反向索引——**确定性、可测、不需 AST**（AST 级精确反查仍归 F-15c）。`codeFile` 加入 `SUPPORTED_KINDS` 与 `project.schema.yaml` 的 `allowAnchorKinds` 枚举。
+
+**通用性不变式**：与 F-15 同源——L1 可内置探测能力（认得"看着像入口"的目录名），不可内置唯一出口（认定入口必在 `controller/` 下）。`agents/supperH-prelearn-analyzer.md` 工作流改为**双向追踪**（正向追下游 Service/DAO、反向追上游入口 route），`skills/supperH-prelearn/SKILL.md` 记明 `sources` 列的正反双用契约。
+
 ---
 ## 11. 一期范围与二期规划
 

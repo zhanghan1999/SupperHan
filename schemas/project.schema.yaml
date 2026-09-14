@@ -87,7 +87,7 @@ properties:
           pattern: "^[a-z][a-z0-9-]{0,30}$"
         entryPattern:
           type: string
-          description: "Glob relative to codeRoot, e.g. '**/order/controller/*.java'"
+          description: "Learning-start anchor: a glob relative to codeRoot. NOT hardcoded to controllers — the entry form is whatever the user declares (an entry package dir like web/ or controller/, a class-suffix glob like **/*Controller.java, or a reverse-start DAO/Mapper/service glob). L1 never presumes a controller package exists."
         description:
           type: string
 
@@ -209,7 +209,7 @@ properties:
         description: "Optional anchor-kind whitelist. Absent/null = unrestricted (any kind the gate supports). Listing a subset narrows it; a directly-usable kind omitted here is rejected with exit 30."
         items:
           type: string
-          enum: [route, fqn, fileLine]
+          enum: [route, fqn, fileLine, codeFile]
 
   # ────────────────────────────────────────────────────────────────
   # git 交付与回滚快照（skills/supperH-auto-fix「Snapshot 语义」/ docs/architecture.md §10.10）。

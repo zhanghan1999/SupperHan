@@ -123,6 +123,20 @@ test('classifyAnchor：三类一期可用锚点 + 两类明确不支持', () => 
   }
 });
 
+test('classifyAnchor：codeFile 反向锚点（源码文件路径，不限于 Controller）', () => {
+  const svc = classifyAnchor('src/main/java/com/x/OrderServiceImpl.java');
+  assert.equal(svc.kind, 'codeFile');
+  assert.equal(svc.supported, true, 'codeFile 一期直用：经 sources 列倒排反查');
+  assert.equal(svc.file, 'src/main/java/com/x/orderserviceimpl.java', '归一为小写正斜杠匹配键');
+  assert.equal(classifyAnchor('OrderMapper.xml').kind, 'codeFile', 'DAO/Mapper 文件也是合法起点');
+  assert.equal(classifyAnchor('src\\main\\Foo.kt').kind, 'codeFile', '反斜杠路径同样识别');
+  assert.equal(classifyAnchor('/home/x/repo/src/main/java/com/x/Foo.java').kind, 'codeFile',
+    '绝对路径不得被 looksLikeRoute 的 /^\// 抢成 route');
+  assert.equal(classifyAnchor('OrderController.java:88').kind, 'fileLine', '带行号仍走 fileLine，不被 codeFile 抢');
+  assert.equal(classifyAnchor('/api/order/create.do').kind, 'route', '.do 不在源码扩展名集，仍是 route');
+  assert.equal(classifyAnchor('/api/v1/order/detail').kind, 'route', '无扩展名的 path 不误判为 codeFile');
+});
+
 test('parseIndexMarkdown：frontmatter + 首张 route 表 + 等级缺省保守降为 L1', () => {
   const p = parseIndexMarkdown(indexDoc());
   assert.equal(p.frontmatter.learnedAtCommit, HEAD);
@@ -174,6 +188,39 @@ test('matchRows：route 全等 / 仅 path 匹配多变体 / fqn 末段 / 行号�
   assert.equal(matchRows(rows, classifyAnchor('OrderController.java:50')).length, 1, '50 落在 40-88');
   assert.equal(matchRows(rows, classifyAnchor('OrderController.java:200')).length, 0, '200 越界');
   assert.equal(matchRows(rows, classifyAnchor('NoteController.java:999')).length, 1, 'lines 为 - 时视为可用');
+});
+
+test('matchRows：codeFile 反向锚点——经 sources 列倒排（文件→route），含双向后缀与边界', () => {
+  const { rows } = parseIndexMarkdown(indexDoc());
+  // OrderServiceImpl.java 在 batch-01 三行的 sources 里 → 反查命中 3 条 route
+  assert.equal(matchRows(rows, classifyAnchor('src/main/java/com/x/OrderServiceImpl.java')).length, 3);
+  // 只给文件名（相对 stored 是后缀）也要命中
+  assert.equal(matchRows(rows, classifyAnchor('OrderServiceImpl.java')).length, 3, '只给文件名也能倒排');
+  // LegacyController.java 在 batch-02 两行 → 2
+  assert.equal(matchRows(rows, classifyAnchor('src/main/java/com/x/LegacyController.java')).length, 2);
+  // 绝对/长路径：stored 是 want 的后缀（want.endsWith('/'+q)）
+  assert.equal(matchRows(rows, classifyAnchor('/home/x/repo/src/main/java/com/x/NoteController.java')).length, 2,
+    '用户给绝对路径时 stored 为后缀也要命中');
+  // 不存在于任何 sources → 零命中
+  assert.equal(matchRows(rows, classifyAnchor('src/main/java/com/x/Ghost.java')).length, 0);
+  // 边界：只给半截名字不得在 / 边界外误配（controller.java 不得命中 ordercontroller.java）
+  assert.equal(matchRows(rows, classifyAnchor('Controller.java')).length, 0,
+    '必须在 / 边界匹配，避免 FooController 误配');
+});
+
+test('门禁·codeFile 反向 anchor：唯一命中 route 可一路放行，多命中判 31', () => {
+  // 一行一个独立源文件（不共用 sources）：OnlyService.java 只属于 POST /api/only
+  const uniq = makeContext(indexDoc({ rows: [
+    '| POST /api/only | OnlyController | only | batch-01.md | 10-20 | L3 | src/main/java/com/x/OnlyController.java;src/main/java/com/x/OnlyService.java |',
+    '| GET /api/other | OtherController | other | batch-02.md | 5-9 | L3 | src/main/java/com/x/OtherController.java |',
+  ] }));
+  // 起点给一个 Service（非 Controller）→ sources 倒排反查唯一 route → G3 L3 足→ 放行
+  const r = gate(uniq, 'src/main/java/com/x/OnlyService.java', 'src/main/java/com/x/OnlyService.java 返回的创建人字段为空，期望返回创建人姓名');
+  assert.equal(r.status, EXIT.PASS, '反向起点唯一命中应能走完整门禁');
+  assert.equal(r.anchorResolved.route, 'POST /api/only', '反查出的 route 作为锁定的唯一锁点');
+  // 默认 indexDoc 里 OrderServiceImpl.java 属 batch-01 三行 → 多命中 31
+  const ok = makeContext(indexDoc());
+  assert.equal(gate(ok, 'src/main/java/com/x/OrderServiceImpl.java', 'src/main/java/com/x/OrderServiceImpl.java 字段为空，期望返回').status, EXIT.AMBIGUOUS, '一个文件属多 route → 歧义 31');
 });
 
 test('scanVeto：命中面覆盖三类，且典型快路径描述不误伤', () => {

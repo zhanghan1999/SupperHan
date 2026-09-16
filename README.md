@@ -123,7 +123,8 @@ supper-Han-java/
 ├── mcp-skeleton/          MCP 壳 server + 共享契约包 supperh_contract（mcp 通道；零凭据）
 ├── scripts/               resolve-project / fastpath-gate / git-preflight / sync-assets /
 │                          validate-project / resolve-private-root / setup / detect-ide /
-│                          bootstrap / init-project / driver-registry / migrate-registry / flow-engine
+│                          bootstrap / init-project / driver-registry / migrate-registry / flow-engine /
+│                          git-deliver-check（提交与推送前的交付对账：覆盖清单 ↔ git 实况）
 ├── .qoder/rules/          项目无关红线（零占位符，clone 即生效）
 ├── .githooks/             降级式 pre-commit
 ├── docs/                  架构文档 + 占位符清单 + 页面档案模型设计（F-15，未实现）

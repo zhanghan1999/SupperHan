@@ -48,11 +48,17 @@ function git(root, args, timeout = GIT_TIMEOUT_MS) {
  * `-c core.quotePath=false` 不是可选项：中文文件名被转义成 `"\346\226\207..."` 后，
  * 下游拿它与 plan 的 `touched_files` 比对永远对不上，"脏文件命中计划内文件"这条
  * 停问判据就静默失效（同一个坑见 §10.7 表）。
+ *
+ * `--untracked-files=all` 也不是可选项：默认的 `normal` 会把未跟踪**目录**折叠成
+ * 一行目录名，于是「这个目录里新建了 4 个文件」在清单上只剩 `src/new/` 一条 ——
+ * 下游任何按文件粒度做的比对都会漏掉它们（漏提交事故的机制级形态，见
+ * `scripts/git-deliver-check.mjs` 头注）。
  * 失败回 `null` = 不知道；空数组 = 确认干净。
  * @returns {string[]|null}
  */
 export function listDirtyFiles(root) {
-  const out = git(root, ['-c', 'core.quotePath=false', 'status', '--porcelain'], STATUS_TIMEOUT_MS);
+  const out = git(root, ['-c', 'core.quotePath=false', 'status', '--porcelain',
+    '--untracked-files=all'], STATUS_TIMEOUT_MS);
   if (out === null) return null;
   const files = [];
   for (const line of out.split(/\r?\n/)) {

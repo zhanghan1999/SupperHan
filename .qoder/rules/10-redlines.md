@@ -29,6 +29,8 @@
 - **禁止把 L2 值塞进 L1 prompt**：任何形式的"这段文字只在 A 项目有意义"的常量都不允许写进 `agents/commands/skills/` 里；必须写成 `PROJECT.<dot.path>` 占位符。
 - **禁止未替换的占位符进入运行时**：sync 阶段若检测到任何双花括号包裹的占位符残留 → 必须阻断，不许降级为 warning。
 
+- **提交 / 推送前必须过交付对账门禁** — 用户明示下达提交/推送指令时，第一件事不是 `git add`，是跑 `scripts/git-deliver-check.mjs`：拿开发 agent 落盘的 `artifacts` 覆盖清单与 `git status --untracked-files=all` + 快照 ref 的 diff **双向对账**，退出码非 `0` 一律不得提交。未跟踪文件（尤其本次新建的）未经用户明示裁决，禁止用 `git commit -a` 或显式文件列表「顺手一提」—— `-a` 只收已跟踪文件，新建的会静默漏掉，且漏掉的痕迹不存在于任何地方。本仓任何情况下都不自动 commit、不自动 push：只有用户明示才做，而那一次也必须先过这道门禁。
+
 ## R3.5 运行期项目解析门禁（多并发根因）
 
 L1 产物**项目无关**：sync 只烤 `TOOL_ROOT / PRIVATE_ROOT / DRIVERS_ROOT / SYNC_TIMESTAMP` 四个工具级恒定值；任何项目级路径（`CONTEXT_ROOT / TASKS_ROOT / EFFECTIVE_ROOT / PACKAGE_ROOT_PATH / PROJECT.*`）在产物里一律保留为运行期 token，由主 agent 在步骤 0 用解析器输出填充。

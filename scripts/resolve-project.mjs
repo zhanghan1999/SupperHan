@@ -120,6 +120,25 @@
 //   (`fastPath.intent`) on *every* code, because step 1.6 runs on both paths - 40 only
 //   decides whether routing is blocked, not whether the echo is owed.
 //
+//   --flow-readiness            READ-ONLY prerequisite gate for /supperH-learn --flow (needs code + screens
+//                                   learning before flow inference can start). NEVER writes to disk.
+//                                   --page <route>     closure scope = the module owning that page + the modules of
+//                                                      pages reachable through the existing flows generation.
+//                                   Without --page (or with --strict) the scope is every declared module.
+//                                   Emits payload.flowReadiness = { ready, code:{...}, screens:{...}, blockers[] }.
+//                                   blockers non-empty -> exit 41, never 0. A project having no database
+//                                   registered is NEVER a blocker here (§4-D: 接不接库与 flow 能否跑无关).
+//   --flow-plan                 READ-ONLY deterministic sharding plan for --flow --all: groups the routes found in
+//                                   the code partitions' index.md by their `controller` column, then chunks them
+//                                   (<= 3 routes per part, <= 2 parts per wave - both fixed in flow-engine.mjs,
+//                                   not configurable). Same input -> byte-identical output, independent of
+//                                   directory traversal order. Emits payload.flowPlan; no learning data -> 41.
+//   --page / --strict           Only meaningful with --flow-readiness / --flow-plan; given alone -> 36.
+//
+//   41 FLOW_NOT_READY - deliberately outside the 30-37 band like 40: that band means "fall back to the
+//      full bug-fixing path", while 41 means "a prerequisite learning run is owed". It is produced only by
+//      the two --flow-* read-only modes.
+//
 // Invariant (anchor-gate mode): exit 0 implies fastPath.eligible === true AND
 // fastPath.anchorResolved is present. "We never got that far" is always 36 - returning
 // 0 there would let the orchestrator enter the fast path with no anchor (R2 bypass
@@ -131,7 +150,8 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { pathToFileURL } from 'node:url';
 import { resolvePrivateRoot } from './resolve-private-root.mjs';
-import { evaluateFastPath, verifyImpactReport, readFreshness, EXIT } from './fastpath-gate.mjs';
+import { evaluateFastPath, verifyImpactReport, readFreshness, readHeadCommit, parseIndexMarkdown, EXIT } from './fastpath-gate.mjs';
+import { buildPlan, normalizeRoute, readCurrentGen as readFlowsCurrentGen, readPrevGeneration as readFlowsGeneration, MAX_DEPTH as FLOW_MAX_DEPTH, EXIT as FLOW_EXIT } from './flow-engine.mjs';
 import { collectGitFacts, SNAPSHOT_REF_PREFIX } from './git-preflight.mjs';
 import { dbRoleSlot } from './validate-project.mjs';
 
@@ -613,6 +633,234 @@ export function resolveProject(opts = {}) {
   };
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// flow 模式的**只读**前置门禁与分片计划（需求书 §6 步骤 0.6 与步骤 2a）
+//
+// 为什么这两件事住在脚本里而不是主命令里：`10-redlines.md:45` 要求"读私有根
+// index.md 的取数必须下沉到脚本，不得为此放开 external_directory"——主命令既读不到
+// `{{CONTEXT_ROOT}}`，也不该自己分组（分片决定可重生成性，必须是确定性计算）。
+// 本节的两个函数**一行也不写**：不建目录、不切指针、不碰 CURRENT。
+// ───────────────────────────────────────────────────────────────────────────
+
+/** 读一个分区当前代的反查表行（拿不到一律 `[]`，绝不"尽力解析"） */
+function readPartitionRows(indexFile) {
+  if (!indexFile) return [];
+  try {
+    const parsed = parseIndexMarkdown(fs.readFileSync(indexFile, 'utf8'));
+    return Array.isArray(parsed.rows) ? parsed.rows : [];
+  } catch { return []; }
+}
+
+/** 页面档案里的页面键集合（screens 代次 index.md 的 route 列）；取不到返回 null */
+function screenPageKeys(rows) {
+  const s = new Set(rows.map((r) => normalizeRoute(r.route)).filter(Boolean));
+  return s.size ? s : null;
+}
+
+/** 已学 code 分区里 route → 所属模块（按模块名字典序建表，同 route 首见者胜 → 与遍历顺序无关） */
+function routeModuleMap(modulesRows) {
+  const map = new Map();
+  for (const m of Object.keys(modulesRows).sort()) {
+    for (const r of modulesRows[m]) {
+      const k = normalizeRoute(r.route);
+      if (k && !map.has(k)) map.set(k, m);
+    }
+  }
+  return map;
+}
+
+/**
+ * 闭包门槛（D1=B）：目标页所属模块 + 现有 flows 代次里沿 prev/next 双向可达页的所属模块。
+ * 首轮没有 flows 代次 → 闭包就是目标模块自己（不能拿"还不知道的下游"当阻塞理由）。
+ */
+function flowClosureModules(pageKey, moduleOfRoute, flowsGen) {
+  const seed = moduleOfRoute.get(pageKey);
+  const found = new Set(seed ? [seed] : []);
+  if (!flowsGen) return found;
+  const live = (flowsGen.edges || []).filter((e) => e.status !== 'superseded');
+  let frontier = [pageKey];
+  const seen = new Set(frontier);
+  for (let depth = 0; depth < FLOW_MAX_DEPTH && frontier.length; depth++) {
+    const next = [];
+    for (const k of frontier) {
+      for (const e of live) {
+        const other = e.page === k ? e.prev_page : (e.prev_page === k ? e.page : null);
+        if (!other || seen.has(other)) continue;
+        seen.add(other); next.push(other);
+        const m = moduleOfRoute.get(other);
+        if (m) found.add(m);
+      }
+    }
+    frontier = next;
+  }
+  return found;
+}
+
+const FLOW_BLOCKERS = {
+  SCREENS_NOT_LEARNED: {
+    meaning_zh: '页面档案（screens 分区）尚未学习：flow 的节点键与范围判定都建立在页面清单上',
+    action_zh: '先跑 `/supperH-learn --screen`'
+  },
+  CODE_NOT_LEARNED: {
+    meaning_zh: '本轮闭包内的模块还没有代码学习代次（没有可用的 CURRENT / index.md）',
+    action_zh: '先跑 `/supperH-learn --module <模块名>`（缺哪个模块本条会点名）'
+  },
+  TARGET_NOT_FOUND: {
+    meaning_zh: '--page 给的页面不在页面档案清单里：解析不到页面就停，不猜“最像的那个”',
+    action_zh: '核对页面 route，或先跑 `/supperH-learn --screen` 把该页纳入清单'
+  },
+  TARGET_ROUTE_NOT_INDEXED: {
+    meaning_zh: '--page 目标所属模块的代码反查表里没有这条 route，无法确定它归哪个模块',
+    action_zh: '先跑 `/supperH-learn --module <该页所属模块>`（或 --mode update 补索引）'
+  },
+  CODE_STALE: {
+    meaning_zh: '严格口径（--strict）要求所有模块的学习数据相对当前 HEAD 新鲜，存在过期模块',
+    action_zh: '对过期模块跑 `/supperH-learn --module <模块名> --mode update`'
+  },
+  SCREENS_STALE: {
+    meaning_zh: '严格口径（--strict）要求页面档案也相对当前 HEAD 新鲜',
+    action_zh: '跑 `/supperH-learn --screen` 重学页面档案'
+  },
+  NO_CODE_ROWS: {
+    meaning_zh: '没有任何可用的 code 分区反查表行，分片计划无从产出',
+    action_zh: '先跑 `/supperH-learn --module <模块名>`'
+  }
+};
+
+function blockerOf(code, detail) {
+  const b = FLOW_BLOCKERS[code] || { meaning_zh: '未知阻塞码', action_zh: '上报本条 code' };
+  return { code, meaning_zh: b.meaning_zh, action_zh: b.action_zh, ...(detail ? { detail } : {}) };
+}
+
+/** 汇总一次 flow 只读取数（readiness 与 plan 共用的底子） */
+function collectFlowState(binding) {
+  const contextRoot = binding?.contextRoot;
+  const effectiveRoot = binding?.effectiveRoot;
+  const mods = [...new Set((Array.isArray(binding?.project?.modules) ? binding.project.modules : [])
+    .map((m) => String(m?.name ?? '').trim()).filter(Boolean))].sort();
+  const head = readHeadCommit(effectiveRoot);
+  const per = {};
+  const rowsOf = {};
+  for (const m of mods) {
+    const f = readFreshness({ contextRoot, module: m, effectiveRoot, headCommit: head });
+    per[m] = f;
+    rowsOf[m] = f.available ? readPartitionRows(f.indexFile) : [];
+  }
+  const screensFresh = readFreshness({ contextRoot, module: 'screens', effectiveRoot, headCommit: head });
+  const screensRows = screensFresh.available ? readPartitionRows(screensFresh.indexFile) : [];
+  const pageKeys = screenPageKeys(screensRows);
+  return {
+    head, mods, per, rowsOf, screensFresh, screensRows, pageKeys,
+    screens: {
+      available: screensFresh.available === true,
+      learnedAtCommit: screensFresh.learnedAtCommit ?? null,
+      headCommit: screensFresh.headCommit ?? head ?? null,
+      stale: screensFresh.stale === true,
+      page_count: pageKeys ? pageKeys.size : 0
+    },
+    moduleOfRoute: routeModuleMap(rowsOf),
+    flowsGen: safeReadFlowsGeneration(contextRoot)
+  };
+}
+
+/** 读现有 flows 代次（只为算闭包）。contextRoot 形态不对/读不到一律当"没有上一代" */
+function safeReadFlowsGeneration(contextRoot) {
+  try {
+    if (!contextRoot || !readFlowsCurrentGen(contextRoot)) return null;
+    return readFlowsGeneration(contextRoot);
+  } catch { return null; }
+}
+
+/**
+ * `--flow-readiness` 求值。**只读**。
+ * @returns {{payload:object, exitCode:number}}
+ */
+export function evaluateFlowReadiness(binding, { page, strict } = {}) {
+  const st = collectFlowState(binding);
+  const pageKey = page === undefined || page === null || String(page).trim() === '' ? null : normalizeRoute(page);
+  const blockers = [];
+
+  if (!st.screens.available) blockers.push(blockerOf('SCREENS_NOT_LEARNED'));
+
+  let required = [...st.mods];
+  if (pageKey) {
+    if (st.screens.available && st.pageKeys && !st.pageKeys.has(pageKey)) {
+      blockers.push(blockerOf('TARGET_NOT_FOUND', { page_key: pageKey }));
+    }
+    const closure = flowClosureModules(pageKey, st.moduleOfRoute, st.flowsGen);
+    if (!closure.size) {
+      blockers.push(blockerOf('TARGET_ROUTE_NOT_INDEXED', { page_key: pageKey }));
+    } else required = [...closure].sort();
+  }
+
+  const missing = required.filter((m) => !st.per[m]?.available);
+  if (missing.length) blockers.push(blockerOf('CODE_NOT_LEARNED', { modules: missing }));
+
+  if (strict) {
+    const staleMods = st.mods.filter((m) => st.per[m]?.available && st.per[m]?.stale);
+    if (staleMods.length) blockers.push(blockerOf('CODE_STALE', { modules: staleMods }));
+    if (st.screens.available && st.screens.stale) blockers.push(blockerOf('SCREENS_STALE'));
+    required = [...st.mods];
+  }
+
+  const payload = {
+    ready: blockers.length === 0,
+    strict: strict === true,
+    target_page_key: pageKey,
+    code: {
+      ready: required.length > 0 && required.every((m) => st.per[m]?.available),
+      head_commit: st.head ?? null,
+      modules_total: st.mods.length,
+      modules_ready: st.mods.filter((m) => st.per[m]?.available).sort(),
+      modules_required: required.sort(),
+      stale: st.mods.filter((m) => st.per[m]?.available && st.per[m]?.stale).sort(),
+      closure_source: pageKey ? (st.flowsGen ? 'page+existing-flows' : 'page-only(no flows generation yet)') : (strict ? 'all(strict)' : 'all')
+    },
+    screens: st.screens,
+    flows: { available: !!st.flowsGen, gen: safeFlowsGenName(binding?.contextRoot) },
+    blockers
+  };
+  return { payload, exitCode: blockers.length ? FLOW_EXIT.NOT_READY : FLOW_EXIT.OK };
+}
+
+function safeFlowsGenName(contextRoot) {
+  try { return contextRoot ? readFlowsCurrentGen(contextRoot) : null; } catch { return null; }
+}
+
+/**
+ * `--flow-plan` 求值（确定性分片）。**只读**，同输入必同字节输出。
+ * @returns {{payload:object, exitCode:number}}
+ */
+export function evaluateFlowPlan(binding, { page } = {}) {
+  const st = collectFlowState(binding);
+  const rows = [];
+  for (const m of st.mods.sort()) {
+    for (const r of (st.rowsOf[m] || [])) {
+      const k = normalizeRoute(r.route);
+      if (!k) continue;
+      rows.push({ route: k, controller: String(r.controller ?? '').trim(), module: m });
+    }
+  }
+  const pageKey = page === undefined || page === null || String(page).trim() === '' ? null : normalizeRoute(page);
+  const scoped = pageKey ? rows.filter((r) => r.route === pageKey) : rows;
+  if (!scoped.length) {
+    return {
+      payload: { ok: false, blockers: [blockerOf('NO_CODE_ROWS')], total_routes: 0, waves: [] },
+      exitCode: FLOW_EXIT.NOT_READY
+    };
+  }
+  const plan = buildPlan(scoped, st.pageKeys);
+  return {
+    payload: {
+      ok: true, head_commit: st.head ?? null,
+      screens_page_count: st.screens.page_count,
+      inventory_filter: st.pageKeys ? 'screens' : 'none(screens inventory unavailable)',
+      target_page_key: pageKey, ...plan
+    },
+    exitCode: plan.total_routes ? FLOW_EXIT.OK : FLOW_EXIT.NOT_READY
+  };
+}
+
 // CLI entry
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const argv = process.argv.slice(2);
@@ -643,6 +891,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   let sqlOrder;                   // --order <NNNN>（四位序号 = 建议执行顺序）
   let sqlSlug;                    // --slug <slug>（短横线小写）
   let sqlReportFile;              // --sql-report <path>（六段正文临时文件，与 --intent-report 同通道避 shell 吃引号）
+  let flowReadinessSeen = false;  // --flow-readiness：flow 学习前置就绪门禁（只读，绝不写盘）
+  let flowPlanSeen = false;       // --flow-plan：确定性分片计划（只读；主命令不得自行分组）
+  let flowPage;                   // --page <route>：闭包范围种子页 / 计划的目标页
+  let flowPageSeen = false;
+  let flowStrictSeen = false;     // --strict：全模块全量就绪 + 新鲜度也要求（A 口径）
   const intentSource = () => (intentInline !== undefined ? '--intent-json' : '--intent-report');
   // 只认 lookup（大小写/空白不敏感），其余一律归 direct。写错了只会多验一道（多拦），
   // 不会把"锚点出处验真"这道护栏静默关掉——方向必须与漏杀/误杀纪律一致。
@@ -672,6 +925,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     else if (flag === '--order')      { if (hasValue) sqlOrder = argv[++i]; }
     else if (flag === '--slug')       { if (hasValue) sqlSlug = argv[++i]; }
     else if (flag === '--sql-report') { if (hasValue) sqlReportFile = argv[++i]; }
+    else if (flag === '--flow-readiness') { flowReadinessSeen = true; }
+    else if (flag === '--flow-plan') { flowPlanSeen = true; }
+    else if (flag === '--page')  { flowPageSeen = true;  if (hasValue) flowPage = argv[++i]; }
+    else if (flag === '--strict') { flowStrictSeen = true; }
   }
   // `--module` on its own is the documented freshness-only mode (exit 0, no gate fields).
   // A verdict is only requested once --anchor/--text/--intent shows up.
@@ -708,6 +965,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       : !impactAsked
         ? '--scope 只在 --impact-* 回灌时生效：单独给 = 圈了范围但没人校'
       : null;
+
+  // flow 两个只读旗标的“参数问题”同样归 36（没求值不能归 0，也不能归 41：
+  // 41 的含义是“前置学习欠一次运行”，把一个写错了的命令行说成“去补学习”是误诊）。
+  // 两者互斥：一次调用只要一个结论，拼在一起时 exitCode 谁定说不清。
+  const flowGap = !flowReadinessSeen && !flowPlanSeen
+    ? ((flowPageSeen || flowStrictSeen)
+        ? '--page / --strict 只在 --flow-readiness 或 --flow-plan 下生效：单独给 = 说了范围但没人校'
+        : null)
+    : flowReadinessSeen && flowPlanSeen
+      ? '--flow-readiness 与 --flow-plan 只能给一个（一次调用只要一个结论）'
+      : flowPageSeen && flowPage === undefined
+        ? '--page 缺参数值，flow 范围未定'
+        : flowStrictSeen && !flowReadinessSeen
+          ? '--strict 只对 --flow-readiness 有意义（--flow-plan 不做就绪判定）'
+          : null;
 
   const startedAt = Date.now();
   let res = null;
@@ -829,6 +1101,64 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
         written: r.written === true, path: r.path ?? null, bytes: r.bytes ?? null,
         problems: r.problems ?? [], wall_time_ms: Date.now() - startedAt
       });
+      emit();
+    }
+
+    // ---- --flow-readiness / --flow-plan：两个**只读**独立模式 ----
+    // 与 --emit-sql 同位阶、同方向上的相反面：它们一个字段也不写（不建目录、
+    // 不切 CURRENT、不碰私有根），只把“能不能跑 flow”与“该怎么分片”两个事实算出来。
+    // 位置在 emit-sql 之后、锚点门禁之前：flow 旗标与 bug 快路径旗标互不相干，
+    // 拼在一起时不能出现“两边的 exitCode 互相抢写”，所以命中就 emit() 直接收尾。
+    if (res.ok && (flowReadinessSeen || flowPlanSeen || flowGap)) {
+      if (flowGap) {
+        console.error('[resolve-project][flow] ' + flowGap);
+        if (flowReadinessSeen || flowPlanSeen) {
+          // “未求值”也得把字段位置占住：否则调用方拿到一个与 plain 完全同形的输出，
+          // 分不清“脚本 didn't run”与“ran but found nothing”。两个旗标都没给时不占：
+          // 那连一次 flow 求值都没被申请，凭空注入一个字段反而破坏 plain 形状。
+          const holder = flowReadinessSeen ? 'flowReadiness' : 'flowPlan';
+          payload[holder] = { evaluated: false, ready: false, blockers: [{ code: 'ARGS_INVALID', meaning_zh: flowGap, action_zh: '按本条 message 修正命令行参数（这是调用方缺陷，不是项目缺学习数据）' }] };
+        }
+        exitCode = EXIT.INCOMPLETE;
+        logFastPathAttempt(res.binding.privateRoot, {
+          stage: flowReadinessSeen ? 'flow_readiness' : 'flow_plan',
+          project: res.binding.code, status: EXIT.INCOMPLETE,
+          problems: [flowGap], wall_time_ms: Date.now() - startedAt
+        });
+        emit();
+      }
+      if (flowReadinessSeen) {
+        const r = evaluateFlowReadiness(res.binding, { page: flowPage, strict: flowStrictSeen });
+        payload.flowReadiness = { evaluated: true, ...r.payload };
+        exitCode = r.exitCode;
+        logFastPathAttempt(res.binding.privateRoot, {
+          stage: 'flow_readiness', project: res.binding.code, status: r.exitCode,
+          page: r.payload.target_page_key ?? null, strict: flowStrictSeen === true,
+          ready: r.payload.ready,
+          blockers: r.payload.blockers.map((b) => b.code),
+          wall_time_ms: Date.now() - startedAt
+        });
+        if (r.exitCode !== 0) {
+          console.error('[resolve-project][flow-readiness] 未就绪：' +
+            r.payload.blockers.map((b) => b.code).join(' / '));
+        }
+        emit();
+      }
+      const r = evaluateFlowPlan(res.binding, { page: flowPage });
+      payload.flowPlan = { evaluated: true, ...r.payload };
+      exitCode = r.exitCode;
+      logFastPathAttempt(res.binding.privateRoot, {
+        stage: 'flow_plan', project: res.binding.code, status: r.exitCode,
+        page: r.payload.target_page_key ?? null,
+        total_routes: r.payload.total_routes ?? 0,
+        total_waves: r.payload.total_waves ?? 0,
+        problems: r.payload.blockers ? r.payload.blockers.map((b) => b.code) : [],
+        wall_time_ms: Date.now() - startedAt
+      });
+      if (r.exitCode !== 0) {
+        console.error('[resolve-project][flow-plan] 无可用分片：' +
+          (r.payload.blockers || []).map((b) => b.code).join(' / '));
+      }
       emit();
     }
 

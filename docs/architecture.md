@@ -168,7 +168,7 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 ```
 {{PRIVATE_ROOT}}/context/
   └── {{PROJECT.identity.code}}/       # 按项目 code 分区，多项目互不污染
-      └── <module>/                     # 按条目 modules[].name 分区（或保留分区名 screens）
+      └── <module>/                     # 按条目 modules[].name 分区（或保留分区名 screens / flows）
           ├── CURRENT                   # 文本文件；内容 = 当前 gen 目录名
           ├── gen-20240101120000/       # 上一代
           │   ├── index.md
@@ -184,6 +184,7 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 - 每次重学 → 新代目录（copy-on-write） → 原子切 `CURRENT`（tmp + rename）
 - 保留最近 2 代；N-2 及更早由 **supperH-prelearn 惰性 GC**（agent 切 `CURRENT` 时顺手回收 + 24h 后物理删除），**sync 不做任何 GC**（旧版本文档误标；sync 全文只把 `CONTEXT_ROOT` 当 runtime token 处理）
 - 保留分区 `screens`：页面学习（`/supperH-learn --screen`）产物，`index.md` frontmatter 带 `kind: screens`；与业务模块分区共用同一套 CURRENT/gen 不变量
+- 保留分区 `flows`：流程学习（`/supperH-learn --flow`）产物，入口是 `flow-index.md`（frontmatter `kind: flows`），**不写 `index.md`** —— 任何按 `index.md` 找入口的读取器找不到它，这是有意的（它的两张表是边集，不是路由反查表，硬套七列会把「方向」写进列名）。与业务模块分区共用同一套 CURRENT/gen 不变量；`kind: flows` 与 `kind: screens` 一样**不参与快路径**（G2 按名出局）。契约见 `skills/supperH-prelearn/SKILL.md`，接触面见 `docs/screen-partition.md` §13
 - 详见 `skills/supperH-prelearn/SKILL.md`
 
 ## 8. Skill vs Agent vs Command 的分工
@@ -842,9 +843,11 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 - **清场重配（本轮，见 §10.19）**：`init-project.mjs` 新增第三种模式 —— `--reinit`（只读计划）/ `--purge`（执行）/ `--confirm <code>`（允许带走学习数据），退出码新增 **23** / **24**；撤销一律 `rename` 进 `<私有根>/_retired/<戳>/<code>/` 并写 `manifest.json`，不删任何东西；`resolve-project.mjs` 把 `paths.contextRoot` / `paths.tasksRoot` 的解析抽成导出的 `resolveRootPaths()`，`buildBinding` 与清场共用同一个答案。新测试 `tests/init-reinit.test.mjs`（6 条，全走真实 CLI）—— 其中两条抓到真缺陷：`--confirm` 给错值被降级成“还没确认”（参数错误必须先于需确认），以及默认布局空壳未算进学习数据（“条目改路径”就是绕过 23 的后门）。
 
 - **L1 纯度门禁（本轮，对外发布前的补欠）**：`sync-assets.mjs` 新增 `checkL1Purity()`，`--check` 与写模式（构建 dist 前）都是**退 5 硬阻断**。判据两条：上传物里不得出现注册条目的专有值（`identity.code` / `displayName` / `aliases[]` / `packageRoot` / `codeRoot` / `db.host` / 三个库名 / 只读账号），也不得出现本机三个绝对路径（私有根 / 仓库父目录 / 家目录）。三个设计决定：① **值从 L2 运行期取，不写硬黑名单**——把公司名抄进 deny 列表等于把它再公开一遍；② 比对按**段**过滤示例形态（`example_*` / `demo_*` / `<占位符>`），否则模板自身天天误报；③ 不把模块名/分支名当事实（`order` / `dev` 这类高复用词淹没信号），环境词（prod/uat/dev）也**不列进过滤表**——列了会连带屏蔽掉 `<code>_prod` 这种真库名。为什么现在才做：文档与红线一直写着“sync 的敏感字扫描会拦下”，而这条扫描从未存在；失去机械判据后，真实项目短码、真实包根、真实工作区路径成片躺在 `tests/` 夹具与 `mcp-skeleton/README.md` 示例里（手工才找得到，因此对外发布前的全量人工扫描是必须的一道）。同时 `main()` 加了 `import.meta.url` 守卫——无守卫的入口脚本被测试 import 时会重烤 dist 并 `process.exit`。
+- **流程学习（`/supperH-learn --flow`，本轮）**：学习对象从「一个页面上有什么」换成「页面与页面之间的业务先后关系」。三条不变量：**只存 prev**（节点表恰六列、边表恰七列，`next` 一律现查 `prev_page == 本页`，绝不落第二张表，也绝不存 next 侧状态列）、**外部接口只登记不建边**（独立九列段，`scope: outOfScope`，不进边表也不参与任何端点判据；「指向」不等于「关系」）、**体检报告不是数据**（`flow-check.md` 全量重算、可删可字节一致重生成，只有悬挂边 > 0 阻断 `CURRENT`，环只列不断）。执行模型是波次：`--flow-plan` 确定性聚片（一片 ≤3 route、一波 ≤2 片，L1 固定值）→ 整波等齐 → 一次 writer 追加落盘进 `flow-parts/` → 全部波结束后整理阶段一次完成折叠 + 自检 + 校验 + 切 `CURRENT`。新增确定性脚本 `scripts/flow-engine.mjs` 与解析器两支只读旗标 `--flow-readiness` / `--flow-plan`；**不新增顶级命令、不新增 agent、不放开任何权限、不改 `index.md` 七列**
+
 **一期不做**：
 
-- `/supperH-flow`、`/supperH-package`、`/supperH-test`（二期）
+- `/supperH-flow`、`/supperH-package`、`/supperH-test`（二期；三者都指**顶级命令**）。别把它和 `/supperH-learn` 的 flow 模式混为一谈：**页面间先后关系的学习能力已在一期落地**（见上一条），二期那个命令要解决的是把这条链编排成可执行工作流
 - 真实内网 driver 实现（用户自开发放 `{{PRIVATE_ROOT}}/drivers/`）
 - 真实私有 MCP adapter（`{{PRIVATE_ROOT}}/drivers/<code>/adapter.py`）与官方数据库/日志 server 的内网可用性探测；每项目独立 venv（现共享解释器 site-packages）；IDE 对 MCP `tools/list_changed` 的消费行为未实测，不作设计地基
 - 存量仓库（跨仓）命令行里的路径字面串 → token 收敛（需先定位到真实 driver 迁入 `{{PRIVATE_ROOT}}/drivers/<code>/` 后才能验收“正则 `python\s+"?[A-Za-z]:[/\\]` 命中数 0”）—— L1 自身的 `{{DRIVERS_ROOT}}` 展开缺陷已修（见 §9 与 `docs/placeholders.md` §3.3）

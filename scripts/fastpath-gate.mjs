@@ -690,6 +690,13 @@ export function evaluateFastPath(o = {}) {
   gates.G0_anchorKind = 'pass';
 
   // ---- G2 数据就绪：分区 / CURRENT / index.md 必须存在、可读、格式代际相符 ----
+  // 保留分区按名字先于一切 I/O 排除：screens / flows 两支都不参与 bug 快路径的锚点反查，
+  // 而 flows 的入口文件名是 `flow-index.md`（不是 `index.md`），靠下面的通用读取器
+  // 根本读不到 —— 那样给出的会是“无可用 CURRENT”这种误导性的话，而不是“本来就不该来”。
+  // 不排掉的后果不是报错而是把保留分区拖进 G1：它拿一个不存在的七列契约去判一个图。
+  if (moduleName === 'screens' || moduleName === 'flows') {
+    return fail(EXIT.NO_INDEX, 'G2_dataReady', `${moduleName} 保留分区不参与 bug 快路径`);
+  }
   const idx = readCurrentIndexDir(contextRoot, moduleName);
   if (!idx.genDir) return fail(EXIT.NO_INDEX, 'G2_dataReady', `模块 '${moduleName}' 在 ${contextRoot} 下无可用 CURRENT 或 index.md 不可读（${idx.code}）`);
   let parsed;
@@ -705,7 +712,9 @@ export function evaluateFastPath(o = {}) {
   if (!parsed.rows.length) {
     return fail(EXIT.NO_INDEX, 'G2_dataReady', `index.md 格式漂移：${parsed.drift || '反查表不可用'}`);
   }
-  if (fm.kind === 'screens') return fail(EXIT.NO_INDEX, 'G2_dataReady', 'screens 保留分区不参与 bug 快路径');
+  if (fm.kind === 'screens' || fm.kind === 'flows') {
+    return fail(EXIT.NO_INDEX, 'G2_dataReady', `${fm.kind} 保留分区不参与 bug 快路径`);
+  }
   gates.G2_dataReady = 'pass';
 
   // ---- G4a 新鲜度·仓库级（先于 G1：全等就无需碰反查表，最快也最省）----

@@ -47,6 +47,7 @@ subagent 返回必须是**结构化 JSON**，字段：
 4. **回灌脚本一次只装一份回报**：`--impact-json` / `--intent-json` 的输入都是一份对象，把两份 analyzer 回报合并成一份喂给脚本 = 稀释 `external_refs`，那比不验收更糟。
 5. **快路径 F3 不并发**：它只有一个 `supperH-bug-analyzer(lite)`，且回报要回灌 G5；并发收益只存在于**完整路径步骤 4**（把 `dimensions` 拆成多个只读 analyzer 同时派）与**多模块同时学习**（每模块一个 `supperH-prelearn-analyzer`）。
 6. 每个并发派发仍须逐条满足上面三条前置（首行回显 `target project: <code>` + 列参数 + 声明兜底），并发不免除任何一项；派发参数里永远显式带 `--project <code>`（既有红线）。
+7. **流程学习（`/supperH-learn --flow`）在此之上再收紧两条**：① **一波 ≤ 2 片**（比第 1 条的 ≤3 更严 —— writer 每波只被派一次，各波回执要汇进主 agent 的同一个上下文，瓶颈是汇聚面不是算力）；② **整波等齐才派 writer**。第 ② 条是第 3 条 fail-closed 的另一面，也是上表那条互斥判据的直接推论：`flows` 本身就是 module 名，所以「一片到就写、另一片还在跑」正好等于 writer 与同 module 的 analyzer 写读交叠。
 
 > 真误并发了（写类重叠）不自行收拾：也不新增一个“并发冲突检测”去自壮（那会成了第三个真相源）。下一次 `supperH-bug-dev` 进它的步骤 4 时，`git status` 与 `dirty_files` 一比就露馅，落回“允许停下来问用户”硬清单第 1 条。
 
@@ -59,6 +60,7 @@ subagent 返回必须是**结构化 JSON**，字段：
 - **切分优先级**：Controller 数分片 > 方法数分片 > 单方法深挖后拆段
 - **batch 命名**：`batch-<NN>.md`，NN 从 01 递增，零填充
 - **`index.md` 必带**：路由名 → batch 文件 + 行号范围 + 完整度标记；格式按 `supperH-prelearn`（预学习统筹） skill 的「index.md 规范格式」节（首张表以 `| route |` 开列，七列 `route/controller/method/batch/lines/level/sources` **缺一不可** —— 这是机器契约，缺列 = 格式漂移 = 快路径门禁判 32 出局）。`sources` 列 = 该 batch 调用链可达文件全集（含 Controller 自身，repo-relative POSIX，`;` 分隔，追不全写 `-`），供快路径门禁 G4b 与 `git diff` 求交集做 batch 级新鲜度复核
+- **流程学习不走上面这套 batch 切分**：它按 `--flow-plan` 的确定性聚片切分（同一个 Controller 的 route 聚成一片、**一片 ≤ 3 个 route**、**一波 ≤ 2 片**；两个数值都是 L1 固定值，不进配置、不开运行期放宽口子），落盘单位是 `flow-parts/part-<route 稳定键>.md` 而不是 `batch-NN.md`。分组**必须由脚本产出、不得由主 agent 现场分组**：`route → Controller` 是 `index.md` 里现成的列，读它是解析器的活（见 `10-redlines.md` 的只读取数下沉条）。
 
 ## CURRENT 原子切换
 
@@ -71,6 +73,8 @@ subagent 返回必须是**结构化 JSON**，字段：
 5. 保留最近 2 代（N、N-1）；N-2 及更早标为 stale，24 小时后 GC
 
 `CURRENT` 文件本身用 tmp + rename 更新（同目录、同文件系统，保证 rename 原子性）。**禁止**直接 truncate + write。
+
+> **`flows` 分区是一次有意偏离**：上面 1–5 步在它身上**全程只走一次**，不是每批一次 —— 各波只做 `flow-parts/` 追加（不校验、不切），全部波结束后由整理阶段一次完成「折叠去重 → 生成 `flow-index.md` → 五类端点自检 → 校验 → 切 `CURRENT`」。**禁止日后顺手把它对齐回每批即切**：半张流程图会主动误导下游问答，而半份 batch 不会。此点已在 `commands/supperH-learn.md`（整理阶段）与 `agents/supperH-prelearn-writer.md`（Mode: flow）正文里各写明一次。
 
 ## copy-on-write 语义
 

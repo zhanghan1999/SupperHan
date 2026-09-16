@@ -40,9 +40,10 @@ L1 产物**项目无关**：sync 只烤 `TOOL_ROOT / PRIVATE_ROOT / DRIVERS_ROOT
 - **禁止用文字自行判定 G5**：影响半径窄与否不得靠主 agent 读 `supperH-bug-analyzer`（代码分析） 回报的措辞得出结论，必须把回报原文回灌解析器（`--impact-json` 或 `--impact-report`）由 `verifyImpactReport` 的退出码定（0 窄→继续；37 宽或 lite 护栏被破→升格；36 回报不可用→升格）。脚本只验回报形状，G5 因此永久弱于 G1–G4。
 - **禁止把退出码 0 与"没跑成门禁"混为一谈**：锚点门禁 `exit 0` 必须同时满足 `fastPath.eligible === true`、`fastPath.anchorResolved` 非空、`fastPath.intent.ok === true`；G5 回灌模式 `exit 0` 必须满足 `impact.narrow === true`。`--anchor`/`--text`/`--module`/`--intent-*`/`--impact-*`/`--scope` 不成对、或脚本内部异常，一律由脚本返回 **36（门禁未求值）** 落完整路径 —— “没校过”永远不等于“校过了且通过”。主 agent 不得因为"只是少个参数"而自行补参重试或当作通过。
 - **禁止跳过步骤 0 门禁**：`/supperH-bug`、`/supperH-learn` 进入步骤 1 之前**必须**先成功运行解析器（退出 0）。非 0 一律立即停止并原样输出打回语。
-- **窄 bash 白名单**：`/supperH-bug`、`/supperH-learn` 虽 `bash: allow`，其**唯一**允许的 bash 脚本就是那一条 `node "<TOOL_ROOT>/scripts/resolve-project.mjs" ...`，可按不同参数多次调用：步骤 0 不带参、新鲜度取数带 `--module`、I0 + 门禁判定带 `--anchor` + `--text` + `--intent-json`/`--intent-report`（反查来的锚点再加 `--anchor-source lookup`）、诊断基线带 `--env`、G5 验收再带 `--impact-json`/`--impact-report`（可叠 `--scope`）、改动动手前带 `--preflight`。**白名单只圈到“这一个脚本文件”**，不圈子命令：除上述已文档化的旗标外不得自造参数。其它任何编译/DB/网络命令（**包括跑 driver**）仍必须派子 agent——快路径 F1.4 的 traceId/ticketNo 反查因此走 `supperH-bug-analyzer(mode=lookup)` 而非主 agent 直接跑脚本；`--preflight` 也只集**本地事实**（脏文件/快照 ref/槽位名单），绝不在执行前做网络预检（§10.8）。
+- **窄 bash 白名单**：`/supperH-bug`、`/supperH-learn` 虽 `bash: allow`，其**唯一**允许的 bash 脚本就是那一条 `node "<TOOL_ROOT>/scripts/resolve-project.mjs" ...`，可按不同参数多次调用：步骤 0 不带参、新鲜度取数带 `--module`、I0 + 门禁判定带 `--anchor` + `--text` + `--intent-json`/`--intent-report`（反查来的锚点再加 `--anchor-source lookup`）、诊断基线带 `--env`、G5 验收再带 `--impact-json`/`--impact-report`（可叠 `--scope`）、流程学习就绪判定带 `--flow-readiness`（可叠 `--page <route>` 只判一页；叠 `--strict` 时把「够学但没学全」也算阻塞）、流程分片计划带 `--flow-plan`（同样可叠 `--page`）。**后两支都是只读判定**：一支出就绪结论、一支出分片计划，一个字段也不写盘（不建目录、不切 CURRENT、不碰私有根）。**白名单只圈到“这一个脚本文件”**，不圈子命令：除上述已文档化的旗标外不得自造参数。其它任何编译/DB/网络命令（**包括跑 driver**）仍必须派子 agent——快路径 F1.4 的 traceId/ticketNo 反查因此走 `supperH-bug-analyzer(mode=lookup)` 而非主 agent 直接跑脚本；`--preflight` 也只集**本地事实**（脏文件/快照 ref/槽位名单），绝不在执行前做网络预检（§10.8）。
 - **MCP 取数工具只绑子 agent**：壳 server `supperh-drivers` 只允许出现在子 agent frontmatter 的 `mcpServers` 里（现绑 `supperH-bug-analyzer` / `supperH-bug-tester`（测试执行） / `supperH-bug-test-writer`（测试编写） / `supperH-prelearn-analyzer`），**主 agent 与命令入口一律不绑**。这与上一条是同一条精神的两个面：取数动作必须发生在被约束的下游，主入口只消费结构化结果。
 - **跨私有根的只读取数下沉到脚本**：子 agent 与主入口均不得为了读 `CONTEXT_ROOT/` 下的 `index.md` 而要求放开 `external_directory`；需要这份数据时走解析器返回的 `freshness` / `fastPath` 字段，或派 `supperH-prelearn-analyzer`。目的是把最小放开面钉在**结构上最少**而不是钉在某个数字上。已有两个例外的共同特征：“写入落在私有根”，且都不能下沉为脚本（学习落地与写驱动都是探索型判断，不是确定性计算）——拿不到这个特征就不得新增例外。
+- **流程分区（`flows`）不是第三个例外**：`/supperH-learn --flow` 要读 `code` 与 `screens` 两个分区的产物（route 清单、route → Controller 归属），这两件事全部下沉进解析器的 `--flow-readiness` / `--flow-plan`；它的落盘与整理下沉进 `scripts/flow-engine.mjs`，由**已有写权**的 supperH-prelearn-writer（预学习落笔） 经 bash 调用。整条链路没有新增任何 `external_directory` 放开面，也没有让 deny 角色伸手私有根。
 - **禁止不传 `--project <code>` 就调用 driver/子 agent**：拿到解析结果后，所有下游调用必须显式携带该 code 与解析返回的 `contextRoot`，杜绝多项目下串包。
 
 ## R4 学习数据完整性
@@ -52,6 +53,9 @@ L1 产物**项目无关**：sync 只烤 `TOOL_ROOT / PRIVATE_ROOT / DRIVERS_ROOT
 - **禁止手写 batch-*.md 内容绕开 analyzer**：所有学习记录必须由 supperH-prelearn-analyzer 生成结构化输出后交 writer 落地。
 - **禁止把空 / 不合法的 `sources` 当成"该 batch 无源码依赖"**：`index.md` 反查表的 `sources` 列必须是该 batch 调用链可达文件**全集**（含 Controller 自身），repo-relative POSIX 路径、`;` 分隔；追不全、或路径含 `;`/`|` 等破坏表格的字面，一律写 `-`。G4b 对 `-` 与非法形态 **fail-closed** 判过期（35）——写成空集等于给门禁开后门，把误杀换成了漏杀。
 - **禁止给 `index.md` 加列而不升 `schema` 代际**：反查表列集合是机器契约，`scripts/fastpath-gate.mjs` 的 `REQUIRED_COLS` / `INDEX_SCHEMA` 必须与 `supperH-prelearn`（预学习统筹） skill 的「index.md 规范格式」节同步；代际不符或缺列一律 32 出局，绝不"尽力解析"。
+
+- **禁止给 `flows` 分区的两张表加列、改列序或放宽取值域而不升 `schema: flows-v1` 代际**：`flow-index.md` 的节点表（恰六列，状态列**只有** `prev_status` 一个）与边表（恰七列，唯一允许追加的列是 `superseded_by`）是机器契约；列名与取值域写死在 supperH-prelearn（预学习统筹） skill 的「流程分区契约」节，解析侧写死在 `scripts/flow-engine.mjs` 的 `NODE_COLS` / `EDGE_COLS`。代际不符一律**整代出局**，不做尽力解析。
+- **禁止把 `flow-check.md` 当数据源，也禁止拿它的计数做分流**：它是体检报告（全量重算、可删、可字节一致重生成），除「悬挂边 > 0 阻断 `CURRENT`」这一条外，五类结果里任何一类都不得成为放行或出局的条件。
 
 ## R5 派发协议
 

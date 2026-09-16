@@ -1,6 +1,6 @@
 ---
 name: supperH-prelearn
-description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。定义分批算法、CURRENT 原子切换、copy-on-write、supplement 内容级补学四项核心不变量。被 /supperH-learn 主入口与 supperH-prelearn-analyzer / supperH-prelearn-writer 子 agent 共同引用。
+description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。定义分批算法、CURRENT 原子切换、copy-on-write、supplement 内容级补学四项核心不变量。被 /supperH-learn 主入口与 supperH-prelearn-analyzer / supperH-prelearn-writer 子 agent 共同引用。另含两个保留分区（`screens` 页面、`flows` 流程边集）的产物契约。
 ---
 
 # skill: supperH-prelearn · 预学习统筹
@@ -27,9 +27,10 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
           └── ...
 ```
 
-- `<module>` 必须命中 `{{PROJECT.modules[].name}}`，**或**为保留分区名 `screens`；否则拒绝写入
+- `<module>` 必须命中 `{{PROJECT.modules[].name}}`，**或**为保留分区名 `screens` / `flows`；否则拒绝写入
 - `<ts>` 格式：`yyyymmddHHMMSS`（本地时区，秒级足够）
 - `CURRENT` 是**文件**（不是符号链接），内容单行为 gen 目录名；读方 `readFile + trim`
+- `flows` 分区的**入口文件是 `flow-index.md`**（不是 `index.md`），因此任何按 `index.md` 找入口的读取器都找不到它——这是有意的：它不参与代码反查，也不参与 bug 快路径。该代文件集合：`flow-index.md`（唯一读取入口）+ `flow-check.md`（体检报告）+ `flow-notes-NN.md`（叙述）+ `flow-parts/part-*.md`（各波中间态，**不是数据源，任何消费方不得读它**）+ `CURRENT`
 
 ## 四项核心不变量
 
@@ -68,7 +69,7 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
 - 旧代保留最多 2 份（N、N-1）；N-2 及更早标记 stale，由 **writer 切 `CURRENT` 时的惰性 GC** 在 24h 后物理删除（`sync-assets.mjs` 不做任何 GC —— 旧版本文档在此误标为"sync 结尾的 GC 步骤"，已改）
 - **禁止跨代 hardlink**（Windows 授权复杂 + 语义混乱）
 
-## 四种工作模式（对外契约）
+## 工作模式（对外契约）
 
 | 模式 | 触发方 | 输入 | 输出 |
 |------|-------|------|------|
@@ -76,6 +77,7 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
 | `update` | `/supperH-learn --mode update` | 代码变更后重学：analyzer 输出的**变更 Controller 清单** | 新 gen 目录（未受影响 batch 从旧代拷） + CURRENT 原子切换 |
 | `supplement` | `/supperH-bug` 步骤 7a 内部触发 | 单个 `target_method` + `gap_hint` | 新 gen 目录（只有目标 batch 被替换） + CURRENT 原子切换 |
 | `screen` | `/supperH-learn --screen` | 页面档案配置（`screen` 对象，含 `discovery` 数组） | 页面索引 batch（`index.md` frontmatter 带 `kind: screens`）+ CURRENT 原子切换 |
+| `flow` | `/supperH-learn --flow <route>` 或 `--flow --all` | 一片 `page_keys[]`（≤3 route）+ 页面档案清单 + 闭包内模块反查行 | `flow-parts/part-*.md`（每波一次 `phase: append`，**不校验不切**）→ 整理阶段一次 `phase: finalize`：折叠 + `flow-index.md` + `flow-check.md` + 校验 + **CURRENT 只切这一次** |
 
 `supplement` 不面向用户直接调用（`/supperH-learn` 一期只暴露 `init|update`）；只由 `supperH-bug-dev` 上报 `content_gaps` → 主 agent 派 `supperH-prelearn-analyzer(mode=enrich)` → 派 `supperH-prelearn-writer(mode=supplement)` 内部串起来。
 
@@ -85,6 +87,71 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
 - 页面学习产物固定落 `{{CONTEXT_ROOT}}/screens/gen-<ts>/`；`index.md` frontmatter 带 `kind: screens` 与 `screenSource: <discovery[].via>`。
 - 页面 batch 锚点约定为 `--- screen: <screen-id> <path> ---`（便于 supplement / 反查）。
 - 页面分区与业务模块分区共享同一套目录不变量（CURRENT / gen / copy-on-write / 30KB 分批）。
+
+### 流程分区契约（保留名 `flows`）
+
+**本节是列顺序的唯一真相**：写下来就是契约，`scripts/flow-engine.mjs` 按它解析与渲染，改本节必须同时改那个脚本 + 补测试。列名、列序、取值域一律不得自行增删改名调序。
+
+#### 节点表（`flow-index.md`，每页一行；**本表只有一列状态**）
+
+```
+| page_key | route | title | module | prev_status | evidence_ref |
+|---|---|---|---|---|---|
+```
+
+- `page_key`：**归一化 route**，节点键只能是它。禁止用页面名 / 菜单名 / 中文标题当节点键（可重名、可空、随遍历抖动）
+- `prev_status` 三值：`root`（确无上游）/ `unresolved:<原因码>`（查不出）/ `no_data`（无此类动作，只读页列表页）。原因码**只有两个**：`no_table_inventory`、`sources_incomplete`；**不得出现数据库类或语言/剖面类原因码**
+- **不存在 next 侧的任何列**（v2.3 撤销原设计的 `next_status`）：`next_pages` / `leaf` / `pending` / `next_coverage` 一类"把反查结果固化成字段"的写法全部禁止——本模块只存 prev，"被谁当上一步"永远是查询结果
+- `evidence_ref` / `title` / `module` 允许留空（`-`）
+
+#### 边表（`flow-index.md`，每条边一行 = 一条「本页 ← 上一步」；**恰 7 列**）
+
+```
+| edge_id | page | prev_page | kind | basis | evidence | status |
+|---|---|---|---|---|---|---|
+```
+
+- `page` = 本页，`prev_page` = 本页的上一步。**不用 `from_page`/`to_page`**（`from→to` 会被读成"从本页流向下一页"，与这里的存储语义正好相反）
+- `kind`：`data_predecessor`（数据前置，主型）/ `navigation`（仅当源码里有明确跳转证据）
+- `basis`：`inventory`（代码侧表读写事实）/ `read_code`（现场读源码兜底）
+- `status`：`confirmed` / `inferred` / `superseded`；被推翻的旧边追加 `superseded_by: <新边id>` —— `superseded_by` 是**唯一**允许追加的第 8 列
+- `evidence`：出处，含表名与操作，例 `src/main/resources/mapper/OrderMapper.xml:42 insert t_order`；路径一律 repo-relative POSIX
+- **去重键 = 归一化后的 `(page, prev_page)` 二元组**（不是边 id、不是行文本）。**折叠只发生在整理阶段这一个点**，分片与并发阶段一律不去重；`edge_id` 由 writer 在整理时统一重排，所以各 agent 之间不需要约定 id
+- **落盘机检**：每行 `page` 与 `prev_page` 两端都必须能在节点表里找到同名 `page_key`，否则报 `EDGE_ENDPOINT_NOT_FOUND` 并拒绝切 `CURRENT`
+
+#### 外部接口段（`flow-index.md` 内独立一段；**只登记，不进边表**）
+
+```
+| direction | endpoint | points_to | via_page | via_route | counterpart | evidence | scope | linked_flow |
+|---|---|---|---|---|---|---|---|---|
+```
+
+- `direction`：`out`（我调别人）/ `in`（别人调我）；`scope` 固定写 `outOfScope`；`points_to` 优先级 **页面 → 代码 → 留空**（`page:<route>` / `code:<文件:行号>` / 空）
+- **「指向」≠「关系」**：`points_to` 对上某个已登记页面，也**不得**因此把那页写进边表——一次外部调用会凭空造出一批假流程边
+- 端点自检五类**一律不读这一节**：`entry_pages` / `leaf_pages` / `dangling_edges` 只走边表；本段记录数单独呈报，不参与任何端点判据
+
+#### `flow-check.md`（端点自检报告，**体检报告不是数据**）
+
+每次 flow 学习收尾时对**整代边集**全量重算 + **整体重写**；可删可原样重生成（重生成必须字节一致）。五类，全依赖 prev 边集即可算出：
+
+| 检查项 | 中文判据 | 输出去向 |
+|---|---|---|
+| `entry_pages` | 入口页：没有上一步 | 清单 + 占比（另按 prev 三态拆分呈现） |
+| `leaf_pages` | 末叶页：没被任何页当作上一步 | 清单 + 占比 |
+| `orphan_pages` | 孤立页：**既是入口又是末叶**（且本轮页面集 > 1） | **逐条列** + 补学建议 |
+| `dangling_edges` | 悬挂边：边的一端已不在当前页面档案里 | 列边 + 列缺失端 + 建议重跑 `--screen` |
+| `cycles` | 环：沿 `prev_page` 走能回到自己 | **逐条列页链，只列不断** |
+
+性质必须是**呈现 + 建议**：五类里**只有悬挂边 > 0** 阻断 `CURRENT`（报 `FLOW_STALE_PAGESET`）。入口页/末叶页/孤立页/环**永不阻断**——孤立页合法存在（独立配置页），环在真实系统里也合法，判红会逼执行者去编边或静默断环。回答"下一步"时**绝不读它**（读了就等于把 next 存下来）。
+
+#### route 归一化（**单点，全仓只有一份实现**）
+
+`flows` 与 `screens` 共用同一个函数：`scripts/flow-engine.mjs` 导出的 `normalizeRoute()`。禁止任何一侧另写一份，也禁止命令层/agent 自己 trim/小写/替换路径变量。
+
+- 折叠三类写法差异：**大小写**、**末尾斜杠**、**路径变量**（`/order/{id}` / `/order/:id` / `/order/123` 同键，纯数字段也算变量）→ 统一成 `/order/{}`
+- **丢弃 HTTP method** 是有意的：flow 的单位是"页面"，同 path 上的 GET/POST/DELETE 属同一页面的不同动作；要按接口粒度区分归 code 分区
+- 为什么必须单点：两个方向的匹配全靠它。不一致就 join 不上，而且**只会单向失败**（上一步查得到、下一步查不到）——那是最难发现的一类错
+- 与 `scripts/fastpath-gate.mjs` 的 `normRoute()` **故意不合并**：后者是 bug 快路径 G1 的锚点匹配键，改它等于改既有判据（搭 flow 的车做判据类改动是越界）
 
 ## index.md 规范格式（机器可解析）
 
@@ -110,7 +177,7 @@ coveredControllers: N
 
 - `schema`：固定值 `supperh-index/2`。解析器据此判**格式代际** —— 不符或缺失一律 32 出局。`/1` → `/2` 是因为反查表新增 `sources` 列（旧表无此列→无法安全判 G4b）；看到 `/1` 的存量数据一律先重学。
 - `module`：目标模块名；页面分区写 `screens`。
-- `kind`：`code`（代码学习）或 `screens`（页面学习）。**页面分区必须 `kind: screens`**，否则 G2 会把它当业务模块。
+- `kind`：`code`（代码学习）或 `screens`（页面学习）。**页面分区必须 `kind: screens`**，否则 G2 会把它当业务模块。流程学习**不写 `index.md`**，它写 `flow-index.md` 且 frontmatter `kind: flows`；`screens` 与 `flows` 两个保留分区都不参与 bug 快路径的锚点反查（`scripts/fastpath-gate.mjs` 的 G2 按名出局）。
 - `learnedAt`：本次学习完成时刻。
 - `learnedAtCommit`：学习时所在代码库的 HEAD SHA；**缺此项 → G4 新鲜度直接判失败（35）**。必须加引号，见下面「已知类型陷阱」。它仍然是**仓库级** HEAD（不是模块级、不是 batch 级）—— G4b 靠它作 diff 的左端点，而非拿它直接当相等判据。
 - `controllers` / `coveredControllers`：目标总数 / 本 index 覆盖数；比值即 95% 完整度自检输入。
@@ -177,6 +244,9 @@ coveredControllers: N
 - 禁止 in-place 修改已 commit 过的 gen
 - 禁止跨 worktree 复用 gen 目录（学习数据只跟 codeRoot 走，不跟 effectiveRoot 走；worktree 只影响**读取源码**的路径）
 - 禁止把 `{{PROJECT.identity.code}}` 之外的目录作为 `{{CONTEXT_ROOT}}` 的最后一段（避免多项目串数据）
+- 禁止为 `next` 另立第二张表或存 next 侧任何状态列：边表只有一行行的「本页 ← 上一步」，两个真相源冲突时没有裁决者
+- 禁止把 `flows` 的端点自检做成阻断门禁（只有悬挂边 > 0 阻断）；`flow-check.md` 与 `flow-notes-NN.md` 都是派生呈现物，不得当数据源读
+- 禁止 `flow-parts/` 被任何消费方读取：它是各波中间态，一切对外语义只在 `flow-index.md` 这一个入口
 
 ## 与其它 skill 的关系
 

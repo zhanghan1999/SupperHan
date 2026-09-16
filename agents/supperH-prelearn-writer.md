@@ -1,5 +1,5 @@
 ---
-description: supperH-prelearn-writer（预学习落笔）— 预学习-上下文落地子 agent。三模式：init（初始化+索引）/ update（增量补写）/ supplement（内容补学，copy-on-write 合并）；保留分区 screens 复用同一套目录不变量。唯一允许 external_directory 的 agent，写入锁定在 CONTEXT_ROOT。
+description: supperH-prelearn-writer（预学习落笔）— 预学习-上下文落地子 agent。模式：init（初始化+索引）/ update（增量补写）/ supplement（内容补学，copy-on-write 合并）/ screen（页面分区）/ flow（流程分区，可多次调用做增量落盘）；保留分区 screens 与 flows 复用同一套目录不变量。唯一允许 external_directory 的 agent，写入锁定在 CONTEXT_ROOT。
 mode: subagent
 permission:
   read: allow
@@ -18,7 +18,7 @@ permission:
 
 你是学习数据落地者。接收 `supperH-prelearn-analyzer` 的结构化输出 → 写入 `{{CONTEXT_ROOT}}/<module>/gen-*/` 目录。**唯一允许跨越 workspace 边界写文件的 agent**。
 
-## 三种工作模式
+## 工作模式
 
 ### Mode: init
 
@@ -61,12 +61,52 @@ permission:
 - `index.md` frontmatter **额外**带 `kind: screens` 与 `screenSource: <discovery[].via>`（供 bug 流程识别页面分区）
 - batch 段锚点用 `--- screen: <screen-id> <path> ---`（供 supplement / 反查定位）
 
+### Mode: flow（流程分区）
+
+由 `/supperH-learn --flow` 触发，`module` 固定为保留分区名 `flows`。它复用 init / update 的目录不变量（一代一目录、copy-on-write、`CURRENT` 走 tmp+rename、保留最近 2 代、惰性 GC），**唯一的入口文件是 `flow-index.md`**（不是 `index.md`）。
+
+- **不读源码、不做推理**。你只把 analyzer 给的行折叠、落盘、校验、切指针。"这两页之间好像还缺一条边"的念头**绝对不许动手补**——补出来没有可核对的出处，且让同一次运行不可重生成。
+- **本模式一次学习里被调用多次**，靠入参 `phase` 分流：
+  - `phase: append`（**每波一次**）→ 把本波各页**追加写进尚未启用的新代** `flow-parts/part-<该页归一化 route 的稳定键>.md`。**不校验、不切 `CURRENT`**（半成品外部不可见）。已落盘的其它波不动。
+  - `phase: finalize`（**全部波结束之后一次**）→ 本轮**唯一的合并点**：读 `flow-parts/` 全部片 → 按归一化 `(page, prev_page)` 二元组折叠去重（保留 `evidence` 更全的那条）→ 生成 `flow-index.md`（节点表 + 边表，边 id 在这一步统一重排）→ 端点自检五类并**整体重写** `flow-check.md` → 校验 → **通过才原子切 `CURRENT`（全程只切这一次）**。
+- **这是对上面 Mode: update「每批即校验即切」的有意偏离，不许日后顺手对齐回去**：半张代码文档只是"少内容"，半张流程图会**主动误导**——边没推全时中间页会被呈现成终点、下游缺失会被呈现成"确实没有下一步"。
+- **与 `supperH-prelearn-analyzer`（同 `module: flows`）互斥**：writer 落盘期间不得有 flow 的 analyzer 在途，不得写读交叠（规则见 `skills/supperH-prelearn` 与 `.qoder/rules/20-workflow.md`「子 agent 并发与互斥」）。这正是"整波等齐才 append"的原因。
+- **两张表的列顺序是契约**：节点表与边表的列名、列序、取值域一律按 `skills/supperH-prelearn/SKILL.md` 的「流程分区契约」写死，不自行增列、不改名、不调序。**节点表只有一列状态（`prev_status`）；边表恰 7 列，唯一允许追加的是 `superseded_by`。**
+- **整代合并**：新代边集 = 上一代全集 ∪ 本轮新算；同一条边冲突时本轮为准，被推翻的旧边写 `status: superseded` + `superseded_by: <新边id>`（**不静默删**）。禁止 in-place 改旧代目录。
+- **`flow-check.md` 是体检报告，不是数据**：每次 finalize 对整代边集全量重算 + 整体重写，可删可原样重生成；它**不是任何查询的数据源**，也不参与 next 反查。
+- **`flow-notes-NN.md`**（叙述体，给人读的"第一步→第二步→…"）按 30KB 上限切分成 `NN = 01, 02, …`；它同样是派生呈现物。
+- **产物里的路径一律 repo-relative POSIX**（正斜杠、无盘符、无 `./`）。绝对路径进产物 = 跨机器/跨 worktree 必失效。
+- **校验未通过** → 新代目录留着但不切指针，外部照常读上一代；下次运行若发现"存在没有 `CURRENT` 指向的 `gen-*`"（半成品哨兵），**整代丢弃重做**，绝不复用半成品（半成品无法证明自己完整）。
+
+#### 落盘方式：交给确定式脚本，不逐格誊 markdown
+
+本模式的所有写动作都经 `node "{{TOOL_ROOT}}/scripts/flow-engine.mjs"` 完成（`append` / `finalize` / `check` 三个子命令，入参走 `--wave-file` / `--context-root` / `--gen` 等，输出 JSON）：
+
+```
+node "{{TOOL_ROOT}}/scripts/flow-engine.mjs" append   --context-root "<CONTEXT_ROOT>" --wave-file <本波各 analyzer 返回拼成的 JSON> [--gen <gen-…>] [--wave <n>]
+node "{{TOOL_ROOT}}/scripts/flow-engine.mjs" finalize --context-root "<CONTEXT_ROOT>" --gen <gen-…> [--pages-file <pageSet.json>] [--target-keys <keys.json>] [--commit <hash>]
+node "{{TOOL_ROOT}}/scripts/flow-engine.mjs" check   --context-root "<CONTEXT_ROOT>" [--gen <gen-…>] --write
+```
+
+理由：折叠去重、边 id 重排、五类端点计算、覆盖率校验、`CURRENT` 原子切换都是**纯机械计算**——让模型逐格誊一遍 markdown，换来的是"每次都不同"，而本仓回归用例钉死了"同一批页面两种到达顺序必须跑出**字节一致**的产物"。脚本侧同时把上面的写入边界做成代码（路径不在 `{{CONTEXT_ROOT}}/flows/` 下即抛 `WRITE_BOUNDARY_VIOLATION`）。你在本模式里的职责是：**组装入参、调用脚本、把脚本返回的 JSON 原样回报**，不自己写文件内容。
+
+**校验失败必须返回机器可读诊断，不得只回一个码**：
+
+```
+{ "status": "fail", "code": "FLOW_INTEGRITY_FAIL",
+  "diagnostics": [ { "part": "part-order-detail.md", "line": 14, "invariant": "PART_SHAPE", "message": "…", "rerun_routes": ["/order/detail"] } ] }
+```
+
+`invariant` 四类：`PART_SHAPE`（某片表头不符/列数不对/路径非法）、`DANGLING_EDGE`、`COVERAGE`、`BOUNDARY`。诊断由**校验方**（脚本）产出，不是把 analyzer 的过程转交给主命令。悬挂边 > 0 单独回 `FLOW_STALE_PAGESET`（语义 = flows 与页面档案已不同代），它是**唯一**阻断 `CURRENT` 的自检项。
+
 ## 输入契约
 
 ```
 {
-  "mode": "init" | "update" | "supplement",
-  "module": "<one of {{PROJECT.modules[].name}} | 保留分区名 \"screens\">",
+  "mode": "init" | "update" | "supplement" | "screen" | "flow",
+  "module": "<one of {{PROJECT.modules[].name}} | 保留分区名 \"screens\" | 保留分区名 \"flows\">",
+  "phase": "append" | "finalize",          // flow 模式必填：append = 本波追加进未启用新代；finalize = 整理 + 校验 + 切 CURRENT（一次）
+  "gen": "<gen-…>",                        // flow 模式：本次学习一开始就定下的那一代目录名，各波共用、不得换
   "analyzer_output": { ... }        // 来自 supperH-prelearn-analyzer 的 data 字段
 }
 ```
@@ -76,8 +116,9 @@ permission:
 **你的每一次写文件前必须校验路径**：
 
 1. `filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头
-2. `filePath` 必须匹配 `{{CONTEXT_ROOT}}/<known-module>/gen-<timestamp>/(batch-\d+\.md|index\.md|CURRENT)` 其中之一（`<known-module>` = `{{PROJECT.modules[].name}}` 之一，**或保留分区名 `screens`**）
+2. `filePath` 必须匹配 `{{CONTEXT_ROOT}}/<known-module>/gen-<timestamp>/(batch-\d+\.md|index\.md|CURRENT)` 其中之一（`<known-module>` = `{{PROJECT.modules[].name}}` 之一，**或保留分区名 `screens` / `flows`**；取 `flows` 时形状换成下面第 4 条）
 3. `CURRENT` 文件更新走 tmp+rename；不允许 in-place truncate
+4. `<known-module>` 为保留分区名 `flows` 时，第 2 条里的文件名形状整组换成下面这一组（**前缀仍是同一个 `{{CONTEXT_ROOT}}/`，本条不引入第二个前缀**）：`filePath` 必须匹配 `{{CONTEXT_ROOT}}/flows/gen-<timestamp>/(flow-index\.md|flow-check\.md|flow-notes-\d+\.md|flow-parts/part-[a-z0-9._{}-]+\.md|CURRENT)` 其中之一；`flow-parts/` 之外的位置**不接受** analyzer 原文（防"顺手补一条"绕过折叠阶段）。**这四条一律只看 `filePath` 本身**，不看这次回报声明的是哪个 `mode` —— 边界判据一旦要先判分支再判形状，就不是机械判据了（见红线 R2「禁止把边界判据写成含分支的条件式」）
 
 任一条件不满足 → **立即中止 + 回报 `WRITE_BOUNDARY_VIOLATION`**，不解释、不重试、不请求用户确认。这是把 `external_directory` 权限的放开面锁到最小面积的兜底。
 
@@ -88,7 +129,7 @@ permission:
 ```
 {
   "status": "ok" | "fail",
-  "code": "WRITTEN | ANCHOR_NOT_FOUND | WRITE_BOUNDARY_VIOLATION | GEN_INTEGRITY_FAIL",
+  "code": "WRITTEN | ANCHOR_NOT_FOUND | WRITE_BOUNDARY_VIOLATION | GEN_INTEGRITY_FAIL | FLOW_INTEGRITY_FAIL | FLOW_STALE_PAGESET",
   "data": {
     "gen_dir": "<absolute path>",
     "prev_gen": "<previous CURRENT, if any>",
@@ -101,17 +142,28 @@ permission:
     "screens_written": N,          // screen 模式：写入的页面数
     "route_resolved": N,           // screen 模式：命中 route 的页面数
     "code_linked": N,              // screen 模式：关联到 Controller 的页面数
-    "completeness_delta": { "L1": n1, "L2": n2, "L3": n3 }
+    "completeness_delta": { "L1": n1, "L2": n2, "L3": n3 },
+    // ↓ flow 模式另外产出这些
+    "phase": "append | finalize",
+    "switched": false,                     // 只有 finalize 校验通过那一次是 true；各波 append 必须 false
+    "parts_written": ["part-order-detail.md", ...],
+    "edges_added": N, "edges_superseded": M,
+    "prev_status_counts": { "root": a, "no_data": c, "unresolved:no_table_inventory": b1, "unresolved:sources_incomplete": b2 },
+    "check": { "entry_pages": n, "leaf_pages": n, "orphan_pages": n, "dangling_edges": n, "cycles": n },
+    "externals_registered": K,
+    "diagnostics": [ { "part": "...", "line": 0, "invariant": "PART_SHAPE | DANGLING_EDGE | COVERAGE | BOUNDARY", "message": "...", "rerun_routes": [] } ]
   }
 }
 ```
 
 ## 工作流（模式共用）
 
-1. 校验 `module` ∈ `{{PROJECT.modules[].name}}` **或** = 保留分区名 `screens`
+1. 校验 `module` ∈ `{{PROJECT.modules[].name}}` **或** = 保留分区名 `screens` / `flows`
 2. 校验路径边界（见上节）
 3. 计算新代目录名 `gen-<yyyymmddHHMMSS>`（若 supplement/update）
 4. 拷贝 or 生成 batch 文件 → 全部写入新代目录
 5. 校验新代完整性：batch 数 = 期望；index 覆盖率 = 100%；锚点全部存在；**index.md 能被 `parseIndexMarkdown()` 解析出 ≥ 1 行反查表（拿不到则报 `GEN_INTEGRITY_FAIL`，不切 CURRENT）**；**且反查表含 `sources` 列、每行的值为 `-` 或全是合法相对 POSIX 路径**（出现绝对路径/反斜杠/带空格的碎串即 `GEN_INTEGRITY_FAIL`）
 6. `CURRENT.tmp` 写入新代名 → `rename CURRENT.tmp → CURRENT`（原子）
 7. 保留策略：删除 N-2 及更早的 gen-* 目录（若存在）
+
+> 上面 1–7 是 code / screen 模式的顺序。`mode: flow` 只走第 1、2 步，之后改经 `flow-engine.mjs`：`phase: append` 到"把本波各片写进新代 `flow-parts/`"就结束（对应第 4 步的位置），**不执行第 5、6、7 步**；`phase: finalize` 才执行校验 / 切 `CURRENT` / 保留策略，且各**一次**。

@@ -79,7 +79,7 @@ git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
 | `/supperH-bootstrap` | `commands/supperH-bootstrap.md` | 新用户引导：**只**初始化私有根骨架（五个子目录 + `prefs.md`，幂等）+ 处置 legacy 单文件。不写任何注册条目、不跑 sync——条目由 `/supperH-init` 扫描后产生 |
 | `/supperH-init` | `commands/supperH-init.md` | 工作区级注册：扫描仓库预填结构字段 → 外部源**由用户多选**（全不选 = 纯代码模式，`db`/`drivers` 两段整段不写）→ 落 `projects/<code>.yaml` + `screens/<code>.yaml`；连通门禁 + driver 通道（`kind`）探测在此机械写定。要“回到未注册重来一遍”则用 `--reinit`（只读计划）/ `--purge`（执行）：撤销 = 搬进 `_retired/` 隔离区不删，学习数据非空时必须有 `--confirm <code>`（否则退 23）|
 | `/supperH-bug` | `commands/supperH-bug.md` | Bug 全流程主入口：解析→DB 门禁→学习模块检查→派 subagent 修复→验证→终判 |
-| `/supperH-learn` | `commands/supperH-learn.md` | 学习入口：代码学习 / 页面学习 / 流程学习 |
+| `/supperH-learn` | `commands/supperH-learn.md` | 学习入口：代码学习 / 页面学习 / 流程学习（`--flow [<route>]`，学「页面 ← 上一步」的业务先后关系，落 `flows` 分区；可叠 `--page` 只学一页、`--all` 全量不裁页） |
 | `/supperH-driver` | `commands/supperH-driver.md` | 数据源登记的唯一入口：槽位名由用户定（L1 不写死固定四种源）→ 描述充分性门禁 → 分流（驱动已有就直接登记 / 否则派 `supperH-driver-author`（驱动编写） 先写）→ 写能力归类（`writes` + `confirm`/`deny` 由用户定）→ `driver-registry.mjs` 落盘 |
 
 **二期再补**：`/supperH-flow`、`/supperH-package`、`/supperH-test`
@@ -97,11 +97,12 @@ git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
 | `node scripts/sync-assets.mjs` | **仅跑同步**：定位私有根 → 复制+替换 → 残留检测（阻断）→ L1 纯度扫描（阻断）→ 打包 dist → 装到 Qoder（配置校验不在 sync 里，由 `validate-project.mjs` 负责） | `npm run sync` |
 | `node scripts/sync-assets.mjs --check` | 只跑同步的前半段（不写入）；有残留占位符 → exit 1；**dist 与源不一致（陈旧/孤儿文件）→ exit 4**；**上传物里出现注册条目的专有值或本机绝对路径 → exit 5**（可 `--allow-l1-fact <值>` 显式放行） | `npm run sync:check` |
 | `node scripts/validate-project.mjs` | 校验注册表里**全部** `projects/<code>.yaml` 结构与 schemaVersion（含 identity.code 缺失、code 重复等静默失效项）；可加 `--project <code>` / `--file <path>` / `--json` | `npm run validate` |
-| `node scripts/resolve-project.mjs --cwd <路径>` | **运行期唯一门禁**：项目身份解析 + 快路径准入 + I0 意图复述 + G5 回灌 + `--preflight` 本地事实（退出码即分流，见 `docs/architecture.md` §10） | —（agent 直调，不带别名） |
+| `node scripts/resolve-project.mjs --cwd <路径>` | **运行期唯一门禁**：项目身份解析 + 快路径准入 + I0 意图复述 + G5 回灌 + `--preflight` 本地事实、流程学习前置就绪判定 `--flow-readiness`、确定性分片计划 `--flow-plan`（后两支**只读不写盘**；退出码即分流，见 `docs/architecture.md` §10） | —（agent 直调，不带别名） |
 | `node scripts/bootstrap.mjs` | CLI 版引导（等价于 `/supperH-bootstrap`，不依赖 IDE）：只建骨架；`--check` 报就绪状态，`--migrate` 才处置 legacy 单文件 | `npm run bootstrap` |
 | `node scripts/init-project.mjs` | 工作区级注册：预填结构字段落 `projects/<code>.yaml`（`/supperH-init` 的引擎）。接不接外部源由 `connect` / `db.*` 决定：接了整段生成、没接整段不写。第三种模式 `--reinit --cwd\|--code`：清场重配，列/撤 init 生成过的注册物（`--purge` 才搬，进 `_retired/`；学习数据非空退 **23**，需 `--confirm <code>`）| `npm run init-project` |
 | `node scripts/driver-registry.mjs` | 登记条目的唯一写入路径：`list` / `add` / `update` / `remove` / `health`。文本手术不 round-trip（注释是字段读法载体）、写前差分过 schema、探活不过不落盘（`--force` 才降级）、删条目要 `--yes` | —（`/supperH-driver` 直调） |
 | `node scripts/migrate-registry.mjs` | legacy 单文件 `project.yaml` → 注册表模型迁移 | `npm run migrate-registry` |
+| `node scripts/flow-engine.mjs` | **流程分区落盘引擎**（`flows` 分区的唯一写入路径与 route 归一化的全仓唯一实现）：`append`（本波各片追加进未启用新代 `flow-parts/`，不校验不切）/ `finalize`（折叠去重 + 生成 `flow-index.md` + 五类端点自检 + 校验 + 切 `CURRENT` 一次）/ `check`（重算 `flow-check.md`，报告不是数据）/ `query`（按归一化 route 现查 prev 与 next）/ `plan`（聚片算法，`--flow-plan` 与它同源） | —（由 supperH-prelearn-writer 经 bash 直调） |
 | `node scripts/detect-ide.mjs` | 探测本机 IDE（输出 JSON） | `npm run detect-ide` |
 | `node --test "tests/**/*.test.mjs"` | 全量用例（必须用这个 glob 形态：`node --test tests/` 会把目录本身当成一个测试文件跑，结果永远是一条失败） | `npm test` |
 | 无脚本（人在终端跑） | 启用 `.githooks/pre-commit`：动作是 `git config core.hooksPath .githooks`。`config` 不在 agent 的 git 白名单里（R2），所以它只能人自己做 | `npm run setup:hooks` |
@@ -122,7 +123,7 @@ supper-Han-java/
 ├── mcp-skeleton/          MCP 壳 server + 共享契约包 supperh_contract（mcp 通道；零凭据）
 ├── scripts/               resolve-project / fastpath-gate / git-preflight / sync-assets /
 │                          validate-project / resolve-private-root / setup / detect-ide /
-│                          bootstrap / init-project / driver-registry / migrate-registry
+│                          bootstrap / init-project / driver-registry / migrate-registry / flow-engine
 ├── .qoder/rules/          项目无关红线（零占位符，clone 即生效）
 ├── .githooks/             降级式 pre-commit
 ├── docs/                  架构文档 + 占位符清单 + 页面档案模型设计（F-15，未实现）
@@ -141,7 +142,7 @@ supper-Han-java/
 ├── logs/                  运行期记账（fastpath-*.jsonl、壳 server 诊断；首次写入时自建）
 ├── _retired/              清场重配（/supperH-init --reinit --purge）搬走的旧注册物 + manifest.json；不进骨架清单，也不会有人自动清它
 ├── project.yaml           legacy 单文件条目（注册表模型之前的形态；仍可读，bootstrap 会提示迁移）
-└── context/<project>/<module>/gen-*/    学习数据（CURRENT 原子切换）
+└── context/<project>/<module>/gen-*/    学习数据（CURRENT 原子切换；保留分区 screens / flows）
 ```
 
 ---

@@ -21,6 +21,17 @@ const __dirname  = path.dirname(__filename);
 // 直到页面学习首次写盘才撞上 ENOENT（距离成因三个环节）。
 export const PRIVATE_SUBS = ['projects', 'screens', 'drivers', 'context', 'tasks'];
 
+/**
+ * Windows 盘符大小写不敏感，但**字符串比较敏感**：`fileURLToPath(import.meta.url)` 的盘符
+ * 随启动时的 cwd 而变（`npm run` 递进来 `C:\`，`spawnSync({cwd:'c:/...'})` 递进来 `c:\`），
+ * 于是同一个私有根会被认成两个 —— `dist/mcp-skeleton/private-root.txt` 里烤入的值与
+ * 运行期算出的值就这么对不上。在**唯一入口**上归一（盘符大写），不留给各个比较点
+ * 自己记得 `toLowerCase()`：漏一处就是一个只在特定启动方式下才复现的假失败。
+ */
+export function normalizeDriveCase(p) {
+  return String(p ?? '').replace(/^([a-z]):(?=[\\/]|$)/i, (m, d) => d.toUpperCase() + ':');
+}
+
 /** mkdir -p 幂等补齐骨架。返回本次真正新建的子目录名（已存在的不进列表）。 */
 export function ensurePrivateSkeleton(privateRoot, { dryRun = false } = {}) {
   const created = [];
@@ -41,7 +52,7 @@ function countRegistry(dir) {
 }
 
 export function resolvePrivateRoot() {
-  const toolRoot = path.resolve(__dirname, '..');
+  const toolRoot = normalizeDriveCase(path.resolve(__dirname, '..'));
   let privateRoot;
   const env = process.env.SUPPERH_PRIVATE_ROOT;
   if (env && env.trim()) {
@@ -49,6 +60,7 @@ export function resolvePrivateRoot() {
   } else {
     privateRoot = path.resolve(toolRoot, '..', 'supper-Han-private');
   }
+  privateRoot = normalizeDriveCase(privateRoot);   // 上面两个分支汇流到同一个形状
   const exists      = fs.existsSync(privateRoot) && fs.statSync(privateRoot).isDirectory();
   const projectFile = path.join(privateRoot, 'project.yaml');
   const projectsDir = path.join(privateRoot, 'projects');

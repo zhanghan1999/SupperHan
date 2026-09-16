@@ -10,7 +10,7 @@
 
 ```bash
 # 1. 克隆本仓库到任意位置
-git clone https://github.com/zhanghan1999/supper-Han-java-.git
+git clone https://github.com/zhanghan1999/SupperHan.git
 cd supper-Han-java
 
 # 2. 装依赖（脚本自身要 import yaml 包，这一步没有 node 直调等价物）
@@ -64,7 +64,7 @@ node scripts/setup.mjs --check           # 只体检不写入
 | `dev` | 全量 L1 资产（`agents/` `commands/` `skills/` `scripts/` `schemas/` `mcp-skeleton/` `drivers-skeleton/` `tests/` `.qoder/`） | **实际使用就 checkout 这条**；`npm install` + `node scripts/setup.mjs` 的完整链路只在它身上成立 |
 
 ```bash
-git clone -b dev https://github.com/zhanghan1999/supper-Han-java-.git
+git clone -b dev https://github.com/zhanghan1999/SupperHan.git
 ```
 
 两条分支的历史**互不相干**（各自孤儿提交）：说明文件与代码分头演进，也让 `master` 的 diff 保持"只有文档"这一可读承诺。

@@ -100,7 +100,22 @@ function probeOpencodeMcp(opencodeHome) {
   return { registered: false, path: path.join(home, OPENCODE_CONFIG_FILES[0]), reason };
 }
 
-export function detectIde({ workspaceCwd, opencodeHome: opencodeHomeOverride } = {}) {
+// DSH 的 supperH 通道 = $DSH_HOME/skills 下的 supperh-* skill + AGENTS.md 托管区块。
+// MCP 走 profile 的 cordis.patch.yml（仓库外，探测不到也不报错）：这里只探技能通道是否就绪。
+function probeDshChannel(dshHome) {
+  const skillsDir = path.join(dshHome, 'skills');
+  if (!isDir(skillsDir)) return { registered: false, path: dshHome, reason: 'no skills/ dir' };
+  const n = fs.readdirSync(skillsDir).filter((x) => /^supperh-/.test(x)).length;
+  let agentsBlock = false;
+  try {
+    const f = path.join(dshHome, 'AGENTS.md');
+    if (fs.existsSync(f)) agentsBlock = /BEGIN supperH rules/.test(fs.readFileSync(f, 'utf8'));
+  } catch { agentsBlock = false; }
+  if (n === 0) return { registered: false, count: 0, path: dshHome, reason: 'no supperh-* skills yet (run setup --target dsh)' };
+  return { registered: true, count: n, agentsBlock, path: dshHome, reason: n + ' supperh-* skills' };
+}
+
+export function detectIde({ workspaceCwd, opencodeHome: opencodeHomeOverride, dshHome: dshHomeOverride } = {}) {
   const env = process.env;
   const all = [];
   const evidence = {};
@@ -145,6 +160,21 @@ export function detectIde({ workspaceCwd, opencodeHome: opencodeHomeOverride } =
       const ws = path.join(workspaceCwd, '.opencode');
       if (isDir(ws)) evidence.opencodeWorkspace = ws;
     }
+  }
+
+  // ---- DSH --------------------------------------------------------------
+  // DSH 用户长期使用时会优先在这里装，故探测到时排在最前（primary=dsh）。
+  const dshHomeCandidates = [
+    dshHomeOverride,
+    env.SUPPERH_DSH_HOME,
+    env.DSH_HOME,
+    path.join(HOME, '.dsh'),
+  ].filter(Boolean);
+  const dshHome = firstExisting(dshHomeCandidates);
+  if (dshHome) {
+    all.unshift('dsh');
+    evidence.dsh = dshHome;
+    mcp.dsh = probeDshChannel(dshHome);
   }
 
   // ---- portable fallback (always available) -----------------------------

@@ -16,7 +16,7 @@ cd supper-Han-java
 # 2. 装依赖（脚本自身要 import yaml 包，这一步没有 node 直调等价物）
 npm install
 
-# 3. 一条命令完成：建私有根骨架 → 探测 IDE（Qoder / OpenCode）→ sync → 安装
+# 3. 一条命令完成：建私有根骨架 → 探测 IDE（Qoder / OpenCode / DSH）→ sync → 安装
 node scripts/setup.mjs
 #    注册项目是另一件事：到**目标 Java 项目的工作区**跑 /supperH-init（它扫结构 + 问你接哪些外部源）
 
@@ -34,8 +34,11 @@ node scripts/setup.mjs
 ```bash
 node scripts/setup.mjs --target qoder    --yes
 node scripts/setup.mjs --target opencode --dest ~/.config/opencode --yes
+node scripts/setup.mjs --target dsh      --yes   # 装进 $DSH_HOME（未设时 ~/.dsh），入口是 /supperh-*（小写）
 node scripts/setup.mjs --check           # 只体检不写入
 ```
+
+`--target auto`（默认）会优先选已探测到的 DSH（长期用它时不必每次指定 target）。
 
 ---
 
@@ -60,7 +63,7 @@ node scripts/setup.mjs --check           # 只体检不写入
 
 | 分支 | 内容 | 用途 |
 |------|------|------|
-| `master` | **只有说明文件**：本 `README.md` + `docs/` + 两份 IDE 适配说明 | 落地页；clone 下来先读懂再决定拉哪条 |
+| `master` | **只有说明文件**：本 `README.md` + `docs/` + 三份 IDE 适配说明 | 落地页；clone 下来先读懂再决定拉哪条 |
 | `dev` | 全量 L1 资产（`agents/` `commands/` `skills/` `scripts/` `schemas/` `mcp-skeleton/` `drivers-skeleton/` `tests/` `.qoder/`） | **实际使用就 checkout 这条**；`npm install` + `node scripts/setup.mjs` 的完整链路只在它身上成立 |
 
 ```bash
@@ -92,10 +95,10 @@ git clone -b dev https://github.com/zhanghan1999/SupperHan.git
 
 | 命令 | 作用 | npm 别名 |
 |------|------|---------|
-| `node scripts/setup.mjs` | **一键总入口**：建私有根 → sync → 探测 IDE → 安装到 Qoder 或 OpenCode（`--skip-npm` 不重跑装依赖） | `npm run setup` |
+| `node scripts/setup.mjs` | **一键总入口**：建私有根 → sync → 探测 IDE → 安装到 Qoder / OpenCode / DSH（`--skip-npm` 不重跑装依赖） | `npm run setup` |
 | `node scripts/setup.mjs --check` | 只体检不写入 | `npm run setup:check` |
 | `node scripts/sync-assets.mjs` | **仅跑同步**：定位私有根 → 复制+替换 → 残留检测（阻断）→ L1 纯度扫描（阻断）→ 打包 dist → 装到 Qoder（配置校验不在 sync 里，由 `validate-project.mjs` 负责） | `npm run sync` |
-| `node scripts/sync-assets.mjs --check` | 只跑同步的前半段（不写入）；有残留占位符 → exit 1；**dist 与源不一致（陈旧/孤儿文件）→ exit 4**；**上传物里出现注册条目的专有值或本机绝对路径 → exit 5**（可 `--allow-l1-fact <值>` 显式放行） | `npm run sync:check` |
+| `node scripts/sync-assets.mjs --check` | 只跑同步的前半段（不写入）；有残留占位符 → exit 1；**dist 与源不一致（陈旧/孤儿文件）→ exit 4**；**上传物里出现注册条目的专有值或本机绝对路径 → exit 5**（可 `--allow-l1-fact <值>` 显式放行）；**per-IDE 配置文档不合规（白名单外/缺件/跑题/非适配内容）→ exit 8** | `npm run sync:check` |
 | `node scripts/validate-project.mjs` | 校验注册表里**全部** `projects/<code>.yaml` 结构与 schemaVersion（含 identity.code 缺失、code 重复等静默失效项）；可加 `--project <code>` / `--file <path>` / `--json` | `npm run validate` |
 | `node scripts/resolve-project.mjs --cwd <路径>` | **运行期唯一门禁**：项目身份解析 + 快路径准入 + I0 意图复述 + G5 回灌 + `--preflight` 本地事实、流程学习前置就绪判定 `--flow-readiness`、确定性分片计划 `--flow-plan`（后两支**只读不写盘**；退出码即分流，见 `docs/architecture.md` §10） | —（agent 直调，不带别名） |
 | `node scripts/bootstrap.mjs` | CLI 版引导（等价于 `/supperH-bootstrap`，不依赖 IDE）：只建骨架；`--check` 报就绪状态，`--migrate` 才处置 legacy 单文件 | `npm run bootstrap` |
@@ -103,7 +106,7 @@ git clone -b dev https://github.com/zhanghan1999/SupperHan.git
 | `node scripts/driver-registry.mjs` | 登记条目的唯一写入路径：`list` / `add` / `update` / `remove` / `health`。文本手术不 round-trip（注释是字段读法载体）、写前差分过 schema、探活不过不落盘（`--force` 才降级）、删条目要 `--yes` | —（`/supperH-driver` 直调） |
 | `node scripts/migrate-registry.mjs` | legacy 单文件 `project.yaml` → 注册表模型迁移 | `npm run migrate-registry` |
 | `node scripts/flow-engine.mjs` | **流程分区落盘引擎**（`flows` 分区的唯一写入路径与 route 归一化的全仓唯一实现）：`append`（本波各片追加进未启用新代 `flow-parts/`，不校验不切）/ `finalize`（折叠去重 + 生成 `flow-index.md` + 五类端点自检 + 校验 + 切 `CURRENT` 一次）/ `check`（重算 `flow-check.md`，报告不是数据）/ `query`（按归一化 route 现查 prev 与 next）/ `plan`（聚片算法，`--flow-plan` 与它同源） | —（由 supperH-prelearn-writer 经 bash 直调） |
-| `node scripts/detect-ide.mjs` | 探测本机 IDE（输出 JSON） | `npm run detect-ide` |
+| `node scripts/detect-ide.mjs` | 探测本机 IDE（Qoder / OpenCode / DSH，输出 JSON） | `npm run detect-ide` |
 | `node --test "tests/**/*.test.mjs"` | 全量用例（必须用这个 glob 形态：`node --test tests/` 会把目录本身当成一个测试文件跑，结果永远是一条失败） | `npm test` |
 | 无脚本（人在终端跑） | 启用 `.githooks/pre-commit`：动作是 `git config core.hooksPath .githooks`。`config` 不在 agent 的 git 白名单里（R2），所以它只能人自己做 | `npm run setup:hooks` |
 

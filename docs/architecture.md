@@ -480,7 +480,7 @@ L1 资产可以被两个通道装载（Qoder 插件 / OpenCode 配置目录）�
 | 红线四件套 `.qoder/rules/*.md` | OpenCode 侧不拷，写 `opencode.json` 的 `instructions: ["<TOOL_ROOT>/.qoder/rules/*.md"]` | rules 是**行为约束**，两份副本必然漂移（Qoder 改了、OpenCode 还拿旧副本办事）；指回工具仓后改红线不需重装。代价：工具仓不得删/改名/搬家，搬家后重跑 setup（旧 glob 按 `/.qoder/rules/*.md` 后缀识别并替换，不累积） |
 | 用户配置文件 `opencode.json(c)` | merge-only，且**只拥有 `opencode.json`** | `.jsonc` 是用户文件，`JSON.stringify` dump 会抹掉注释；带注释的 `.json` 同样拒写，只打印待粘贴片段（fail-loud 比静默不生效好）。两个文件名 OpenCode 都会加载，所以探测必须两个都看（只看 `.json` 在“本机只有 `.jsonc`”上永久假阴性） |
 
-命令 / agent / skill 正文**仍是拷贝件**（OpenCode 只能按目录发现它们，没有“声明指向另一个仓库”的稳定约定）—— 所以改了这三类源码必须两边各装一次。这条限制写进两份适配说明的“共用数据”一节，不让人靠猜。
+命令 / agent / skill 正文**仍是拷贝件**（OpenCode 只能按目录发现它们，没有“声明指向另一个仓库”的稳定约定）—— 所以改了这三类源码必须三边各装一次（Qoder / OpenCode / DSH，DSH 侧重跑 `setup --target dsh` 即整块刷新拷贝件）。这条限制写进三份适配说明，不让人靠猜。
 
 数据层本身天然工具无关：可变态全在私有根（`projects/ screens/ context/ tasks/ drivers/ prefs.md`），路径 token 由主 agent 步骤 0 跑 `resolve-project.mjs` 运行期现填，所以 Qoder 学出来的模块 OpenCode 直接可读（反之亦同）。
 
@@ -662,6 +662,7 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 | 锁 | 判据 |
 |---|---|
 | `sync-assets.mjs` → `namespaceProblems()` → **exit 7** | 四条：① `agents/` `commands/` 每个 `.md` 的 stem 与 `skills/` 每个目录名匹配 `^supperH-[a-z0-9][a-z0-9-]*$`；② `skills/<dir>/SKILL.md` 的 `name:` 必须等于 `<dir>`（`mismatch`），缺 `name:` 也算红（`noname`）；③ 三个资产目录都不许空（`empty`——空目录会把 dist 烤成"没有 agent 的插件"而 sync 自己一切正常）；④ `LEGACY_NAMES` 不得再出现在运行期加载目录 `agents/ commands/ skills/ .qoder/`（`legacy`） |
+| `sync-assets.mjs` → `ideDocsProblems()` → **exit 8** | per-IDE 适配文档门禁（dev20260918 起）：仓库根的 `*适配说明.md` 必须精确等于 `IDE_DOCS` 白名单（qoder / opencode / dsh 三份）；每份 H1 以自家 IDE 名开头、含自家安装根字面量（`.qoder-cn` / `.config/opencode` / `$DSH_HOME`）、且不含非适配性历史标记（账本 / 结论 / 回退 / 清理类）。**不为别的 IDE 维护专属"非适配性"文档**：机制研究、历史账本、结论一律放共享文档 |
 | `tests/asset-naming.test.mjs` 集合相等 | 目录里的资产集合 == `AGENT_IDS` / `SKILL_IDS`：新增资产忘登记就红。**前两条判据不查改名表**，所以"表里没名字"不是放行理由——门禁判形态，登记表只承载历史与角色名 |
 | 同上，角色名两条 | 每个资产 `description:` 以 `<标识符>（<角色>）` 开头且正文 H1 == `headingFor(id)`；派单侧文件非路径形提及某资产时必须 spelled out 一次角色名（围栏代码块与 `skills/x/SKILL.md` 这类路径形除外——往路径里插中文括号会把路径写坏） |
 | 同上，门禁自证 | 临时目录里造四种坏法（裸名文件 / `name:` 与目录不符 / 缺 `name:` / 资产目录清空），逐个断言真会红。只测"当前是干净的"等于没测门禁 |
@@ -763,7 +764,7 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 
 **schema**：新增 `schemas/screens.schema.yaml`（顶层 `schemaVersion: const 2`、`discovery` `minItems: 1`、`items` oneOf 四支、全层 `additionalProperties: false`）+ `screens.example.yaml`；删 `menu.schema.yaml` / `menu.example.yaml`；`validate-project.mjs` 纳入 screens 校验。
 
-**文档与资产**：契约限定语（`data.screens`、`module: screens`、`mode: screen`、`screenSource`）、命令层（learn / init 步骤 3）、writer / analyzer / prelearn SKILL、README、两份适配说明、`.qoder/rules/` 全部改名。对外称呼：学习对象 = `screen`，产物分区名 / frontmatter `kind` = `screens`，配置文件 = `screens/<code>.yaml`，对人描述 = "页面学习"。
+**文档与资产**：契约限定语（`data.screens`、`module: screens`、`mode: screen`、`screenSource`）、命令层（learn / init 步骤 3）、writer / analyzer / prelearn SKILL、README、三份适配说明、`.qoder/rules/` 全部改名。对外称呼：学习对象 = `screen`，产物分区名 / frontmatter `kind` = `screens`，配置文件 = `screens/<code>.yaml`，对人描述 = "页面学习"。
 
 **取代关系**：本节落地取代 §10.12 / §10.14 / §10.16 / §10.19 中 `menu` / `menus/` / `菜单配置` / `--menu` 的旧措辞，以及 §10.16 里 `renderMenuConfig` 逐行 `setLine` 的采集机制描述（v2 已改直接装配 + `YAML.stringify`）。那些是 dated 台账，按 append-only 保留原文不删，**以本节为准**。**F-15 的 F-15c–e（六段产物骨架 / 键依赖图 hops / `evidence` 轴门禁 / 下钻树形与探测优先纪律）仍待做**，本轮只落"改名 + v2 discovery 采集 + schema"这一格；全文见 `docs/screen-partition.md`。
 
@@ -819,6 +820,31 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 **根因归类**：与 F-17/F-18 同盲区（权限声明层与提示词动作层此前无一致性校验），差别只在护栏的措辞覆盖面。本轮把读侧肯定式补到"含无介词前缀的动词'读'"，并首次引入否定后瞻处理肯定/否定二义。
 
 ---
+### 10.25 DSH 适配层：skill 生成 + per-IDE 配置文档门禁（dev20260918）
+
+**需求源**：长期使用 DSH，所以把 supperH 智能体流适配进 DSH；且**每 IDE 只维护一份配置文档**，
+不为别的 IDE 维护专属的“非适配性”文档（机制研究 / 历史账本 / 结论 / 回退一律放共享文档）。
+
+**适配形态（不动 22 个资产正文与门禁脚本）**：DSH 的斜杠入口只有 skill 的 /name 手势且命名强制
+小写 kebab-case，所以把 sync 后的 dist + 红线四件套**生成**成 `supperh-*` skill（生成器
+`scripts/dsh-assets.mjs`，纯函数可单测）：命令 → user-invocable + disable-model-invocation、
+角色 → user-invocable: false、协议 → user-invocable: false、红线四件套 → `supperh-rules` skill
++ `AGENTS.md` 短区块（带 BEGIN/END 标记，重跑整块替换）。安装走 `setup.mjs --target dsh`
+（复用清单式陈旧清理 `supperh-installed.json`，用户自放文件不动）；探测
+`detect-ide.mjs` 新增 DSH（`--target auto` 优先选它）。
+
+**per-IDE 配置文档门禁（`ideDocsProblems()` → exit 8）**：仓库根的 `*适配说明.md` 必须精确等于
+白名单（qoder / opencode / dsh 三份）；每份 H1 以自家 IDE 名开头、含自家安装根字面量
+（`.qoder-cn` / `.config/opencode` / `$DSH_HOME`）、不含非适配性历史标记。想新增/改名
+任何一份都得先改 `sync-assets.mjs` 的 `IDE_DOCS` 白名单 —— 门禁自己就是这道纪律的机械保证。
+
+**双开安全边界（答复用户“opencode + dsh 同时处理不同 bug”）**：可行。① 同一私有根 —— 各边跑
+`resolve-private-root.mjs` 比对 `privateRoot` + `registryCount` 相等，裂根只来自有人另设
+`SUPPERH_PRIVATE_ROOT`；② 不同模块 —— `CURRENT` 是 tmp+rename 原子切换、copy-on-write、
+last-writer-wins，结构安全但会覆盖，故不同 checkout / 不同模块互不干扰；③ 不同 checkout ——
+git 层面冲突与适配无关。driver-registry 并发登记是 read-modify-write 无锁，低频可忽略。
+
+---
 ## 11. 一期范围与二三期规划
 
 **一期做**：
@@ -852,7 +878,7 @@ commands 从未撞上，因为它们的名字从一开始就带 `supperH-` 前�
 - 真实私有 MCP adapter（`{{PRIVATE_ROOT}}/drivers/<code>/adapter.py`）与官方数据库/日志 server 的内网可用性探测；每项目独立 venv（现共享解释器 site-packages）；IDE 对 MCP `tools/list_changed` 的消费行为未实测，不作设计地基
 - 存量仓库（跨仓）命令行里的路径字面串 → token 收敛（需先定位到真实 driver 迁入 `{{PRIVATE_ROOT}}/drivers/<code>/` 后才能验收“正则 `python\s+"?[A-Za-z]:[/\\]` 命中数 0”）—— L1 自身的 `{{DRIVERS_ROOT}}` 展开缺陷已修（见 §9 与 `docs/placeholders.md` §3.3）
 - 工单 watcher（task-1024 已定为二期）
-- Claude Code / DSH 兼容层（二期）
+- Claude Code 兼容层（二期）。**DSH 兼容层一期已于 `dev20260918` 落地**：`setup.mjs --target dsh` 把 dist + 红线四件套生成成 `supperh-*` skill 装进 `$DSH_HOME`，并合并 `AGENTS.md` 托管区块；生成器 `scripts/dsh-assets.mjs`、探测 `detect-ide.mjs`、测试 `tests/setup-dsh.test.mjs`、配置文档 `dsh适配说明.md`
 - marketplace 发布通道（二期）
 - supperH-auto-fix 的 CLI 化实现（一期只出协议骨架）
 - **快路径 P1 未完部分**：A1 锚点反查的**实际内网 driver 实现**（由用户经 `/supperH-driver` 逐个登记；L1 不规定它叫什么名字、也不假设有几个）——代码/契约/退出码已全部就位，缺的只是驱动本体；驱动未就绪时 F1.4 自动退回完整路径

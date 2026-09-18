@@ -321,7 +321,7 @@ const L1_SCAN_DIRS = ['agents', 'commands', 'skills', 'schemas', 'drivers-skelet
 // 两份适配说明原本不在名单里 → 其中一份整份躺 \r\r\n 而没人发现，直到一次普通编辑
 // 把 250 行文件重排成 500 行（工具按行读写时把多余 CR 当成空行）。纯度与行尾两条体检共用这份名单。
 const L1_SCAN_FILES = ['README.md', 'package.json', '.gitignore',
-  'qoder适配说明.md', 'opencode适配说明.md'];
+  'qoder适配说明.md', 'opencode适配说明.md', 'dsh适配说明.md'];
 // 只有这些 L2 字段值得当“事实”比对：模块名/分支名一类高复用词（order、dev）会淹没信号。
 const FACT_FIELDS = [
   ['identity.code', (d) => d?.identity?.code],
@@ -570,6 +570,67 @@ function printNamespace(list, tag) {
   console.error(`${tag} 修法：文件名 / 目录名 / SKILL.md 的 name: 三处统一加 ${NS} 前缀，旧裸名不留别名。`);
 }
 
+// ---- per-IDE 适配文档门禁：每 IDE 只维护一份"配置文档" ---------------------------
+// 红线（用户原话的机械化）：不为别的 IDE 维护专属的"非适配性"文档 —— 每份 *适配说明.md
+// 只讲自己 IDE 的配置/装法；机制研究、历史账本、结论、跨 IDE 专属内容一律不进 IDE 文档
+// （共享知识放 README / docs/architecture.md）。判据四条：
+//   1. 仓库根的 *适配说明.md 精确等于 IDE_DOCS 白名单 —— 新增/改名任何一份都得先改本名单，
+//      这就是"想为别的 IDE 维护文档必须先过门禁本身"的机械保证；
+//   2. 每份文档 H1 以自家 IDE 名开头（证明它是"某 IDE 的配置文档"）；
+//   3. 每份文档含自家 IDE 的安装根字面量（证明它是配置/适配文档，不是分析/杂记）；
+//   4. 每份文档不得含非适配性历史标记（账本/结论/回退/清理 —— 这类内容不该住进任何 IDE 文档）。
+const IDE_DOCS = {
+  qoder:    'qoder适配说明.md',
+  opencode: 'opencode适配说明.md',
+  dsh:      'dsh适配说明.md',
+};
+const IDE_TITLE_PREFIX = { qoder: 'Qoder 适配说明', opencode: 'OpenCode 适配说明', dsh: 'DSH 适配说明' };
+const IDE_INSTALL_ROOT = { qoder: '.qoder-cn', opencode: '.config/opencode', dsh: '$DSH_HOME' };
+const IDE_NONCONFIG_MARKERS = ['不建议使用', '账本', '实验残留', '上一轮', '成本不对称',
+  '机制事实', '本仓库不提供', '清理本机'];
+
+/** 每 IDE 配置文档的体检。当前仓库必须通过；测试直接断言"当前仓库干净"。 */
+export function ideDocsProblems(toolRoot) {
+  const problems = [];
+  const rel = (p) => p.split(path.sep).join('/');
+  const files = fs.existsSync(toolRoot)
+    ? fs.readdirSync(toolRoot).filter((f) => f.endsWith('适配说明.md'))
+    : [];
+  for (const f of files) {
+    if (!Object.values(IDE_DOCS).includes(f)) {
+      problems.push({ kind: 'extra-ide-doc', file: f });
+    }
+  }
+  for (const [ide, f] of Object.entries(IDE_DOCS)) {
+    const p = path.join(toolRoot, f);
+    if (!fs.existsSync(p)) { problems.push({ kind: 'missing-ide-doc', file: f }); continue; }
+    const text = readText(p);
+    const h1 = (text.match(/^#\s+[^\n]+/m) || [''])[0].trim();
+    if (!h1.startsWith('# ' + IDE_TITLE_PREFIX[ide])) {
+      problems.push({ kind: 'own-title', ide, file: f, h1 });
+    }
+    if (!text.includes(IDE_INSTALL_ROOT[ide])) {
+      problems.push({ kind: 'own-config', file: f, want: IDE_INSTALL_ROOT[ide] });
+    }
+    for (const m of IDE_NONCONFIG_MARKERS) {
+      if (text.includes(m)) problems.push({ kind: 'non-config', file: f, marker: m });
+    }
+  }
+  return problems;
+}
+
+function printIdeDocs(list, tag) {
+  console.error(`${tag} per-IDE 配置文档不合规（IDE 文档只许是配置/适配文档，一份一个 IDE）：`);
+  for (const p of list) {
+    if (p.kind === 'extra-ide-doc')  console.error(`  ${p.file}: 白名单外的新 IDE 文档 —— 不为别的 IDE 维护专属文档；真要新增通道，先改 sync-assets.mjs 的 IDE_DOCS 白名单`);
+    else if (p.kind === 'missing-ide-doc') console.error(`  ${p.file}: 白名单内的配置文档缺失`);
+    else if (p.kind === 'own-title')  console.error(`  ${p.file}: H1 必须以「# ${IDE_TITLE_PREFIX[p.ide]}」开头（现在是 ${JSON.stringify(p.h1)}）`);
+    else if (p.kind === 'own-config') console.error(`  ${p.file}: 缺自家 IDE 安装根字面量 ${JSON.stringify(p.want)} —— 它不像配置文档`);
+    else if (p.kind === 'non-config') console.error(`  ${p.file}: 含非适配性内容标记 ${JSON.stringify(p.marker)} —— 机制研究/账本/结论/回退不该住进 IDE 文档（放 README / docs/architecture.md）`);
+  }
+  console.error(`${tag} 修法：每份 IDE 文档只讲自己 IDE 的装法/生效/刷新；共享知识放共享文档。`);
+}
+
 /** 整条纯度扫描的入口：读注册表 + 列上传物 + 求违规。测试直接拿它断言“真仓库当前干净”。 */
 export function checkL1Purity(toolRoot, info, allow = []) {
   const facts = [];
@@ -730,6 +791,12 @@ function main() {
       console.error('[sync --check] BLOCKING. 这种 dist 装出去，同名资产会被别的插件顶掉且不报错。');
       process.exit(7);
     }
+    const ideDocs = ideDocsProblems(info.toolRoot);
+    if (ideDocs.length) {
+      printIdeDocs(ideDocs, '[sync --check]');
+      console.error('[sync --check] BLOCKING. IDE 文档只许是配置文档。');
+      process.exit(8);
+    }
     const distDir = path.join(info.toolRoot, 'dist', PLUGIN_NAME);
     // A fresh clone has no dist/ at all (it is git-ignored). That is "not built yet",
     // not "built from stale sources" - only the latter is worth blocking on.
@@ -771,6 +838,12 @@ function main() {
     printNamespace(ns, '[sync]');
     console.error('[sync] BLOCKING. 先补齐命名空间，再烤 dist。');
     process.exit(7);
+  }
+  const ideDocs = ideDocsProblems(info.toolRoot);
+  if (ideDocs.length) {
+    printIdeDocs(ideDocs, '[sync]');
+    console.error('[sync] BLOCKING. IDE 文档只许是配置文档。');
+    process.exit(8);
   }
   const distDir = ensureDist(info.toolRoot);
   for (const d of COPY_DIRS) {

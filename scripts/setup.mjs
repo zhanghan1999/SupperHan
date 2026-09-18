@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { resolvePrivateRoot, ensurePrivateSkeleton } from './resolve-private-root.mjs';
 import { detectIde, OPENCODE_CONFIG_FILES } from './detect-ide.mjs';
+import * as dsh from './dsh-assets.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOOL_ROOT = path.resolve(__dirname, '..');
@@ -73,7 +74,7 @@ function parseArgs(argv) {
 }
 function usage() {
   console.log(`Usage: node scripts/setup.mjs [flags]
-  --target auto|qoder|opencode|portable   install channel (default auto-detect)
+  --target auto|qoder|opencode|dsh|portable   install channel (default auto-detect)
   --dest <path>                           override install dir (opencode/portable only)
   --skip-npm                              do not run npm install automatically
   --skip-sync                             do not re-run sync-assets (dist must be fresh)
@@ -149,8 +150,8 @@ function removeEmptyUpwards(start, stopRoot) {
 // 只删「上一次 supperH 自己按清单放下的文件」：
 // rm -rf 目标目录会连用户手放进 agent/command/skill 的东西一起抹掉；
 // 完全不删则改名/删掉的命令会以陈旧副本继续被加载。两者都不可接受，故走清单 + 边界校验。
-function prunePrevious(target) {
-  const roots = Object.values(OPENCODE_MAP).map(n => path.resolve(target, n));
+function prunePrevious(target, roots = Object.values(OPENCODE_MAP).map(n => path.resolve(target, n))) {
+  // roots 缺省 = OpenCode 的四个加载目录；DSH 目标显式传 ['skills']。
   let removed = 0;
   for (const rel of readManifest(target)) {
     const abs = path.resolve(target, rel);           // rel 是绝对路径（换机器的旧清单）时原样返回 → 下面越界判定拦下
@@ -381,6 +382,44 @@ function installToOpencode(opts, dest) {
   return target;
 }
 
+// DSH 没有"命令目录"：斜杠入口只有 skill 的 /name 手势，且命名强制全小写 kebab-case。
+// 所以 DSH 通道 = 把 dist/{commands,agents,skills} + .qoder/rules/*.md 生成成 23 个
+// supperh-* skill（scripts/dsh-assets.mjs），再合并 AGENTS.md 托管区块。生成件是拷贝件，
+// 改源码后重跑本命令刷新；安装走清单式清理（supperh-installed.json），用户自放文件不动。
+function dshHomeFor(opts) {
+  return opts.dest
+    || process.env.SUPPERH_DSH_HOME
+    || process.env.DSH_HOME
+    || path.join(os.homedir(), '.dsh');
+}
+
+function installToDsh(opts) {
+  const target = dshHomeFor(opts);
+  if (opts.dryRun) {
+    log('[dry-run] would generate DSH skills (from dist + .qoder/rules) into ' + path.join(target, 'skills') + ' and merge AGENTS.md');
+    return target;
+  }
+  ensureDir(target);
+  const pruned = prunePrevious(target, [path.join(target, 'skills')]);
+  if (pruned) log('dsh: 清理上次安装产物 ' + pruned + ' 个文件（按清单，不动用户自放文件）');
+  const gen = dsh.generateAll({ distDir: DIST_DIR, rulesDir: path.join(TOOL_ROOT, '.qoder', 'rules'), toolRoot: TOOL_ROOT });
+  const placed = [];
+  for (const s of gen) {
+    const abs = path.join(target, s.relPath);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, s.text, 'utf8');
+    placed.push(abs);
+  }
+  log('dsh: generated ' + gen.length + ' skills -> ' + path.join(target, 'skills'));
+  const agentsFile = path.join(target, 'AGENTS.md');
+  const existing = fs.existsSync(agentsFile) ? fs.readFileSync(agentsFile, 'utf8') : '';
+  const merged = dsh.mergeAgentsBlock(existing, dsh.renderAgentsBlock({ toolRoot: TOOL_ROOT, dshHome: target }));
+  fs.writeFileSync(agentsFile, merged.text, 'utf8');
+  log('dsh: AGENTS.md ' + merged.mode + ' -> ' + agentsFile);
+  log('dsh: install manifest ' + manifestPath(target) + ' (' + writeManifest(target, placed) + ' files)');
+  return target;
+}
+
 function installPortable(opts, dest, privateRoot) {
   const target = dest || path.join(privateRoot, 'dist-portable');
   if (opts.dryRun) { log('[dry-run] would mirror dist into ' + target); return target; }
@@ -419,6 +458,7 @@ async function main() {
     switch (target) {
       case 'qoder':    installed = installToQoder(opts); break;
       case 'opencode': installed = installToOpencode(opts, opts.dest); break;
+      case 'dsh':      installed = installToDsh(opts); break;
       case 'portable': installed = installPortable(opts, opts.dest, info.privateRoot); break;
       default:         die(5, 'unknown target: ' + target);
     }
@@ -434,6 +474,7 @@ async function main() {
     // opencode 装到 --dest 时必须探那个目录，不然报的是默认 config dir 的状态（假阴性）。
     const probe = { workspaceCwd: process.cwd() };
     if (target === 'opencode' && installed && installed !== '(dry-run)') probe.opencodeHome = installed;
+    if (target === 'dsh' && installed && installed !== '(dry-run)') probe.dshHome = installed;
     const st = detectIde(probe).mcp[target];
     if (st) {
       log('mcp shell: ' + (st.registered ? 'registered ' + st.path : 'NOT registered - ' + st.reason));
@@ -458,6 +499,14 @@ async function main() {
     log('     （改 rules 即改行为、无需重装；工具仓不能删/改名，搬家后重跑一次 setup）');
     log('  6) MCP 通道默认不启用（全部槽位 kind=script）。只有项目 yaml 写了 kind: mcp 才需要');
     log('     装依赖：`pip install -r ' + path.join(installed && installed !== '(dry-run)' ? installed : '<install-dir>', 'mcp-skeleton', 'requirements.txt') + '`');
+  } else if (target === 'dsh') {
+    log('  1) skill 无需重启：DSH 有目录 watcher，下一个步骤就能看到 /supperh-* 手势');
+    log('  2) 入口是 /supperh-setup /supperh-bootstrap /supperh-init /supperh-driver /supperh-bug /supperh-learn');
+    log('     （/supperH-* 在 DSH 里解析不到 —— 命名强制全小写 kebab-case）');
+    log('  3) 首次接入一个项目：在**那个项目的工作区**里跑 /supperh-init');
+    log('     注册表在私有根，和 Qoder/OpenCode 共用同一份数据');
+    log('  4) 红线 = AGENTS.md 短区块 + supperh-rules skill 按需加载；改源码后重跑本命令刷新拷贝件');
+    log('  5) 只有改 DSH profile（MCP 等）才需重启该 profile');
   } else {
     log('  1) inspect ' + (installed || '<portable>') + ' and copy sub-folders into your IDE');
     log('  2) or re-run with --target qoder / --target opencode --dest <path>');

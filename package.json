@@ -25,6 +25,8 @@
     "agent",
     "opencode",
     "qoder",
+    "dsh",
+    "deepseek-harness",
     "java",
     "multi-agent"
   ],

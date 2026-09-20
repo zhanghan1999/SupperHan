@@ -142,7 +142,7 @@ node scripts/sync-assets.mjs
 
 `external_directory: allow` 是**跨越 workspace 边界**的能力，全仓库只放开 **2 个 subagent + 4 个 command**。这六个的 prompt 里都写死了路径前缀自检（名单同时钉在 `tests/agent-permissions.test.mjs` —— 只改本文不改进代码里的名单，测试会先红）：
 
-- `supperH-prelearn-writer`：`filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头 + 匹配 `<known-module>/gen-<ts>/(batch-NN.md | index.md | CURRENT)`；违反报 `WRITE_BOUNDARY_VIOLATION`
+- `supperH-prelearn-writer`：`filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头 + 匹配 `<known-module>/gen-<ts>/(batch-NNN[-MM[-KK]].md | index.md | CURRENT)`（编号固定 3 位，附属后缀最多两层，第 3 层超限不匹配）；违反报 `WRITE_BOUNDARY_VIOLATION`
 - `supperH-driver-author`：`filePath` 必须以 `{{DRIVERS_ROOT}}/` 开头（凭据只额外允许 `.secrets/*.local.json`）；不得碰注册表 YAML、L1 仓库、代码工作区；违反同样报 `WRITE_BOUNDARY_VIOLATION`。不绑壳 server（它是造驱动的，不是用数据的）
 - `supperH-bootstrap`：只允许在 `<TOOL_ROOT>/../supper-Han-private/` 下 mkdir / 写文件；不允许在本仓库内创建私有根
 - `supperH-init`：只允许写私有根下的注册文件（`projects/<code>.yaml` + `screens/<code>.yaml`）与 `context/<code>` `tasks/<code>` 目录骨架；实际写盘动作全部在 `scripts/init-project.mjs --write` 里完成，命令本身不手改 YAML
@@ -175,8 +175,9 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
           │   └── batch-01.md
           └── gen-20240201120000/       # 当前代
               ├── index.md              # learnedAtCommit / route→batch 反查 / L1-L3 完整度
-              ├── batch-01.md           # ≤30KB；同 Controller 不拆开
-              └── batch-02.md
+              ├── batch-001.md          # ≤30KB；route 段为原子，单 Controller 30–50KB 容忍带打 oversized
+              ├── batch-003.md          # 父批次
+              └── batch-003-001.md      # 003 溢出时的附属（第 2 层封顶；细则见 prelearn skill §1）
 ```
 
 演进规则：

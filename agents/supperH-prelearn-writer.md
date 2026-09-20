@@ -23,8 +23,8 @@ permission:
 ### Mode: init
 
 - 首次学习某 module，或某 module 无历史 gen
-- 输入 analyzer 完整输出 → 按 30KB 上限切 batch（同 Controller 不拆开）
-- 生成 `batch-01.md` / `batch-02.md` / ... + `index.md`
+- 输入 analyzer 完整输出 → 按 `supperH-prelearn` skill §1 装填（route 段为原子；单 Controller 30–50KB 容忍不拆、>50KB 拆、段 >30KB oversized）
+- 生成 `batch-001.md` / `batch-002.md` / ...（溢出时附属 `batch-003-001.md` …）+ `index.md`
 - `index.md` 必带：`learnedAtCommit`（来自 analyzer 输入的 commit） + 路由 → batch 反向映射表 + 每方法完整度标记 `L1`（骨架）/ `L2`（含分支+异常）/ `L3`（含 SQL 摘要） + **`sources` 列**
 - **`index.md` 必须严格遵从 `supperH-prelearn` skill 的「index.md 规范格式」节**：frontmatter 含 `schema: supperh-index/2` 与**加引号的** `learnedAtCommit`；首张反查表以 `| route |` 开头（`route` 必须第一列）且七列齐全：`| route | controller | method | batch | lines | level | sources |`。理由：`scripts/resolve-project.mjs` 的快路径门禁靠这张表做确定性反查，列名漂移 = 反查不出 = 所有 bug 永久失去快路径资格（不报错，只是默默变慢，最难发现的一类退化）。
 - **`sources` 列怎么算**（该 batch 内各方法 `touched_files` 的并集，同 batch 全部行重复写同一值）：
@@ -38,7 +38,8 @@ permission:
 
 - 已存在 CURRENT 指向旧代，本次是代码变更后重学
 - 创建新代 `gen-<yyyymmddHHMMSS>/`（时间戳来自 analyzer 输出或本 agent 现取）
-- 拷贝旧代里**未被本次覆盖**的 batch，用 analyzer 新数据替换指定 Controller 的 batch 段
+- 拷贝旧代里**未被本次覆盖**的整组 batch（未命中组的父+附属原样拷，含各自 `oversized` 标记）
+- 对每个被变更 Controller 所属的「逻辑批次组」执行 skill §1.1 `repack(G)`：在逻辑序列上改 → 整组重排 → 只重写本组涉及的 index 行；排空的附属删、溢出的附属建；本组若需落第 3 层则改触发送模块级线性全重排并置 `needs_repack_group`
 - **拷贝过来的 batch，其 `sources` 行沿用旧代原值，不重新推演也不置空**（重推没依据）。它到底新不新鲜，由门禁 G4b 拿 `git diff ∩ sources` 实测得出，不靠信任"当初 analyzer 算的增量清单是对的"——那是一份从未落盘、事后无法核验的推断
 - 新写 batch 的 `sources` 按 init 模式那套规则重算；`learnedAtCommit` 写**本次** commit（仓库级单值不变，batch 级差异由 `sources` 承担）
 - 校验新代 index 覆盖率 ≥ 95% → 原子切 CURRENT（tmp + rename）
@@ -47,8 +48,8 @@ permission:
 ### Mode: supplement
 
 - supperH-bug-dev 回报"某方法 batch 存在但内容浅"时，主 agent 派 analyzer 定向深挖 → 交给你合并
-- **不新增 batch 文件**，不新增 Controller
-- 用 copy-on-write：把旧代完整拷贝到新代 → 在**指定 batch 文件**里定位 `--- route: <method> ---` 锚点 → 合并新内容到该段
+- 不新增 Controller；**允许因补学内容撑破预算而经 §1.1 `repack(G)` 新增/删除附属 batch 文件**（补学不再被"必须塞回原文件"逼成无限越限）
+- 用 copy-on-write：把旧代完整拷贝到新代 → 在目标组内按 `--- route: <method> ---` 锚点合并新内容 → 对该组跑 `repack(G)` 落位
 - 锚点定位失败（历史 batch 里锚点写法不规范或找不到） → **立即拒绝写入 + 回报 `ANCHOR_NOT_FOUND`**（红线）
 - index.md 的对应方法完整度标记递增（L1→L2 / L2→L3）
 - 若 enrich 输出带了新的 `touched_files`（深挖常会挖到之前没记的依赖），**重算该 batch 的 `sources`**：旧值 ∪ 新值（并集，不是覆盖 —— 旧值里的文件仍是真实依赖），并同样受 `-` / `sources_unusable_batches` 规则约束
@@ -116,7 +117,7 @@ node "{{TOOL_ROOT}}/scripts/flow-engine.mjs" check   --context-root "<CONTEXT_RO
 **你的每一次写文件前必须校验路径**：
 
 1. `filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头
-2. `filePath` 必须匹配 `{{CONTEXT_ROOT}}/<known-module>/gen-<timestamp>/(batch-\d+\.md|index\.md|CURRENT)` 其中之一（`<known-module>` = `{{PROJECT.modules[].name}}` 之一，**或保留分区名 `screens` / `flows`**；取 `flows` 时形状换成下面第 4 条）
+2. `filePath` 必须匹配 `{{CONTEXT_ROOT}}/<known-module>/gen-<timestamp>/(batch-\d+(-\d+){0,2}\.md|index\.md|CURRENT)` 其中之一（允许父 `batch-001` / 附属 `batch-001-001` / 第 2 层 `batch-001-001-001`；`{0,2}` = 最多 2 段附属后缀。第 3 层段数超限即不匹配——但正常流程由 skill §1.1 在写之前就触发送模块级全重排、不会走到"写第 3 层"，本正则只作 fail-closed 兜底。`<known-module>` = `{{PROJECT.modules[].name}}` 之一，**或保留分区名 `screens` / `flows`**；取 `flows` 时形状换成下面第 4 条）
 3. `CURRENT` 文件更新走 tmp+rename；不允许 in-place truncate
 4. `<known-module>` 为保留分区名 `flows` 时，第 2 条里的文件名形状整组换成下面这一组（**前缀仍是同一个 `{{CONTEXT_ROOT}}/`，本条不引入第二个前缀**）：`filePath` 必须匹配 `{{CONTEXT_ROOT}}/flows/gen-<timestamp>/(flow-index\.md|flow-check\.md|flow-notes-\d+\.md|flow-parts/part-[a-z0-9._{}-]+\.md|CURRENT)` 其中之一；`flow-parts/` 之外的位置**不接受** analyzer 原文（防"顺手补一条"绕过折叠阶段）。**这四条一律只看 `filePath` 本身**，不看这次回报声明的是哪个 `mode` —— 边界判据一旦要先判分支再判形状，就不是机械判据了（见红线 R2「禁止把边界判据写成含分支的条件式」）
 
@@ -133,7 +134,9 @@ node "{{TOOL_ROOT}}/scripts/flow-engine.mjs" check   --context-root "<CONTEXT_RO
   "data": {
     "gen_dir": "<absolute path>",
     "prev_gen": "<previous CURRENT, if any>",
-    "batches": ["batch-01.md", ...],
+    "batches": ["batch-001.md", "batch-003.md", "batch-003-001.md", ...],   // 含溢出附属
+    "oversized_batches": ["batch-007.md"],          // 单 route 段 >30KB 独占的文件；可空
+    "needs_repack_group": ["batch-003"],            // 落到第 2 层的组 → 建议单独重学该模块（局部，不影响其它模块）；可空
     "index_updated": true,
     "methods_written": N,
     "sources_batches": N,                    // 写了非 `-` 的可用 sources 的 batch 数
@@ -162,7 +165,7 @@ node "{{TOOL_ROOT}}/scripts/flow-engine.mjs" check   --context-root "<CONTEXT_RO
 2. 校验路径边界（见上节）
 3. 计算新代目录名 `gen-<yyyymmddHHMMSS>`（若 supplement/update）
 4. 拷贝 or 生成 batch 文件 → 全部写入新代目录
-5. 校验新代完整性：batch 数 = 期望；index 覆盖率 = 100%；锚点全部存在；**index.md 能被 `parseIndexMarkdown()` 解析出 ≥ 1 行反查表（拿不到则报 `GEN_INTEGRITY_FAIL`，不切 CURRENT）**；**且反查表含 `sources` 列、每行的值为 `-` 或全是合法相对 POSIX 路径**（出现绝对路径/反斜杠/带空格的碎串即 `GEN_INTEGRITY_FAIL`）
+5. 校验新代完整性：覆盖判定只按 route 行数与 `coveredControllers ÷ 目标总数 ≥ 95%`（附属文件不计入"批次数期望"，防误报 `GEN_INTEGRITY_FAIL`）；index 覆盖率 = 100%；锚点全部存在；**index.md 能被 `parseIndexMarkdown()` 解析出 ≥ 1 行反查表（拿不到则报 `GEN_INTEGRITY_FAIL`，不切 CURRENT）**；**且反查表含 `sources` 列、每行的值为 `-` 或全是合法相对 POSIX 路径**（出现绝对路径/反斜杠/带空格的碎串即 `GEN_INTEGRITY_FAIL`）
 6. `CURRENT.tmp` 写入新代名 → `rename CURRENT.tmp → CURRENT`（原子）
 7. 保留策略：删除 N-2 及更早的 gen-* 目录（若存在）
 

@@ -84,12 +84,13 @@ node "<TOOL_ROOT>/scripts/git-deliver-check.mjs" --cwd "<WORKSPACE>" \
 
 ## 分批学习算法
 
-`supperH-prelearn-analyzer` 按 Controller 为单元切分 batch，遵守：
+`supperH-prelearn-analyzer`（预学习读码）每个 HTTP 入口方法输出一段（`--- route: <method> ---` 锚点为切分/合并原子）；切批与落位由 `supperH-prelearn-writer`（预学习落笔）按 `supperH-prelearn`（预学习统筹） skill §1 执行，遵守：
 
-- **单 batch 上限 30KB**（含 frontmatter、路由标记、正文），超过必须切分
-- **一个 Controller 只属于一个 batch**（不允许跨 batch 拆同一 Controller 的方法）
-- **切分优先级**：Controller 数分片 > 方法数分片 > 单方法深挖后拆段
-- **batch 命名**：`batch-<NN>.md`，NN 从 01 递增，零填充
+- **目标预算**：每个物理 `batch-*.md` ≤ 30KB（含 frontmatter 与路由锚点）；单 route 段自身 > 30KB 不可再分 → 独占一个文件并 `oversized: true`（绝对下限兜底）
+- **单 Controller 容忍带 30–50KB（不拆）**：独占一批时允许越 30KB 至多到 50KB，打 `oversized: true`（记入 index，不进文件名）
+- **单 Controller > 50KB → 自动拆**：按 route 段声明序连续装填成每件 ≤ 30KB 的父 `batch-NNN.md` + 附属 `batch-NNN-MM.md`（第 2 层 `batch-NNN-MM-KK.md` 封顶并建议单独重学该模块；第 3 层禁止，改触发送模块级线性全重排）；拆点在 route 边界，绝不切断单个方法
+- **落位变化只走整组重排 `repack(G)`**（update/supplement 唯一改 batch 文件的方式，细则见 skill §1.1）：禁止就地插文件与单文件编辑；抖动锁在被改的那一组，其它批次跨代不动；查找走 `index.md` 的 `batch` 列（不透明字符串），改名不断链
+- **batch 命名**：编号固定 3 位 `batch-001 … batch-999`，附属后缀同为 3 位，不设自动扩位；历史 2 位命名（`batch-01`）仍可解析，无需迁移
 - **`index.md` 必带**：路由名 → batch 文件 + 行号范围 + 完整度标记；格式按 `supperH-prelearn`（预学习统筹） skill 的「index.md 规范格式」节（首张表以 `| route |` 开列，七列 `route/controller/method/batch/lines/level/sources` **缺一不可** —— 这是机器契约，缺列 = 格式漂移 = 快路径门禁判 32 出局）。`sources` 列 = 该 batch 调用链可达文件全集（含 Controller 自身，repo-relative POSIX，`;` 分隔，追不全写 `-`），供快路径门禁 G4b 与 `git diff` 求交集做 batch 级新鲜度复核
 - **流程学习不走上面这套 batch 切分**：它按 `--flow-plan` 的确定性聚片切分（同一个 Controller 的 route 聚成一片、**一片 ≤ 3 个 route**、**一波 ≤ 2 片**；两个数值都是 L1 固定值，不进配置、不开运行期放宽口子），落盘单位是 `flow-parts/part-<route 稳定键>.md` 而不是 `batch-NN.md`。分组**必须由脚本产出、不得由主 agent 现场分组**：`route → Controller` 是 `index.md` 里现成的列，读它是解析器的活（见 `10-redlines.md` 的只读取数下沉条）。
 
@@ -99,7 +100,7 @@ node "<TOOL_ROOT>/scripts/git-deliver-check.mjs" --cwd "<WORKSPACE>" \
 
 1. 创建新代目录 `<module>/gen-<yyyymmddHHMMSS>/`
 2. 全部 batch + index 写入新代；**不 touch** 旧代
-3. 校验新代完整性（batch 数、index 覆盖率、锚点存在性）
+3. 校验新代完整性（route 行数与 Controller 覆盖率、index 覆盖率、锚点存在性；附属文件不计入"批次数期望"）
 4. 通过后原子更新 `CURRENT` 指向新代目录名
 5. 保留最近 2 代（N、N-1）；N-2 及更早标为 stale，24 小时后 GC
 
@@ -111,8 +112,8 @@ node "<TOOL_ROOT>/scripts/git-deliver-check.mjs" --cwd "<WORKSPACE>" \
 
 任何对已有 batch 的修改（supplement 模式）必须：
 
-1. 在**新代目录**里完整拷贝一份旧 batch
-2. 拷贝上再合并新内容
+1. 在**新代目录**里完整拷贝一份旧 batch（命中组拷父+附属整组）
+2. 拷贝上再合并新内容（组内落位经整组重排 `repack(G)`，见「分批学习算法」节）
 3. 原子切 CURRENT  
 不允许在原 batch 文件上 in-place 编辑。
 

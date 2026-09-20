@@ -22,8 +22,9 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
       ├── gen-<ts-A>/           # 老代（stale 时保留 ≤2 代）
       └── gen-<ts-B>/           # 当前代 = CURRENT 指向者
           ├── index.md          # 元数据：learnedAtCommit / route→batch 反查表 / 完整度标记 / batch→sources
-          ├── batch-01.md       # 一批 Controller 学习成果
-          ├── batch-02.md
+          ├── batch-001.md      # 一批 route 段的学习成果（编号固定 3 位）
+          ├── batch-003.md      # 父批次
+          ├── batch-003-001.md  # 003 溢出时的附属（第 1 层；再溢出 003-001-001 为第 2 层，封顶）
           └── ...
 ```
 
@@ -34,13 +35,35 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
 
 ## 四项核心不变量
 
-### 1. 分批算法（30KB 预算）
+### 1. 分批算法（30KB 预算 + 溢出附属）
 
-- 每个 `batch-NN.md` ≤ 30KB（含 frontmatter）
-- **同一 Controller 的所有方法必须落在同一个 batch**（不拆开）
-- 一个 Controller 超 30KB → 单独一个 batch，允许该 batch 越限并打 `oversized: true` 标记（`index.md` 里登记）
-- 切批策略：按 Controller 文件名字典序，贪心装填；填不进当前 batch 就开新 batch
-- batch 编号从 `01` 起，宽度 2 位；≥ 100 个时自动扩到 3 位
+原子单位是一个 `--- route: <method> ---` 段（见 §2）——它是切分与合并的最小块，不可再分。
+
+- **目标预算**：每个物理 `batch-*.md` ≤ 30KB（含 frontmatter）。
+- **逻辑序列 L**：某模块全部 route 段按 `(Controller 文件名字典序, 方法在源码中的声明先后)` 全序排列；**同一 Controller 的各 route 段在 L 中是一段连续区间**。
+- **单 Controller 容忍带 30–50KB（不拆）**：某 Controller 独占一批且内容在 30–50KB 之间 → 允许该批越 30KB 至多到 50KB，打 `oversized: true`（记入 index，不进文件名），**不拆**（保住"一个 Controller 尽量看全"）。
+- **单 Controller > 50KB → 自动拆**：按 L 中该 Controller 的 route 段声明序连续装填，切成每件 ≤ 30KB 的若干文件（父 `batch-NNN.md` + 附属 `batch-NNN-001.md`、`batch-NNN-002.md` …）；拆点是 route 边界，绝不切断单个方法。
+- **单 route 段自身 > 30KB**（不可再分的方法）→ 独占一个文件并 `oversized: true`——这是越限的绝对下限。
+- **溢出即开附属，绝不就地插号、绝不整模块重排**：一组 = 父 `batch-NNN` + 附属链 `batch-NNN-MM`（第 1 层）→ `batch-NNN-MM-KK`（第 2 层）。
+    - 第 1 层：正常溢出，静默。
+    - 第 2 层：允许落盘，但必须置 `needs_repack_group` 并在 `/supperH-learn` 汇总里建议「单独重学该模块」。
+    - 第 3 层（`batch-NNN-MM-KK-LL`）：**禁止**。repack 一旦判定某组会落到第 3 层，不写该文件，改而对**整个模块**做一次线性全重排（把 L 从 `batch-001` 连续铺平、附属清零）——即「强制重新分配路径」；它只作用于本模块。
+- **禁止交错由构造保证**：切点只落在 L 的尺寸边界且装填连续，故任一 Controller 至多横跨**相邻**文件。任何变更都走 §1.1 整组重排，杜绝"就地插文件、其后不动"。
+- **编号宽度固定 3 位**：`batch-001 … batch-999`，附属后缀同为 3 位；不设自动扩位。历史 2 位命名（`batch-01`）仍可被 `parseIndexMarkdown` 解析，无需迁移。
+
+### 1.1 整组重排例程（update / supplement 唯一改 batch 文件的方式）
+
+任何"代码增删改 / 补学撑破预算"导致的落位变化，都不得编辑单个物理文件，只能：
+
+    repack(G):                          // G = 被本次变更命中的「一个逻辑批次组」(父 + 其附属链)
+      1. 读该组全部 route 段 → 还原成 §1 的连续逻辑序列 L
+      2. 在 L 上按声明序插入/替换/删除目标 route 段（不碰其它组，不改其它 Controller 的相对序）
+      3. 从 L 头重新连续切分（≤30KB；30–50KB 单 Controller 容忍；>50KB 拆；段 >30KB oversized）→ 覆写父 + 附属；排空的附属删、需新增的附属建
+      4. 若本组重排后仍需落到第 3 层 → 不写第 3 层文件，改触发送模块级线性全重排（§1）
+      5. 仅重写「本组」涉及的 route 行在 index.md 的 batch 列 → 指向各自新文件；越限附属各自重算 sources
+      // 跨组零影响：其它组文件名、index 行、sources 一律不动
+
+> 抖动被锁在「被改的那一组」内部，且查找走 index 的 batch 列（不透明字符串），故附属机制的代价只是本组若干文件的读写，换来的是 30KB 预算的实效 + 其余批次跨代稳定。
 
 ### 2. `--- route: <method> ---` 锚点
 

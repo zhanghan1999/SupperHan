@@ -124,7 +124,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 ## 步骤 3 · 分批策略
 
 - 从 `{{PROJECT.modules[].entryPattern}}` 定位所有 Controller 文件
-- 按 30KB 预算切 batch：同一 Controller 不拆开；一批 batch-NN.md 覆盖一组 Controller
+- 按 30KB 预算切 batch（route 段为原子；单 Controller 30–50KB 容忍不拆、>50KB 自动拆、溢出走附属 `batch-NNN-MM.md`，细则见 `supperH-prelearn`（预学习统筹）skill §1）：一批覆盖一组 Controller
 - 输出批次计划给用户预览（不立即执行），用户确认后再进派发
 
 **流程模式的分片不由本命令计算**（红线：主命令不做分组）：
@@ -263,6 +263,8 @@ FLOW_INTEGRITY_FAIL + diagnostics:[ { part, line, invariant, message, rerun_rout
 - batches: N 个
 - methods_written: M
 - 完整度分布: L1=a, L2=b, L3=c
+- 越限 batch（单 route 段 >30KB 独占）: <oversized_batches 列表或 无>
+- 建议局部重学的组（已落到第 2 层，可 `--module <name> --mode update` 单独重排、不影响其它模块）: <needs_repack_group 列表或 无>
 - 页面模式专属（仅 `--screen`）: screens_written=<n> / route_resolved=<n> / code_linked=<n>
 - 用时: Xs
 - worktree 清理: done | skipped (branch=当前 HEAD)

@@ -62,7 +62,7 @@ permission:
    - **必须含 Controller 自身的文件**。理由：`route → batch` 这张表本身也在被新鲜度判定 —— 若某方法迁走/改名/删除，Controller 文件必然出现在 diff 里；剔掉它等于让门禁拿一张已失效的表去解锚点还判它新鲜。
    - **路径形态**：相对 `{{EFFECTIVE_ROOT}}` 的 **POSIX 风格路径**（`src/main/java/…/OrderMapper.xml`，正斜杠、无盘符、无 `./` 前缀、大小写照 git 输出）。**绝不输出绝对路径** —— 绝对路径跨机器/跨 worktree 必不等，交集恒空，会把"误杀"翻成"漏杀"（见下「边界」）。`controllers[].file` 保留绝对路径是给人在编辑器里打开用的，**不参与**门禁比较。
    - **追不全就如实标 `sources_incomplete: true`**：反射派发、动态数据源、按 bean 名拼类名、生成代码（Lombok/MapStruct 之外的 apt 产物）等导致某一环无法落到文件时置 true，**不要**为凑数猜一个路径，也不要留空数组了事（空数组会让下游判不出是"确实只有一个文件"还是"没追"）。下游据此 fail-closed。
-4. **分段与预算** — 单 Controller 输出超 30KB 时按方法分组；每组一段，段头 `--- route: <method> ---` 锚点（writer 用此锚点定位合并位置）
+4. **分段与预算** — 每个 HTTP 入口方法输出一段，段头 `--- route: <method> ---` 锚点（= writer 的装填/合并/切分原子）。是否溢出、开不开附属、越 30/50KB 怎么切一律交 writer 按 `supperH-prelearn` skill §1 / §1.1 决定；你不得因"某 Controller 大"就打乱其方法的声明序或把同 Controller 的方法分到非相邻位置。
 5. **不合并、不格式化** — 输出原始结构化数据；由 writer 负责落地格式与批次切分
 
 ### 页面模式（`mode: screen`）工作流

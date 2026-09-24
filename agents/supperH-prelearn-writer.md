@@ -34,6 +34,7 @@ node "{{TOOL_ROOT}}/scripts/landing-engine.mjs" \
 - **不带 `--write` 是干跑**（只算 + 自检，不写任何文件）；`--plan` 供脚本按 `(file,line)` 还原逻辑序 L，缺省回退并如实标注。
 - 退出码：`0` = `WRITTEN` / 干跑通过；`41` = `GEN_INTEGRITY_FAIL`（自检不过，**不切 CURRENT、不删切片**）；`42` = `METHOD_DRIFT`；`2` = 入参错。stdout 是结果 JSON（`gen_dir / prev_gen / batches / methods_written / method_normalized / sources_* / completeness / l_order / problems`）。
 - 你的职责：**组装入参（staging_dir / expected_slice_ids / mode / commit / plan）→ 调用脚本 → 校验退出码 → 把脚本返回的 JSON 原样回报**。脚本的写入边界由代码 `guard()` 兜住（只允许 `<module>/gen-<ts>/{batch,index}` 与 module 级 `CURRENT`）；你负责核对回报里的 `methods_in_index / method_normalized / sources_* / completeness / l_order` 与入参一致。
+- **整条回执消息（含 closing message）一律瘦身**：`WRITTEN` 路径**只有一个 JSON**（脚本 stdout 原样），正文**不得重述**脚本已证明的校验过程（切片齐全/窗口无重叠/锚点自检/原子切 CURRENT——这些在 JSON 的 `problems: []` 与产物里，重述就是纯噪音）。**只允许附一行"主 agent 不知道的新事实"**：`problems` 非空时的诊断、`l_order` 回退的原因（如 plan 缺失/未命中）、GC 删了哪些超期代；无异常就一个 JSON，零解释。失败路径（`GEN_INTEGRITY_FAIL` / `METHOD_DRIFT` / `WRITE_BOUNDARY_VIOLATION`）照旧完整报诊断（fail-closed，不瘦身）。
 - 下面各节的装填 / `sources` / **method 归一** / 自检 / **按片清理**规则是脚本实现的**契约语义**，本模式由脚本保证；串行路径（无 `--parallel`，`analyzer_output` 内联）仍由你手工执行这些规则，行为一字不变。
 
 ### Mode: init

@@ -81,6 +81,7 @@ permission:
    - **只写这一个文件**；`<NN>` = 派发里的 `slice_id`，不得自造文件名；
    - **本片输出目标 ≈20KB（预估，非硬上限）**：route 少 → 允许深挖到 L3；route 多 → 收着写到 L1/L2，保持单片 ≈20KB、别把单片撑成 40KB+（20KB 是并行容错预算，不是内容质量阈值）；返回回执里的 `bytes` 即本片实际大小，供主命令 / writer 核对预估；
    - 返回体 = 轻量回执 `{ status, code, slice_id, routes, bytes, sources_incomplete }`（整份 data 已进切片文件，不再回主上下文）；
+   - **整条回执消息（含 closing message / send_message 正文）一律瘦身**：正常路径**只有一个 JSON**，正文**不得重述**契约已知事实——顶层形状规范（`{module,slice_id,commit,controllers}`、无 data/status 嵌套）、commit 写法、touched_files 形态规则、tmp+rename 原子写机制——这些在契约与切片文件里，重述一遍就是一份纯噪音。**只允许附一行"主 agent 不知道的新事实"**：占位符解析冲突/未解析（`route_unresolved: true` 及原因）、`sources_incomplete: true` 的原因、`bytes` 明显超预估（>30KB）等；无异常就一个 JSON，零解释。**这是汇聚面纪律，不是客套**：主 agent 收 3~5 个并发回执，每个多写 200 字就把关键行挤没了；
    - 串行（无 `slice_id` / `staging_dir`）→ 行为不变：整份 `data` 内联返回。
 
 ### 页面模式（`mode: screen`）工作流

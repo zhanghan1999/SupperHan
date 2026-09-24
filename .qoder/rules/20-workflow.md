@@ -44,6 +44,7 @@ subagent 返回必须是**结构化 JSON**，字段：
 ### 并发约束
 
 1. **同批最多 3 个只读子 agent**。理由不是算力而是汇聚面：主 agent 拿到四份长回报后会把关键的那条 `external_refs` 挤到看不见的地方，而它看上去“已读”。
+1.5. **子 agent 回执瘦身 + 主 agent 不逐条转述（汇聚面的另一半）**：子 agent 的整条回执（含 closing message）只含**本仓契约未固化的新事实**——正常路径一个结构化 JSON，正文禁止重述契约已知事实（顶层形状、commit 写法、原子写机制等，那些在契约与产物里）；只允许附一行异常/新信息（`route_unresolved` 原因、`sources_incomplete` 原因、`l_order` 回退原因等）。主 agent 收到并发回执**不逐条写成对话**：攒批，在排空/暂停/落地节点一次性汇总（"3/6 完成、1 失败"）；**异常回执（fail / INSUFFICIENT* / TARGET_NOT_FOUND / WRITE_BOUNDARY_VIOLATION）除外，必须立即原样转述**（fail-closed，不攒批掩盖）。理由与第 1 条同源：多写一个字就多占一次汇聚面，而"已读"往往只是"看过"。
 2. **同一 driver 槽位同时最多 1 个在途取数**。多个并行探活/查询叠在同一内网端点上，叠不出新信息，只会把本来健康的端点测成超时。
 3. **整批等齐再用**：任一返回 `fail` / `INSUFFICIENT_LEARNING` / `TARGET_NOT_FOUND` → **全批按最差的那个分流**（fail-closed）。不得拿“其余三个都 ok”掩盖那一个出局。
 4. **回灌脚本一次只装一份回报**：`--impact-json` / `--intent-json` 的输入都是一份对象，把两份 analyzer 回报合并成一份喂给脚本 = 稀释 `external_refs`，那比不验收更糟。

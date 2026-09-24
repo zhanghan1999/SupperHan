@@ -206,6 +206,11 @@ analyzer 逐项处理 `screen.discovery`（四类介质，至少一项），按�
 ```
 analyzer 返回 → 立即派 writer 落地（**不留到最后一并落**，避免中途失败全丢）。
 
+**回执瘦身（并行多份时是硬纪律，不是风格）**：
+- 派发 analyzer 时明确要求"正常路径只回一个 JSON，禁止重述契约已知事实"（见 analyzer 输出契约的瘦身条款；`slice-NN.json` 里已有整份 data，回执只需 `{status, code, slice_id, routes, bytes, sources_incomplete}`）。
+- **主 agent 收到回执不逐条转述**：不再把"slice-NN 完成、staging 现状"逐条写成对话（那是最快的上下文消耗）。攒批汇报——在**排空点 / 暂停点 / 落地节点**一次性汇总（如"3/6 完成、1 失败，staging 2，等待捞取"）。中间每片完成只在**调度簿记里更新状态**（staging 文件数是 `readdir` 事实，不必每片口头确认）。
+- 例外：`fail` / `INSUFFICIENT*` / `TARGET_NOT_FOUND` / `WRITE_BOUNDARY_VIOLATION` 这类**异常回执必须立即原样转述**（fail-closed，不得攒批掩盖）。
+
 ### 并行模式的滚动池调度（`--parallel` 专属）
 
 **不是栅栏式波次**：不等齐，谁先好谁补位。规则如下（并发安全的两条约束见 `.qoder/rules/20-workflow.md` 上表 writer 行注）：

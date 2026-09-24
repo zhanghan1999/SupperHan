@@ -102,13 +102,13 @@ node scripts/sync-assets.mjs
 输入 /supperH-bug "订单接口创建人字段丢失"
       │
       ▼
-步骤 0 / 1.5：node {{TOOL_ROOT}}/scripts/resolve-project.mjs（全流程唯一放开的 bash）
+步骤 0 / 1.5：node {{TOOL_ROOT}}/scripts/resolve-project.mjs（全流程唯一放开的 bash；`/supperH-learn --parallel` 另放开 scripts/parallel-plan.mjs，同为只读、同一白名单）
          └─ 退出码即分流信号：0 通过 / 10·11·12 硬停 / 30–37 落完整路径 / 40 停下问用户一次 —— 见 §10
 ```
 
 **关键点**：
 
-- 命令文本里一律写 `node scripts/X.mjs`（带参数时连旗标一起），不写 `npm run X`：`npm run` 得从当前目录往上找 `package.json`，而运行期唯一被放开的 bash 是**绝对路径直调**（`node "<TOOL_ROOT>/scripts/resolve-project.mjs"`，R3.5 窄白名单）；npm 还会在脚本输出前后夹进自己的回显，而本流程的判据就是退出码 + stdout JSON。`package.json` 里的同名脚本只是给人手敲的别名，两条皆可。
+- 命令文本里一律写 `node scripts/X.mjs`（带参数时连旗标一起），不写 `npm run X`：`npm run` 得从当前目录往上找 `package.json`，而运行期被放开的 bash 只有**绝对路径直调**的两条（`node "<TOOL_ROOT>/scripts/resolve-project.mjs"` 与 `node "<TOOL_ROOT>/scripts/parallel-plan.mjs"`，R3.5 窄白名单；`/supperH-bug` 只用第一条）；npm 还会在脚本输出前后夹进自己的回显，而本流程的判据就是退出码 + stdout JSON。`package.json` 里的同名脚本只是给人手敲的别名，两条皆可。
 - `.qoder/rules/` 走**零配置通道** —— clone 完立即生效，**不走 sync** —— 因此 rules 里严禁 `{{...}}` 占位符
 - `agents/commands/skills` 走 **plugin 通道** —— sync 后展开绝对路径 + 项目字段，dist 自包含
 - 学习数据落在 `{{PRIVATE_ROOT}}/context/<code>/<module>/gen-*/`，与本仓库解耦；本仓库不追踪任何 context
@@ -137,19 +137,20 @@ node scripts/sync-assets.mjs
 | `read` | allow | — |
 | `edit` | deny | supperH-bug-dev / supperH-bug-refactor / supperH-bug-code-optimizer / supperH-bug-code-generator / supperH-bug-mybatis-optimizer / supperH-prelearn-writer / supperH-bootstrap |
 | `bash` | deny | supperH-bug-tester / supperH-bug-analyzer / prelearn-* / bootstrap / setup / supperH-bug 主入口（**仅** `resolve-project.mjs` 这一个脚本，可按不同参数多次调用） |
-| `external_directory` | **deny** | **仅** supperH-prelearn-writer（写 `{{CONTEXT_ROOT}}`）+ supperH-driver-author（写 `{{DRIVERS_ROOT}}`）+ supperH-bootstrap（建私有根）+ supperH-init（写 `projects/` 与 `screens/` 条目）+ supperH-setup（写 IDE 加载目录）|
+| `external_directory` | **deny** | **仅** supperH-prelearn-writer（写 `{{CONTEXT_ROOT}}`）+ supperH-driver-author（写 `{{DRIVERS_ROOT}}`）+ supperH-prelearn-analyzer（仅 `{{PRIVATE_ROOT}}/staging/` 切片）+ supperH-bootstrap（建私有根）+ supperH-init（写 `projects/` 与 `screens/` 条目）+ supperH-setup（写 IDE 加载目录）|
 | `mcpServers`（取数工具） | **不绑** | **仅** 4 个只读/测试类子 agent：supperH-bug-analyzer / supperH-bug-tester / supperH-bug-test-writer / supperH-prelearn-analyzer（均只绑壳 `supperh-drivers`）|
 
-`external_directory: allow` 是**跨越 workspace 边界**的能力，全仓库只放开 **2 个 subagent + 4 个 command**。这六个的 prompt 里都写死了路径前缀自检（名单同时钉在 `tests/agent-permissions.test.mjs` —— 只改本文不改进代码里的名单，测试会先红）：
+`external_directory: allow` 是**跨越 workspace 边界**的能力，全仓库只放开 **3 个 subagent + 4 个 command**。这七个的 prompt 里都写死了路径前缀自检（名单同时钉在 `tests/agent-permissions.test.mjs` —— 只改本文不改进代码里的名单，测试会先红）：
 
-- `supperH-prelearn-writer`：`filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头 + 匹配 `<known-module>/gen-<ts>/(batch-NNN[-MM[-KK]].md | index.md | CURRENT)`（编号固定 3 位，附属后缀最多两层，第 3 层超限不匹配）；违反报 `WRITE_BOUNDARY_VIOLATION`
+- `supperH-prelearn-writer`：`filePath` 必须以 `{{CONTEXT_ROOT}}/` 开头 + 匹配 `<known-module>/gen-<ts>/(batch-NNN[-MM[-KK]].md | index.md)` **或** `<known-module>/CURRENT`（编号固定 3 位，附属后缀最多两层，第 3 层超限不匹配；**`CURRENT` 在 module 级、不在 gen 目录内** —— 门禁 `readCurrentIndexDir` 读的就是 `<module>/CURRENT`，写进 gen 内会让模块判 32）；并行切片 `staging_dir`（派发入参原值，逐字符相等）读入与成功后**按 `expected_slice_ids` 逐片清理** + 超期 staging 清扫（同一学习数据概念面，不新增第二个前缀锚点）；违反报 `WRITE_BOUNDARY_VIOLATION`。**`--parallel` code 模式的落地动作本体由确定性脚本 `scripts/landing-engine.mjs` 执行**（与 flow 的 `scripts/flow-engine.mjs` 同源：装填 / 逻辑序 L 重排 / index 七列 / sources / 自检 / module 级 `CURRENT` 原子切换 / 按片清理全在代码里，脚本内部有等价边界 `guard()`）；落地组大小 = **3~5 片（可变）**（staging ≥3 即捞取、有几个捞几个、一次最多 5；与池容量 3 各自独立），背压阈值 = 未落地 ≥ 5 停止补位（5 = 捞取上限 = 排队上限），稳态上界 = 未落地 ≤ 7（通式 = 排队上限 + 池容量 − 1）
 - `supperH-driver-author`：`filePath` 必须以 `{{DRIVERS_ROOT}}/` 开头（凭据只额外允许 `.secrets/*.local.json`）；不得碰注册表 YAML、L1 仓库、代码工作区；违反同样报 `WRITE_BOUNDARY_VIOLATION`。不绑壳 server（它是造驱动的，不是用数据的）
+- `supperH-prelearn-analyzer`：`filePath` 必须以 `{{PRIVATE_ROOT}}/` 开头 + 匹配 `staging/<project>/<module>/gen-<ts>/slice-NN.json(.tmp)`（并行切片窄面，run 级目录按文件名隔离）；不写 `{{CONTEXT_ROOT}}` / 工作区；违反报 `WRITE_BOUNDARY_VIOLATION`
 - `supperH-bootstrap`：只允许在 `<TOOL_ROOT>/../supper-Han-private/` 下 mkdir / 写文件；不允许在本仓库内创建私有根
 - `supperH-init`：只允许写私有根下的注册文件（`projects/<code>.yaml` + `screens/<code>.yaml`）与 `context/<code>` `tasks/<code>` 目录骨架；实际写盘动作全部在 `scripts/init-project.mjs --write` 里完成，命令本身不手改 YAML
 - `supperH-driver`：写盘全部经 `scripts/driver-registry.mjs`（先备份 + 先在内存过 schema + 探活不过不落盘）；临时 values JSON 也不得落到私有根之外
 - `supperH-setup`：只允许写 `~/.qoder-cn/plugins/cache/local/supper-Han-java/` + `~/.config/opencode/{agent,command,skill}/` + `<PRIVATE_ROOT>/dist-portable/`；禁止修改用户 IDE 里 supper-Han-java 以外的插件目录
 
-**为什么是两个而不是一个**（曾评估“把写驱动并入 supperH-prelearn-writer 以保住数字”并否决）：`external_directory` 是布尔开关而不是目录白名单 —— 拿到 allow 的那一刻它覆盖整个私有根，“只能写 context/”从来只是提示词里的自检。所以并职责**不缩小硬面**，只会把边界判据从“路径必须以某前缀开头”（无分支）退化成“先本次是哪种模式、再查对应前缀”（含分支）—— 那等于把边界交还给模型判断，与本仓库“确定性门禁优于模型判断”相反。真正缩小硬面的做法是默认不携带该 agent（用完再装），代价是命令层多一条“探测 agent 装了没”的脆弱路径；本仓库本来就有 4 个 command 带 allow，“这套工具就是要往私有根写东西”是既定事实，故取“名单显式登记 + 机械测试卡住新增”而非“默认不装”。派 `supperH-driver-author` 前必须先征得用户当次同意（写进 `commands/supperH-driver.md` 步骤 2）。
+**为什么是两个外加第三个例外**（曾评估“把写驱动并入 supperH-prelearn-writer 以保住数字”并否决；第三个 = `supperH-prelearn-analyzer` 的 `{{PRIVATE_ROOT}}/staging/` 切片窄面，理由：并行学习要零转录把切片从 analyzer 交到 writer，只有“读代码的人写自己的切片”能做到，见 §5 列表与 R2）：`external_directory` 是布尔开关而不是目录白名单 —— 拿到 allow 的那一刻它覆盖整个私有根，“只能写 context/”从来只是提示词里的自检。所以并职责**不缩小硬面**，只会把边界判据从“路径必须以某前缀开头”（无分支）退化成“先本次是哪种模式、再查对应前缀”（含分支）—— 那等于把边界交还给模型判断，与本仓库“确定性门禁优于模型判断”相反。真正缩小硬面的做法是默认不携带该 agent（用完再装），代价是命令层多一条“探测 agent 装了没”的脆弱路径；本仓库本来就有 4 个 command 带 allow，“这套工具就是要往私有根写东西”是既定事实，故取“名单显式登记 + 机械测试卡住新增”而非“默认不装”。派 `supperH-driver-author` 前必须先征得用户当次同意（写进 `commands/supperH-driver.md` 步骤 2）。
 
 MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在被约束的下游**。R3.5 的窄 bash 白名单已经规定「其它任何编译/DB/网络命令（包括跑 driver）仍必须派子 agent」；若把壳 server 绑到主 agent 或命令入口，等于开一条绕过该约束的外连直道。因此 `supperh-drivers` 只出现在 4 个只读/测试类子 agent 的 frontmatter 里，主入口只消费结构化结果。（门禁、编译、GC、写文件、扫码登录类动作**永不 MCP 化**，理由见 §10.2。）
 
@@ -157,7 +158,7 @@ MCP 取数工具的绑定面与上一条同源：**外连动作必须发生在�
 
 | 冲突 | 表现 | 本仓库解法 |
 |------|------|-----------|
-| C1 权限 `external_directory: deny` × 私有根在 workspace 外 | 学习数据写不到私有根；驱动脚本也写不到；IDE 装目录也在 workspace 外 | 只放开 `supperH-prelearn-writer` + `supperH-driver-author` 两个 subagent 与 `supperH-bootstrap` + `supperH-init` + `supperH-driver` + `supperH-setup` 四个 command；其它保持 deny；六者 prompt 内置路径前缀自检 + `WRITE_BOUNDARY_VIOLATION` 兜底；名单机械锁在 `tests/agent-permissions.test.mjs` |
+| C1 权限 `external_directory: deny` × 私有根在 workspace 外 | 学习数据写不到私有根；驱动脚本也写不到；IDE 装目录也在 workspace 外 | 只放开 `supperH-prelearn-writer` + `supperH-driver-author` + `supperH-prelearn-analyzer`（仅 `{{PRIVATE_ROOT}}/staging/` 切片） 三个 subagent 与 `supperH-bootstrap` + `supperH-init` + `supperH-driver` + `supperH-setup` 四个 command；其它保持 deny；七者 prompt 内置路径前缀自检 + `WRITE_BOUNDARY_VIOLATION` 兜底；名单机械锁在 `tests/agent-permissions.test.mjs` |
 | C2 git worktree × context 位置 | worktree 切分支时 context 该跟着哪个 root？ | context 落 `{{PRIVATE_ROOT}}/context/`，**与 worktree 解耦**；worktree 只影响 `effectiveRoot`（读源码路径），不影响学习数据落地 |
 | C3 权限树无参数级校验 | `bash: allow` 允许任何 shell 命令，防不住 `rm` | sync 阶段的**占位符残留阻断**（进程级），不依赖 prompt；agent preamble 里做二级兜底 |
 | C4 Qoder plugin 禁 `..` 路径 | 私有根 = `<TOOL_ROOT>/../supper-Han-private`，含 `..` | sync 时把 `{{PRIVATE_ROOT}}` 等替换成绝对路径后写入 dist；plugin 里只出现绝对路径，自包含 |

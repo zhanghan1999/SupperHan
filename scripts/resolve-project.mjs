@@ -147,6 +147,7 @@
 // emits fastPath fields - so a caller cannot read "0" as "the anchor gate passed".
 import fs   from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import YAML from 'yaml';
 import { pathToFileURL } from 'node:url';
 import { resolvePrivateRoot } from './resolve-private-root.mjs';
@@ -436,6 +437,32 @@ export function resolveRootPaths(data, { privateRoot, toolRoot, code } = {}) {
   };
 }
 
+/**
+ * 当前检出的分支名（供 `/supperH-learn` 的**分支确认**步骤用）。
+ *
+ * 为什么必须有它：`--branch` 缺省时，命令层要问用户"学哪个分支"，候选之一是"当前分支"；
+ * 而命令层 `external_directory: deny` + bash 窄白名单，自己跑不了 git，只能从本返回体拿。
+ * 取数下沉到解析器进程内，与 readHeadCommit / readFreshness 同一条纪律。
+ *
+ * 三种"拿不到"都如实回 null，绝不编一个值：非 git 仓 / git 不可用 / detached HEAD
+ * （`rev-parse --abbrev-ref HEAD` 在游离头时返回字面 `HEAD`，那不是分支名）。
+ * detached 单独报出来，是为了让命令层能给出"当前是游离头，请直接给分支名"这种可行动的提示，
+ * 而不是给一个假的默认项。
+ * @returns {{branch:string|null, detached:boolean}}
+ */
+function readHeadBranch(root) {
+  if (!root) return { branch: null, detached: false };
+  try {
+    const out = execFileSync('git', ['-C', root, 'rev-parse', '--abbrev-ref', 'HEAD'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }).trim();
+    if (!out) return { branch: null, detached: false };
+    if (out === 'HEAD') return { branch: null, detached: true };
+    return { branch: out, detached: false };
+  } catch {
+    return { branch: null, detached: false };
+  }
+}
+
 function buildBinding(entry, ctx) {
   const { code, data, file } = entry;
   const localCtx = tokenCtx(ctx.privateRoot, ctx.toolRoot, code);
@@ -445,6 +472,8 @@ function buildBinding(entry, ctx) {
   const roots = resolveRootPaths(data, { privateRoot: ctx.privateRoot, toolRoot: ctx.toolRoot, code });
   const contextRoot = roots.contextRoot;
   const tasksRoot   = roots.tasksRoot;
+  // 当前分支取代码根（步骤 0 时 effectiveRoot 尚未被 --branch 改写，两者同值）。
+  const headBranch  = readHeadBranch(data?.effectiveRoot ?? data?.codeRoot);
   // Screen-archive sidecar: path is always returned (may not exist); `screen` is
   // the parsed object or null. Screen mode of /supperH-learn gates on `screen == null`.
   // 旧 `menu` 时代残留检测（F-15b §8）：不留别名，检测到旧配置文件就报 staleScreenConfig，
@@ -481,6 +510,13 @@ function buildBinding(entry, ctx) {
     // 它是派生字段而非 YAML 路径：模板里写 {{PROJECT.dbDriver.impl}}，运行期从本返回体取值。
     // 未接入数据库时为 null（不是缺键）：这样“没库”是一个能机械区分的事实，而不是一个解不开的 token。
     dbDriver: pickDbDriver(data, driversExpanded),
+    // `branch` / `detached`：当前检出的分支（见 readHeadBranch）。给 `/supperH-learn` 的分支确认步骤
+    // 当"当前分支"候选用；取不到回 null，不编值。
+    // `branches`：注册表里的 环境名 → 分支名 映射（静态配置，与上面那个 git 事实是两件事），
+    // 供命令层取 `branches.dev` 当第二个候选。
+    branch: headBranch.branch,
+    detached: headBranch.detached,
+    branches: data?.branches && typeof data.branches === 'object' && !Array.isArray(data.branches) ? data.branches : {},
     project: data
   };
 }

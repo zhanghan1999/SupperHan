@@ -29,7 +29,7 @@
 ### 归 L1 的条件
 
 1. 换项目、换人都不动的**角色定义、工作流、算法、协议**
-2. **分批算法**（30KB 上限、按 Controller/Service 分片）
+2. **分批算法**（串行 30KB 上限、按 Controller/Service 分片；`--parallel` 为 20KB route 原子切片）
 3. **CURRENT 原子切换**协议、copy-on-write 语义
 4. **派发协议**：主 agent 派 subagent 的输入格式、输出格式、失败降级策略
 5. **完成判定**：修复完成的必要条件清单

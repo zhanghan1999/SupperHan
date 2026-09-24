@@ -121,7 +121,8 @@ function normRoute(s) {
 
 /** 判定字符串是否像一条 HTTP route（含 method 前缀或以 / 开头的 path） */
 function looksLikeRoute(s) {
-  return /^(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE)\s+\S/i.test(s) || /^\//.test(s);
+  // ALL = 裸 @RequestMapping 归一后的 method 占位（writer 单点归一），识别它才能让 ALL 锚点落成 route 而不是 unknown
+  return /^(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE|ALL)\s+\S/i.test(s) || /^\//.test(s);
 }
 
 /**
@@ -321,9 +322,15 @@ export function matchRows(rows, anchor) {
     const want = normRoute(anchor.route);
     // 只带 path 不带 method 时，按 path 匹配所有 method 变体
     const pathOnly = /^\/.*$/.test(want) ? want.replace(/\/+$/, '') : null;
+    // 显式 method 锚点（如 POST /x）：行侧 method = ALL（裸 @RequestMapping 归一）时同 path 即命中（G1 通配）
+    const wantM = /^([A-Z]+)\s+(\/.*)$/.exec(want);
     return rows.filter((r) => {
       const nr = normRoute(r.route);
       if (nr === want) return true;
+      const rowM = /^([A-Z]+)\s+(\/.*)$/.exec(nr);
+      if (rowM && rowM[1] === 'ALL' && wantM && wantM[2].replace(/\/+$/, '') === rowM[2].replace(/\/+$/, '')) {
+        return true;   // 裸映射路由的 method 通配：显式 method 锚点不因 ALL 行而 miss
+      }
       if (pathOnly) {
         const m = nr.match(/^(?:[A-Z]+ )?(\/.*)$/);
         if (m && m[1].replace(/\/+$/, '') === pathOnly) return true;
@@ -439,7 +446,11 @@ function readCurrentIndexDir(contextRoot, moduleName) {
   const curFile = path.join(modDir, 'CURRENT');
   if (!fs.existsSync(curFile)) return { code: 'NO_CURRENT' };
   let genName = '';
-  try { genName = fs.readFileSync(curFile, 'utf8').trim(); } catch { return { code: 'UNREADABLE_CURRENT' }; }
+  // 剥 UTF-8 BOM：Windows 上 `Set-Content -Encoding utf8`（PowerShell 5.x）会给文件加 BOM，
+  // 读出来就是 "\uFEFFgen-…"，拼成的目录名不存在 → NO_INDEX_FILE → 整个模块静默判 32。
+  // index.md 那一侧早就剥了（parseIndexMarkdown），CURRENT 这一侧漏了 —— 同一个坑两处只堵了一处。
+  // 只剥**行首** BOM：它不可能是合法目录名的一部分，剥掉是纯放宽，不会让任何本来可用的 CURRENT 失效。
+  try { genName = fs.readFileSync(curFile, 'utf8').replace(/^\uFEFF/, '').trim(); } catch { return { code: 'UNREADABLE_CURRENT' }; }
   if (!genName) return { code: 'EMPTY_CURRENT' };
   const genDir = path.join(modDir, genName);
   const idxFile = path.join(genDir, 'index.md');

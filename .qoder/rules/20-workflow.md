@@ -35,10 +35,11 @@ subagent 返回必须是**结构化 JSON**，字段：
 
 | 并发属性 | agent | 依据 |
 |---|---|---|
-| **只读，可并发** | `supperH-bug-analyzer`（代码分析）、`supperH-prelearn-analyzer`（预学习读码） | 不改仓内任何文件；取数只读 |
+| **只读，可并发** | `supperH-bug-analyzer`（代码分析） | 不改仓内任何文件；取数只读 |
+| **只读 + 只写自己的切片，可并发** | `supperH-prelearn-analyzer`（预学习读码，`--parallel`） | 只读 codeRoot；并行时仅写 `PRIVATE_ROOT/staging/<project>/<module>/gen-<ts>/` 下自己的 `slice-NN.json`（tmp+rename；run 级目录按文件名隔离）；**不读也不写** `CONTEXT_ROOT`（读 gen 是 writer 的事）、不写工作区、不写私有根其它位置 |
 | **写工作区，互斥** | `supperH-bug-dev`（开发）、`supperH-bug-refactor`（重构）、`supperH-bug-code-generator`（代码生成）、`supperH-bug-code-optimizer`（代码优化）、`supperH-bug-mybatis-optimizer`（Mapper 优化）、`supperH-bug-test-writer`（测试编写） | 改代码 / 新增文件 |
 | **等同写类** | `supperH-bug-tester`（测试执行） | 跑编译与单测会写 `target/`、能触 `install`；两个 maven 同仓并行会相争产物目录与本地仓库 |
-| **只写私有根，与代码写类可并发** | `supperH-prelearn-writer`（预学习落笔） | 不碰 `codeRoot`；但**与同 module 的 `supperH-prelearn-analyzer` 互斥**（一边写 CURRENT/新代目录一边读它，拿到的批次的集合不是任何一瞬间的真实状态） |
+| **只写私有根，可与代码写类并发** | `supperH-prelearn-writer`（预学习落笔） | 不碰 `codeRoot`；**可与同 module 的 `supperH-prelearn-analyzer` 并发** —— analyzer 对 `CONTEXT_ROOT` **零依赖**（只读 codeRoot、只写自己的切片文件，既不读也不写 gen 目录与 `CURRENT`；读 gen 的只有 writer 自己），故"写读交叠"在实现上并不存在。并发必须同时满足两条：① **落地串行** —— 同一 module 同一时刻最多 1 个 writer 在跑（第二次落地要读第一次刚切出来的 gen，重叠会读到半成品）；② **按片清理 staging** —— 所有切片写同一个 run 级 `staging_dir`，每次落地**只删 `expected_slice_ids` 对应的那几片文件**（不删目录本身、不碰下一组在途切片）。串行模式（无 `--parallel`）不受本条影响，仍是"同一 module 流水内串行" |
 
 ### 并发约束
 
@@ -46,11 +47,14 @@ subagent 返回必须是**结构化 JSON**，字段：
 2. **同一 driver 槽位同时最多 1 个在途取数**。多个并行探活/查询叠在同一内网端点上，叠不出新信息，只会把本来健康的端点测成超时。
 3. **整批等齐再用**：任一返回 `fail` / `INSUFFICIENT_LEARNING` / `TARGET_NOT_FOUND` → **全批按最差的那个分流**（fail-closed）。不得拿“其余三个都 ok”掩盖那一个出局。
 4. **回灌脚本一次只装一份回报**：`--impact-json` / `--intent-json` 的输入都是一份对象，把两份 analyzer 回报合并成一份喂给脚本 = 稀释 `external_refs`，那比不验收更糟。
-5. **快路径 F3 不并发**：它只有一个 `supperH-bug-analyzer(lite)`，且回报要回灌 G5；并发收益只存在于**完整路径步骤 4**（把 `dimensions` 拆成多个只读 analyzer 同时派）与**多模块同时学习**（每模块一个 `supperH-prelearn-analyzer`）。
+5. **快路径 F3 不并发**：它只有一个 `supperH-bug-analyzer(lite)`，且回报要回灌 G5；并发收益只存在于**完整路径步骤 4**（把 `dimensions` 拆成多个只读 analyzer 同时派）、**多模块同时学习**（每模块一个 analyzer → writer 流水）与**模块内并行**（`/supperH-learn --parallel`，同 module ≤3 个 route 原子切片，并发由下表 `supperH-prelearn-writer` 行注的两条约束兜住：**落地串行** + **按片清理 staging**，并由第 9 条的**背压**节流补位）。
 6. 每个并发派发仍须逐条满足上面三条前置（首行回显 `target project: <code>` + 列参数 + 声明兜底），并发不免除任何一项；派发参数里永远显式带 `--project <code>`（既有红线）。
-7. **流程学习（`/supperH-learn --flow`）在此之上再收紧两条**：① **一波 ≤ 2 片**（比第 1 条的 ≤3 更严 —— writer 每波只被派一次，各波回执要汇进主 agent 的同一个上下文，瓶颈是汇聚面不是算力）；② **整波等齐才派 writer**。第 ② 条是第 3 条 fail-closed 的另一面，也是上表那条互斥判据的直接推论：`flows` 本身就是 module 名，所以「一片到就写、另一片还在跑」正好等于 writer 与同 module 的 analyzer 写读交叠。
+7. **流程学习（`/supperH-learn --flow`）在此之上再收紧两条**：① **一波 ≤ 2 片**（比第 1 条的 ≤3 更严 —— writer 每波只被派一次，各波回执要汇进主 agent 的同一个上下文，瓶颈是汇聚面不是算力）；② **整波等齐才派 writer**。第 ② 条与上表的并发判据**无关**（flow 的 analyzer 写不了任何文件，不存在写读交叠），它是第 3 条 fail-closed 的另一面：本波任一页出局即整波按最差分流，半波落盘会让"哪些页已定"变成第二个真相源。
 
 > 真误并发了（写类重叠）不自行收拾：也不新增一个“并发冲突检测”去自壮（那会成了第三个真相源）。下一次 `supperH-bug-dev` 进它的步骤 4 时，`git status` 与 `dirty_files` 一比就露馅，落回“允许停下来问用户”硬清单第 1 条。
+8. **并行切片写（`--parallel`）文件不相交**：各 analyzer 只写自己的 `slice-NN.json`（`slice_id` 预分配，run 级 staging 目录按文件名隔离），不共享文件、不合并；落地引擎按 `expected_slice_ids` 读入**本组**那几片聚合，落地后只删本组那几片文件。
+9. **写类串行 ⇒ 读类必须背压**：只要某个写类被钉成"同一时刻 1 个"（`--parallel` 的落地、`supperH-prelearn-writer` 就是），生产它的读类**必须带节流**，否则落地队列无界增长。`/supperH-learn --parallel` 的判据：**staging 里尚未被删掉的 `slice-*.json` ≥ 5（= 捞取上限 = 排队上限）时停止补位**，等一次 `WRITTEN` 降回 `< 5` 再补；**捞取（落地触发）在 ≥ 3 时进行，有几个捞几个、一次最多 5 个**（3 = 开工线，5 = 排队线，两个数独立）。**"并发 ≤3"只约束在跑数、不约束积压**，两者必须分开表述。反过来，"多 writer"不是可选项：落地是 `CURRENT` 所指 gen 的 copy-on-write，下一次必须读到上一次刚切出的 gen，并行会从同一基线分叉并由后切者静默丢先切者批次。**落地动作本体是确定性脚本**（`scripts/landing-engine.mjs`，与 flow 的 `flow-engine.mjs` 同源）——装填/索引/自检/切 `CURRENT` 是纯机械计算，不该让模型逐格誊 markdown。
+
 
 ## 提交 / 推送前的交付对账（硬门禁）
 
@@ -86,12 +90,12 @@ node "<TOOL_ROOT>/scripts/git-deliver-check.mjs" --cwd "<WORKSPACE>" \
 
 `supperH-prelearn-analyzer`（预学习读码）每个 HTTP 入口方法输出一段（`--- route: <method> ---` 锚点为切分/合并原子）；切批与落位由 `supperH-prelearn-writer`（预学习落笔）按 `supperH-prelearn`（预学习统筹） skill §1 执行，遵守：
 
-- **目标预算**：每个物理 `batch-*.md` ≤ 30KB（含 frontmatter 与路由锚点）；单 route 段自身 > 30KB 不可再分 → 独占一个文件并 `oversized: true`（绝对下限兜底）
+- **目标预算**：每个物理 `batch-*.md` ≤ 30KB（含 frontmatter 与路由锚点）；单 route 段自身 > 30KB 不可再分 → 独占一个文件并 `oversized: true`（绝对下限兜底）。**并行模式（`--parallel`）把切片与装填预算设为预估目标 ~20KB（route 原子打包、≤3 route/片，非硬上限；实际文件大概率落在 20KB 上下）**，细则见 skill §1.2；本节其余规则（repack / 命名 / index 契约）两种模式通用
 - **单 Controller 容忍带 30–50KB（不拆）**：独占一批时允许越 30KB 至多到 50KB，打 `oversized: true`（记入 index，不进文件名）
 - **单 Controller > 50KB → 自动拆**：按 route 段声明序连续装填成每件 ≤ 30KB 的父 `batch-NNN.md` + 附属 `batch-NNN-MM.md`（第 2 层 `batch-NNN-MM-KK.md` 封顶并建议单独重学该模块；第 3 层禁止，改触发送模块级线性全重排）；拆点在 route 边界，绝不切断单个方法
 - **落位变化只走整组重排 `repack(G)`**（update/supplement 唯一改 batch 文件的方式，细则见 skill §1.1）：禁止就地插文件与单文件编辑；抖动锁在被改的那一组，其它批次跨代不动；查找走 `index.md` 的 `batch` 列（不透明字符串），改名不断链
 - **batch 命名**：编号固定 3 位 `batch-001 … batch-999`，附属后缀同为 3 位，不设自动扩位；历史 2 位命名（`batch-01`）仍可解析，无需迁移
-- **`index.md` 必带**：路由名 → batch 文件 + 行号范围 + 完整度标记；格式按 `supperH-prelearn`（预学习统筹） skill 的「index.md 规范格式」节（首张表以 `| route |` 开列，七列 `route/controller/method/batch/lines/level/sources` **缺一不可** —— 这是机器契约，缺列 = 格式漂移 = 快路径门禁判 32 出局）。`sources` 列 = 该 batch 调用链可达文件全集（含 Controller 自身，repo-relative POSIX，`;` 分隔，追不全写 `-`），供快路径门禁 G4b 与 `git diff` 求交集做 batch 级新鲜度复核
+- **`index.md` 必带**：路由名 → batch 文件 + 行号范围 + 完整度标记；格式按 `supperH-prelearn`（预学习统筹） skill 的「index.md 规范格式」节（首张表以 `| route |` 开列，七列 `route/controller/method/batch/lines/level/sources` **缺一不可** —— 这是机器契约，缺列 = 格式漂移 = 快路径门禁判 32 出局）。`sources` 列 = 该 batch 调用链可达文件全集（含 Controller 自身，repo-relative POSIX，`;` 分隔，追不全写 `-`），供快路径门禁 G4b 与 `git diff` 求交集做 batch 级新鲜度复核。**`route` 列必须是可匹配的真值**：注解里的 Spring 属性占位符要在 analyzer 侧按配置展开后再写（原文形态永远匹配不上用户报的 URL）；`method` 必须落在规范集 `GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|ALL` 内，`ANY` / `*` 一类非规范拼写由装填期归一为 `ALL`，装填后自检发现规范集之外的 method 即 `METHOD_DRIFT` 拒绝切 `CURRENT`
 - **流程学习不走上面这套 batch 切分**：它按 `--flow-plan` 的确定性聚片切分（同一个 Controller 的 route 聚成一片、**一片 ≤ 3 个 route**、**一波 ≤ 2 片**；两个数值都是 L1 固定值，不进配置、不开运行期放宽口子），落盘单位是 `flow-parts/part-<route 稳定键>.md` 而不是 `batch-NN.md`。分组**必须由脚本产出、不得由主 agent 现场分组**：`route → Controller` 是 `index.md` 里现成的列，读它是解析器的活（见 `10-redlines.md` 的只读取数下沉条）。
 
 ## CURRENT 原子切换

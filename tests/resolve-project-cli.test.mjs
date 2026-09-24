@@ -36,7 +36,7 @@ let root, privateRoot, workspace;
 const GOLD_KEYS = [
   'ok', 'code', 'displayName', 'configFile', 'registryLegacy', 'toolRoot', 'privateRoot',
   'driversRoot', 'contextRoot', 'tasksRoot', 'screenConfigFile', 'staleScreenConfig', 'screen', 'codeRoot',
-  'effectiveRoot', 'packageRoot', 'db', 'drivers', 'dbDriver', 'project'
+  'effectiveRoot', 'packageRoot', 'db', 'drivers', 'dbDriver', 'branch', 'detached', 'branches', 'project'
 ].join('|');
 
 function runCli(args) {

@@ -42,7 +42,12 @@ venv/
 *.log
 tmp/
 .tmp/
+_dsh-cache-analysis/
 
+
+~/
+
+# DSH 沙箱 Python 用户 site（APPDATA 重定向到工作区，见 site.USER_BASE）
 # ═════════ 允许追踪（覆盖上面某些通配） ═════════
 !.gitignore
 !.qoder/rules/**

@@ -3,7 +3,7 @@ description: 当用户想先理解/梳理某个模块、菜单或业务流程的
 mode: primary
 permission:
   edit: deny
-  bash: allow   # 窄用途：本命令唯一允许的 bash 脚本是 resolve-project.mjs（可带 --module 多次调用做新鲜度取数；流程模式另可带 --flow-readiness / --flow-plan，两支都只读不写）；分析/落地/编译仍走子 agent
+  bash: allow   # 窄用途：本命令允许的 bash 脚本只有两条（R3.5 白名单）——resolve-project.mjs（步骤 0 门禁；--module 多次调用做新鲜度取数；流程模式另可带 --flow-readiness / --flow-plan）与 scripts/parallel-plan.mjs（并行模式切片清单，--module / --controller / --limit），都只读不写；分析/落地/编译仍走子 agent
   external_directory: deny
   task: allow
 ---
@@ -35,10 +35,34 @@ permission:
                                # 项目身份永远由当前工作区决定；本旗标的值与步骤 0 返回的 code 不一致时
                                # 立即停止并告知用户切到正确的工作区，绝不用它去改选项目
   [--module <name>]            # 或 --screen / --flow
-  [--branch <name>]            # 默认 {{PROJECT.branches.dev}}；不同分支用 git worktree 检出到临时目录
+  [--branch <name>]            # 不给 → **步骤 1 会问用户确认**（候选 = 当前分支 + `{{PROJECT.branches.dev}}`，
+                               # 两项都取自步骤 0 返回体，不猜）；给了 → 直接用它、**不再询问**（显式优先）。
+                               # 不等于当前检出时用 git worktree 检出到临时目录，该目录即 effectiveRoot
   [--mode init|update|enrich]  # 默认 init
   [--commit <hash>]            # 默认 HEAD
-  [--limit N]                  # 只学前 N 个 Controller，用于分批验证
+  [--limit N]                  # 只学前 N 个 Controller。⚠️ 截断断点之后的 Controller 不会被后续 update 补学
+                               # （update 增量来自 git diff，未学者源码没变更就不命中）——学剩请用 --pause-every
+                               # 跑到哪算哪 + 重跑 init，本旗标仅供一次性试刀
+  [--pause-every N]            # code 模式：每完成 N 轮（一次 analyzer→writer 落地 = 1 轮）后暂停询问「继续 / 停止」；
+                               # 缺省 = 3。取值 ≥1；给 0 或负数 → 停止并解释，不猜意图。
+                               # 页面/流程模式忽略本旗标（页面只派一次 analyzer；流程按波推进、失败整波 fail-closed）。
+                               # 「停止」不是失败：走步骤 6 正常收尾汇报，已落盘批次全部保留。
+                               # 并行模式（--parallel）一轮 = 1 次落地 = 1 次捞取（计数只看落地次数、不看片数；
+                               # 见步骤 4「滚动池调度」）
+  [--parallel]                 # code 模式：模块内并行学习（新增机制，不改变默认串行路径）。同模块 ≤3 个
+                               # analyzer 并发，每个负责一个 route 原子切片（目标输出预估 ~20KB、≤3 route/片、
+                               # 非硬上限，巨型 Controller 可跨片）；
+                               # **滚动池**：恒 3 个在途、谁先好谁补位、staging ≥3 片即捞取落地（有几个捞几个、
+                               # 最多 5 个、slice_id 可不连续；staging ≥5 背压停补）；落地组之间**串行**（同 module
+                               # 同一时刻最多 1 个 writer），
+                               # **按片清理 staging**（所有切片写同一个 run 级目录，writer 落地后只删本组那几片
+                               # 文件）；writer 与同 module analyzer
+                               # **可并发**（analyzer 对 CONTEXT_ROOT 零依赖，不读也不写 gen/CURRENT；读 gen 的只有
+                               # writer 自己）。**落地动作由 `scripts/landing-engine.mjs` 执行**（确定性脚本：
+                               # 装填 / 逻辑序重排 / index / 自检 / 切 CURRENT / 按片清理全在脚本里）。20KB 是
+                               # 派发给 analyzer 的输出预估目标、
+                               # 只为并行容错；原 30KB / Controller 原子 / oversized 串行机制不变（细则见
+                               # supperH-prelearn skill §1.2）
   [--flow] [<route>]           # 流程模式。带 route = 只推这一页的上一步；与 --all 二选一，两者都不给 = 报错不猜
   [--all]                      # 仅与 --flow 组合：清单内每一页都推，**一页不裁**（规模靠并发，不靠少学）
   [--page <route>]             # 与 `--flow <route>` 等价的显式写法。它同时是解析器旗标名（步骤 0.6 的 --page），
@@ -47,7 +71,7 @@ permission:
 
 ## 步骤 0 · 项目门禁（**确定性硬门禁**）
 
-与 `supperH-bug` 步骤 0 **完全一致**：取当前工作区绝对路径 `<WORKSPACE>`，运行解析器（本命令全程只允许这一个 bash 脚本，可按不同参数多次调用）：
+与 `supperH-bug` 步骤 0 **完全一致**：取当前工作区绝对路径 `<WORKSPACE>`，运行解析器（本命令全程只允许上述两条只读 bash 脚本，可按不同参数多次调用）：
 
 ```
 node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>"
@@ -101,11 +125,19 @@ flows:{available, gen}, blockers:[{code, meaning_zh, action_zh, detail?}] }`。
   目标页集合来自步骤 0.6 已判过就绪的那个清单：`--flow <route>`（等价 `--page <route>`）= 单页；`--flow --all` = screens 代次清单里的**每一页**，一页不裁。
   route 一律先经解析器导出的归一化函数换算成页面键（node 侧单点，见 `skills/supperH-prelearn`），**本命令不得自己 trim/小写/替换路径变量**——两个方向各归一次就 join 不上。
   归一化之后仍解析不到页面 → 按步骤 0.6 返回的 `TARGET_NOT_FOUND` 停，**不猜"最像的那个"**、不退化成按页面名模糊匹配。
-- 若指定 `--branch` 且不等于当前 HEAD：
-  - `git -C {{PROJECT.codeRoot}} worktree add <tmp> <branch>`
-  - `<tmp>` 记为 `effectiveRoot`（**不写入 project.yaml**，仅本次运行使用）
-  - 学习完成后 `git worktree remove --force <tmp>`
-- 未指定 `--branch` → `effectiveRoot = codeRoot`
+- **分支确认（`code` 模式步骤 1 的第一件事，必做且只问一次）**：
+  - 显式给了 `--branch <name>` → 直接用，**不再询问**（显式优先；再问一遍等于把用户已说的话复述给他）。
+  - 未给 → **必须问用户确认，不得自己挑一个默认值**。用 `ask_user_question` 一次问全，候选按此顺序：
+    ① **当前分支** —— 取步骤 0 返回体的 `branch`（推荐项）。`detached === true` 时此项不可用，改为在问题里写明"当前是游离头（detached HEAD），请直接给分支名"，**不给假默认项**。
+    ② **dev 分支** —— 取步骤 0 返回体的 `branches.dev`；该项为空/缺失则不列这一项。
+    用户也可以直接给第三个分支名（问题里说明可自填）。返回体的 `branch` 为 `null` 且 `branches.dev` 也为空 → 只能让用户给分支名，不得退回"学当前检出"当默认。
+  - 用户答完即定，**不问第二遍**（沿用"一次问全"纪律）。
+- 定下分支 `B` 之后：
+  - `B` == 步骤 0 返回体的 `branch`（就是当前检出）→ `effectiveRoot = codeRoot`，**不建 worktree**
+  - `B` != 当前检出 → `git -C {{PROJECT.codeRoot}} worktree add <tmp> <B>`
+    - `<tmp>` 记为 `effectiveRoot`（**不写入 project.yaml**，仅本次运行使用）
+    - 学习完成后 `git worktree remove --force <tmp>`
+    - `worktree add` 失败（分支在本地解析不到）→ **停止并如实报告**，让用户先 fetch/建分支；**不退回当前检出**、也不换一个"最像的分支名"
 
 ## 步骤 2 · 学习检查
 
@@ -125,6 +157,7 @@ node "{{TOOL_ROOT}}/scripts/resolve-project.mjs" --cwd "<WORKSPACE>" --module "<
 
 - 从 `{{PROJECT.modules[].entryPattern}}` 定位所有 Controller 文件
 - 按 30KB 预算切 batch（route 段为原子；单 Controller 30–50KB 容忍不拆、>50KB 自动拆、溢出走附属 `batch-NNN-MM.md`，细则见 `supperH-prelearn`（预学习统筹）skill §1）：一批覆盖一组 Controller
+- **并行模式（`--parallel`）改用 20KB 预估目标**：先派一次只读取数拿到目标 Controller 的 route 清单（主 agent 不亲自读源码），按 route 原子 + 目标输出预估 ~20KB（route 原子打包、≤3 route/片，非硬上限）切片，巨型 Controller 可跨片；切片计划照常给用户预览。落地时 writer 按 20KB 预估目标把切片顺序装填为物理 `batch-*.md`（细则见 `supperH-prelearn` skill §1.2）。**默认串行路径的 30KB 计划规则一字不改**
 - 输出批次计划给用户预览（不立即执行），用户确认后再进派发
 
 **流程模式的分片不由本命令计算**（红线：主命令不做分组）：
@@ -173,7 +206,52 @@ analyzer 逐项处理 `screen.discovery`（四类介质，至少一项），按�
 ```
 analyzer 返回 → 立即派 writer 落地（**不留到最后一并落**，避免中途失败全丢）。
 
-> **并发只有一种形态**：多模块同时学 —— 每个 module 一条自己的 `analyzer → writer` 流水（不同 module 的分区目录天然不碰）。**同一 module 上永远串行**：writer 正在写新代目录 / 切 `CURRENT` 时再派一个 analyzer 读它，拿到的 batch 集合不是任何一瞬间的真实状态（完整规则见 `.qoder/rules/20-workflow.md`「子 agent 并发与互斥」）。
+### 并行模式的滚动池调度（`--parallel` 专属）
+
+**不是栅栏式波次**：不等齐，谁先好谁补位。规则如下（并发安全的两条约束见 `.qoder/rules/20-workflow.md` 上表 writer 行注）：
+
+1. **池容量恒为 3**。切片按 `slice_id` 顺序入池；**任一 analyzer 返回就立刻把下一片派进去**，不等同批其它两个。补位**受第 8 条背压约束**（积压够一组时不得再补）。
+2. **staging ≥ 3 即捞取落地（可变落地组 3~5）**：`readdir(staging_dir)` 里**未被落地引擎删掉**的 `slice-*.json` **≥ 3 时立刻捞取**——**有几个捞几个（3 / 4 / 5 个），一次最多 5 个**，**不等还在跑的那 ≤2 片**。落地组 = "**当时已完成的切片**"，其 `slice_id` **可以不连续**（例如 `{02,03,05}`）——这不影响任何东西：`batch` 物理编号本来就不跟逻辑序（SKILL §1），反查表行序由落地引擎按逻辑序 L 重排。
+   - **不足 3 不捞取，writer 不空转轮询**：staging < 3 时**不落地**；落地是**被动的**——由调度方每次收到 analyzer 完成回执后 `readdir` 检测，≥ 3 才触发引擎，writer 自身不做任何轮询/等待。
+   - **捞取数量以磁盘文件为准（`readdir`），不是以完成回执为准**：analyzer 写盘后回执有延迟，数文件才不漏捞刚完成的那片；故空闲时 staging 一凑满 3 就被捞走（`staging` 峰值 3），writer 忙时它自然攒到 5（被第 8 条背压压住）。
+   - **捞取上限 5 = 排队上限 5**：`staging ≥ 5` 时背压停补（见第 8 条），所以一次捞取最多 5 片、排队等待最多 5 片。
+   - **排空点兜底（唯一例外）**：切片清单全部派完（或到暂停点）时，**不足 3 片也要捞完**（尾组 = 1~4 片任意），绝不滞留。这一点在「排空点」段落再强调。
+   - **为什么是"≥3 就捞"而不是"凑满 5"**：凑满 5 会让 writer 落地完（staging ≤2）后空等 3 片新完成；≥3 就捞把 writer 的空闲缩到"再等 1 片"，writer 慢时落地期间自然攒到 5、落地完直接捞满——**先这样跑，观测 writer 快还是 analyzer 快再调**。
+3. **落地串行**：同一 module 同一时刻最多 1 个 writer 在跑。若上一组还在落地，本组**排队**等它切完 `CURRENT` 再派 —— 第二次落地要读第一次刚切出来的 gen，重叠会读到半成品。
+4. **run 级 staging 目录 + 按片清理**：所有切片写**同一个** `{{PRIVATE_ROOT}}/staging/<project>/<module>/gen-<ts>/`（`gen-<ts>` = 本 run 开始时一次生成，全 run 共用；**不按落地组拆目录** —— 落地组按完成序形成，派发时未知，拆目录会与按完成序分组矛盾）。落地后 writer **只删 `expected_slice_ids` 对应的那几片文件**（`slice-NN.json` 及残留 `.tmp`），**不删整目录** —— 下一组在途的切片文件还在里面。
+5. **落地期间 analyzer 照跑**（这是与旧"phase 分离"唯一的差别）：analyzer 对 `CONTEXT_ROOT` 零依赖，只读 codeRoot、只写自己那组的切片，**不读也不写** gen 与 `CURRENT`；读 gen 的只有 writer 自己。所以 writer 落地时**不需要**停下该 module 的 analyzer。
+6. **失败按组 fail-closed**：本组任一 analyzer 返回 `fail` / `INSUFFICIENT_LEARNING` / `TARGET_NOT_FOUND` → **本组不落地**（已落盘的其它组不动），失败片列进失败清单；继续还是停止由暂停点决定（第 3 条「整批等齐再用」的粒度从"一轮"收窄为"一组"）。
+7. **writer 模式按轮次定**：本 run 的**第 1 轮 `init`**（首次建立 gen），**之后每轮 `update`**（copy-on-write 拷未命中 batch 再追加）。用户重新跑 `--mode init` 视为**重新学习**（覆盖式续学，已学批次被重读覆盖、不重复落盘）。
+8. **背压（writer 恒为 1 ⇒ analyzer 必须被节流）**：`已完成未落地切片数`（= staging 目录里**尚未被落地引擎删掉**的 `slice-*.json` 数，**机械可数**：`readdir(staging_dir)`）**≥ 5（= 捞取上限 = 排队上限）时停止补位** —— 不再派新 analyzer 进池，直到一次 `WRITTEN` 把它降回 `< 5` 再恢复补位。与第 2 条的捞取阈值（≥3）**分离**：3 是"开工线"（有几个捞几个、最多 5），5 是"排队上限"（staging 到 5 停补）。
+   - **派发时的等价口径（点 1）**：停补判据可以换成**可计算的"已派发未落地" = `readdir(staging)` 的切片文件数 + 在途 analyzer 数**，目标是 **≤ 7**（= 排队上限 5 + 在途余量 ≤2）。两个口径等价：staging ≥5 停补 ⇔ 已派发未落地 ≤7。**保持 7 就是目标口径**——派发下一个 analyzer 前按这个数核对，超过就不派。
+   - **为什么必须有**：writer 恒为 1（第 3 条），而"staging ≥3 就排一批落地"是纯生产者节奏。writer 比 analyzer 慢时，落地队列只增不减 → 积压无界（切片堆在 staging、`index` 与"已学进度"的差距越拉越大，中途失败要重跑的窗口也越来越大）。第 1 条的"池容量 3"只约束**在跑**的并发，**不约束积压**，两者必须分开看。
+   - **为什么不是"多 writer"**：每次落地都是对 `CURRENT` 所指 gen 的 copy-on-write，下一次落地**必须读到上一次刚切出来的 gen**。两个 writer 并行会各自从同一基线分叉，后切 `CURRENT` 者**静默丢掉先切者的批次**（lost update）；`repack(G)` 与"全程只切一次 `CURRENT`"也都预设单 writer。要并行就得新增"分片所有权 + 确定性合并 + 单点切换"的独立机制 —— 属重设计，不在本期。
+   - **稳态上界**（可用来验收）：**1 个 writer + ≤3 个 analyzer 在跑 + ≤7 片已完成未落地**（5 片排队 + 落地期间至多 2 片在途完成），即**已派发未落地 ≤ 7**（通式：排队上限 + 池容量 − 1 = 5 + 3 − 1）。看到"未落地 > 7"即说明补位没被背压拦住。
+
+**排空点（只在这两处等）**：① 切片清单全部派完；② 到达暂停点。两处都执行"停止补位 → 等在途片全部跑完 → **有几个捞几个落地（不足 3 片也捞，绝不留滞）** → 再报进度/收尾"，这样暂停消息里的"均已落盘并切 CURRENT"才是真话（暂停点出现在落地之后、池子已重新填满，故在途最多 3 片）。
+
+**批次暂停点（code 模式专属，`--pause-every` 缺省 3）**：上面这一轮（analyzer→落地）以 `WRITTEN` 结束后，把**本轮完整轮次**累计进计数（串行模式一轮 = 1 批 = 1 轮；并行模式一轮 = **1 次落地 = 1 次捞取**——**轮次计数只看落地次数，不看每次捞几片**（组大小 3~5 可变），**计数单位是轮不是物理 batch**，否则并行下一轮跨过暂停点且随 N 漂移；**后续若调捞取片数，本处计数逻辑无需改动**）；轮次计数是 `pause_every` 的整数倍且后面还有未派发轮次 → 先按上面「排空点」等在途片落地，再**停下**，按下面格式报进度并等用户答复：
+
+```
+已学 k/kTotal 批（覆盖 Controller m/mTotal，均已落盘并切 CURRENT）
+继续 → 回"继续"；停止 → 回"停"（已学部分全部保留，不算失败）
+```
+
+- 用户答"继续" → 拿步骤 3 已确认的批次/切片计划接着派发（计划还在会话上下文里，不重新生成、不重排）。
+- 用户答"停"（或任何非"继续"的明确停止意愿）→ **当前批已落盘，直接进步骤 6 收尾**，汇总里如实报"本轮未学完"。
+- 用户答得不明确 → 再问一次，不猜。
+- 计数没到倍数就全部跑完 → 不进暂停点，直接进步骤 6。
+
+> **并发两种形态**（完整规则见 `.qoder/rules/20-workflow.md`「子 agent 并发与互斥」）：
+> 1. **多模块同时学**（默认）—— 每个 module 一条自己的 `analyzer → writer` 流水（不同 module 的分区目录天然不碰）。
+> 2. **模块内并行**（`--parallel`）—— 同一 module 拆成 ≤3 个 route 原子切片（目标输出预估 ~20KB、非硬上限），**滚动池**：恒 3 个在途、谁先好谁补位、每完成 3 片立刻落地（细则见上面「并行模式的滚动池调度」）。
+>
+> **并发安全不变量**（是**两条约束**，不是"互斥"）：writer 与同 module 的 analyzer **可以并发** —— analyzer 对 `CONTEXT_ROOT` 零依赖（只读 codeRoot、只写自己的切片文件，不读也不写 gen 与 `CURRENT`；读 gen 的只有 writer 自己），所以"写读交叠"在实现上并不存在。要守的是：① **落地串行**（同 module 同一时刻最多 1 个 writer，第二次落地要读第一次刚切的 gen）；② **按片清理 staging**（writer 落地后只删 `expected_slice_ids` 对应的那几片文件，不删整目录，不碰下一组在途切片）。
+>
+> **并行组交接**（步骤 5 契约，确定性执行，**不询问用户**）：本组各片已由各自的 analyzer 直接落成 `<staging_dir>/slice-NN.json`（tmp+rename，零转述、零转录），主命令只派那 1 个 writer 读入聚合。串行即原内联 `analyzer_output`，行为不变。
+> **切片清单 = 机器可校验 manifest**：步骤 3 **优先调 `node scripts/parallel-plan.mjs --module <m>`**（巨型 Controller 可 `--controller <fqn>` 单出窗口计划）拿 `slices[]`——脚本出口字节确定性，route 扫描 + 窗口切片全机械；**退出码 43（route 扫描不完整）不手搓**：报告 `incomplete_files[]` 请用户确认（补全后重跑，或该模块改走串行 30KB 路径）——禁止主 agent 静默手动组装：漏路由不可见，且违反「分组必须由脚本产出」。派发逐片喂入 analyzer；writer 按清单核对——**核对粒度是本组的 `expected_slice_ids`（不是全量计划）**：缺号 / 窗口重叠 / 本组并集不覆盖本组计划 → `GEN_INTEGRITY_FAIL`。方法窗口不再靠主 agent 口头编号 + analyzer 自报核对。
+> **plan.json 落盘必须 UTF-8 无 BOM（实测踩过）**：plan 交给落地引擎做 `(file,line)` 逻辑序还原时，若经 PowerShell `1>` 重定向落盘会被默认写成 **UTF-16LE**，node 按 UTF-8 读成乱码 → `readPlanOrder` 解析失败 → 逻辑序回退 fallback（行序不是源码声明序，虽然功能无损但 L 序失真）。落盘用 UTF-8 无 BOM（`[IO.File]::WriteAllText(p, json, [Text.UTF8Encoding]::new($false))`，或让 planner 支持 `--out` 直写）；落地引擎对 UTF-8 的 plan 用占位符后缀 endsWith 兜底（plan 键保留 `${adminPath}` 原文、切片键是真值也能命中）。
+> **计划里的 route 键不是最终真值**：planner 保留注解原文（含 Spring `${...}` 属性占位符），而反查表要的是**可匹配的真值**。故切片里的 route 只是"这一片该学哪些方法"的范围声明——analyzer 必须**自己读代码并按配置把占位符展开**（见其工作流步骤 3），**不得把计划键原样抄进 `route.path`**；writer 用 analyzer 回的 `route_placeholders` 把计划键映射后再核对并集覆盖。
 
 > **页面模式不重复本步**：页面清单已在步骤 3.5 由 `supperH-prelearn-analyzer(mode=screen)` 产出 `data.screens`；页面模式直接进步骤 5 落地（`module: "screens"`）。
 
@@ -205,18 +283,28 @@ analyzer 返回 → 立即派 writer 落地（**不留到最后一并落**，避
 
 > **各 analyzer 之间不共享中间态**：跨片那条边的出处**只能**由 writer 在整理阶段按 `evidence` 机械折叠得出。主 agent 手里握着各片的最终回报，它**有能力**顺手补一条边——正因如此才更要禁：顺手补出来的边没有可核对出处，且会让同一次运行不可重生成。
 
-## 步骤 5 · 派发 writer（原子切换）
+## 步骤 5 · 落地（确定性脚本 + 原子切换）
+
+**code 模式的落地动作由 `scripts/landing-engine.mjs` 执行**（与 flow 模式把它交给 `flow-engine.mjs` 同源）。装填 / 逻辑序重排 / index 生成 / 自检 / `CURRENT` 原子切换 / 按片清理**全部在脚本里**，writer 只做「组装入参 → 调用 → 原样回报」：
 
 ```
-派 supperH-prelearn-writer {
-  mode: init | update | supplement,
-  module,
-  analyzer_output: <analyzer 返回的 data 字段>
-}
+node "{{TOOL_ROOT}}/scripts/landing-engine.mjs" \
+  --context-root "{{CONTEXT_ROOT}}" --module <m> \
+  --staging-dir "<{{PRIVATE_ROOT}}/staging/<project>/<module>/gen-<ts>/>" \
+  --expected-slice-ids 01,02,03,04,05 \
+  --mode init|update \                     # 并行多轮：本 run 第 1 轮 init，之后每轮 update
+  --commit <HEAD> \                        # 与切片里的 commit 必须一致
+  --plan "<步骤 3 的 plan.json>" \          # 供脚本按 (file,line) 还原逻辑序 L；缺省则回退并如实标注
+  --write                                  # **不带 --write = 干跑**：只算 + 自检，不写任何文件
 ```
-页面模式：`module: "screens"`，`mode` 取 `init`（首次）或 `update`（已有代次）。
 
-writer 返回：
+退出码：`0` = WRITTEN（或干跑通过）；`41` = `GEN_INTEGRITY_FAIL`（自检不过，**不切 CURRENT、不删切片**）；`42` = `METHOD_DRIFT`；`2` = 入参错。stdout 一律是结果 JSON（形状与旧 writer 回报一致：`gen_dir / prev_gen / batches / methods_written / method_normalized / sources_* / completeness / l_order / problems`）。
+
+页面模式仍派 `supperH-prelearn-writer`（`module: "screens"`，`mode` 取 `init`（首次）或 `update`（已有代次））——它走的是 writer 角色自己的落地路径，不在本脚本范围内。
+
+并行模式一组 5 份回报的交接（步骤 4「并行组交接」）：**每份切片由对应 analyzer 自写**到 `<staging_dir>/slice-NN.json`（主命令不写、不转述——零转录，杜绝“转录丢字段 → batch 静默变浅”）；落地引擎按 `--expected-slice-ids` 读入本组那 5 份，校验份数/slice_id/schema/commit，校验窗口无重叠后机械装填 → index → 完整度自检（分母 = **本轮派发目标** = `expected_slice_ids` 的长度；本组即本轮，1 轮 = 1 次落地，巨型 Controller 跨片不要求单轮覆盖齐）→ 原子切 `CURRENT`（**module 级**）。**落地组之间串行**（同一 module 同一时刻最多 1 次落地，第二次要读第一次刚切的 gen）；本组落地期间该 module 的 analyzer 照跑（analyzer 对 `CONTEXT_ROOT` 零依赖）。落地返回 `WRITTEN` 后**由脚本按片清理**本组暂存（**只删 `expected_slice_ids` 对应的那几片文件**，不删 staging 目录本身、不碰下一组在途切片），失败则保留供排查。串行路径（无 `--parallel`）仍走 writer 角色 + `analyzer_output` 内联，行为一字不变。
+
+writer 返回（页面模式）：
 - `WRITTEN` → 继续下一批
 - `GEN_INTEGRITY_FAIL` → 停止 + 报告；不重试
 - `WRITE_BOUNDARY_VIOLATION` → **立即中止整个流程 + 上报红线**
@@ -258,11 +346,13 @@ FLOW_INTEGRITY_FAIL + diagnostics:[ { part, line, invariant, message, rerun_rout
 ```
 ## 学习完成
 - module: <name>
+- 学习分支: <branch>（effectiveRoot: codeRoot | worktree <tmp>；用户确认或 --branch 显式给出）
 - gen_dir: <absolute path>
 - prev_gen: <previous or "none">
 - batches: N 个
 - methods_written: M
 - 完整度分布: L1=a, L2=b, L3=c
+- 本轮批次: k/kTotal<若因"停止"提前收尾，补注：未学完，剩余批次重跑 `--mode init` 续学（已学批次会被重读覆盖，不重复计费落盘）>
 - 越限 batch（单 route 段 >30KB 独占）: <oversized_batches 列表或 无>
 - 建议局部重学的组（已落到第 2 层，可 `--module <name> --mode update` 单独重排、不影响其它模块）: <needs_repack_group 列表或 无>
 - 页面模式专属（仅 `--screen`）: screens_written=<n> / route_resolved=<n> / code_linked=<n>
@@ -288,6 +378,7 @@ FLOW_INTEGRITY_FAIL + diagnostics:[ { part, line, invariant, message, rerun_rout
 ## 步骤 7 · 失败降级
 
 - 单批失败 → 保留已落地批次；报失败原因 + 建议后续动作
+- `--pause-every` 暂停点用户选"停止" → **不属于失败**：不进本节的降级路径，直接走步骤 6 正常收尾
 - worktree 场景失败 → 必须 `git worktree remove --force` 清理，不留悬空引用
 
 ## 边界（红线）

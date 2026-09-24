@@ -99,6 +99,8 @@ function gate(ctx, anchor, text = '', headCommit = HEAD, extra = {}) {
 test('classifyAnchor：三类一期可用锚点 + 两类明确不支持', () => {
   assert.equal(classifyAnchor('POST /api/v1/order/create').kind, 'route');
   assert.equal(classifyAnchor('  post /api/x  ').value, 'POST /api/x', 'method 应大写化并折叠空白');
+  assert.equal(classifyAnchor('ALL /api/v1/order/bare').kind, 'route', 'ALL 是裸 @RequestMapping 归一后的合法 method 前缀，必须被识别成 route');
+  assert.equal(classifyAnchor('ALL /api/v1/order/bare').supported, true, 'ALL 锚点可用（此前会被误判 unknown → 30 出局）');
   assert.equal(classifyAnchor('com.x.OrderController#create').kind, 'fqn');
   assert.equal(classifyAnchor('OrderController#create').method, 'create');
   assert.equal(classifyAnchor('OrderController.java:88').kind, 'fileLine');
@@ -190,6 +192,21 @@ test('matchRows：route 全等 / 仅 path 匹配多变体 / fqn 末段 / 行号�
   assert.equal(matchRows(rows, classifyAnchor('NoteController.java:999')).length, 1, 'lines 为 - 时视为可用');
 });
 
+test('matchRows：ALL 行（裸 @RequestMapping 归一）对显式 method 锚点做 method 通配', () => {
+  const mk = (route) => ({ route, controller: 'OrderController', method: 'bare', batch: 'b', lines: '1-2', level: 'L3', sources: { usable: true, files: [] } });
+  const rows = [
+    mk('ALL /api/v1/order/bare'),
+    mk('POST /api/v1/order/create'),
+  ];
+  assert.equal(matchRows(rows, classifyAnchor('POST /api/v1/order/bare')).length, 1, '显式 method 锚点应命中 ALL 行（method 通配）');
+  assert.equal(matchRows(rows, classifyAnchor('GET /api/v1/order/bare')).length, 1, '任意 method 同 path 都命中 ALL 行');
+  assert.equal(matchRows(rows, classifyAnchor('DELETE /api/v1/order/bare')).length, 1);
+  assert.equal(matchRows(rows, classifyAnchor('ALL /api/v1/order/bare')).length, 1, 'ALL 锚点全等命中 ALL 行');
+  assert.equal(matchRows(rows, classifyAnchor('POST /api/v1/order/none')).length, 0, 'path 不同不得误命中');
+  assert.equal(matchRows(rows, classifyAnchor('POST /api/v1/order/create')).length, 1, '具体 method 行不受影响');
+  assert.equal(matchRows(rows, classifyAnchor('/api/v1/order/bare')).length, 1, '纯 path 锚点原有 pathOnly 分支仍命中');
+});
+
 test('matchRows：codeFile 反向锚点——经 sources 列倒排（文件→route），含双向后缀与边界', () => {
   const { rows } = parseIndexMarkdown(indexDoc());
   // OrderServiceImpl.java 在 batch-01 三行的 sources 里 → 反查命中 3 条 route
@@ -272,6 +289,16 @@ test('G2 数据就绪：CURRENT / index.md / 格式漂移 / screens 分区 一�
   // 缺 module 是调用方入参不成对，不是"数据未就绪"：单独给 36，两者在 jsonl 里不得混淆
   assert.equal(gate(ok0(), 'POST /api/v1/order/create', '', HEAD, { module: undefined }).status,
     EXIT.INCOMPLETE, '缺 module 入参 → 36（门禁无法求值）');
+});
+
+test('G2 数据就绪：CURRENT 带 UTF-8 BOM 仍可用（PowerShell Set-Content -Encoding utf8 的坑）', () => {
+  // 实测来源：并行流程真跑时 writer 用 `Set-Content -Encoding utf8` 写 CURRENT，
+  // 得到 21 字节（含 BOM），读方拿 "\uFEFFgen-…" 当目录名 → NO_INDEX_FILE → 静默判 32。
+  const ctx = makeContext(indexDoc());
+  fs.writeFileSync(path.join(ctx.contextRoot, 'order', 'CURRENT'), '\uFEFFgen-20260101120000\n', 'utf8');
+  const r = gate(ctx, 'POST /api/v1/order/create');
+  assert.notEqual(r.status, EXIT.NO_INDEX, 'BOM 不该把可用的 CURRENT 判成 NO_INDEX');
+  assert.equal(r.anchorResolved?.batch, 'batch-01.md', 'BOM 剥掉后应能正常解出锚点');
 });
 
 test('反查表重复 route 判为歧义而非首个命中', () => {

@@ -65,12 +65,28 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
 
 > 抖动被锁在「被改的那一组」内部，且查找走 index 的 batch 列（不透明字符串），故附属机制的代价只是本组若干文件的读写，换来的是 30KB 预算的实效 + 其余批次跨代稳定。
 
+### 1.2 并行切片机制（`--parallel` 新增；原 §1 串行算法一字不改）
+
+并行模式只改变**派发与落地形态**，不改变 route 段原子与 `batch-*.md` 的物理形态：
+
+- **触发**：`/supperH-learn --parallel`。缺省（不传）走 §1 的 30KB 串行路径，本小节不生效。
+- **切片**：先把目标 Controller 的 route 清单取齐（派只读取数，主 agent 不亲自读源码），按 **route 原子 + 目标输出预估 ~20KB（非硬上限）** 切片；**巨型 Controller（单方法多、输出大）可跨多个切片**——这是并行模式与串行"单 Controller 尽量看全"的唯一有意差别（20KB 是并行容错预算/派发目标，不是内容质量阈值、也不是硬上限；实际文件大概率落在 20KB 上下、可超）。脚本退出码 43（route 扫描不完整，`incomplete_files` 列出）→ **本轮不派发**：报告待人工确认，补全后重跑或改走串行，禁止主 agent 静默手动组装。
+- **并发**：同 module 同时 ≤3 个 analyzer（**滚动池**），一个切片一个；analyzer 只读 codeRoot、对 `{{CONTEXT_ROOT}}` **零依赖（读也不读）**，切片间互不依赖。
+- **滚动调度（不是栅栏式波次）**：恒 3 个在途，**任一 analyzer 返回就立刻补下一片**，不等同批其它两个；**staging ≥ 3 片即捞取落地**——**有几个捞几个（3/4/5 个），一次最多 5 个**（以 `readdir` 磁盘文件数为准，不是数回执）；**不足 3 不捞取，落地是被动的**（调度方检测 staging ≥3 才触发引擎，writer 不空转轮询）。落地组 `slice_id` 可以不连续，落地组之间**串行**（同 module 同一时刻最多 1 次落地，第二次要读第一次刚切的 gen）。**捞取上限 5 = 排队上限 5**（staging ≥5 背压停补）。落地组大小**可变（3~5）**：≥3 就捞把 writer 的空闲从"等 3 片"缩到"等 1 片"，writer 慢时落地期间自然攒到 5、落地完直接捞满——先这样跑，观测 writer 快还是 analyzer 快再调。
+- **并发安全（不是"互斥"，是两条约束）**：落地与同 module 的 analyzer **可以并发** —— analyzer 不读也不写 gen / `CURRENT`（读 gen 的只有落地方），故"写读交叠"在实现上并不存在。要守的只有：① **落地串行**；② **按片清理 staging**（落地后只删 `expected_slice_ids` 对应的那几片文件，不删整目录、不碰下一组在途切片）。串行路径（无 `--parallel`）仍是"同一 module 流水内串行"，两者不混用。
+- **背压（落地恒为 1 ⇒ analyzer 必须被节流）**：`已完成未落地切片数`（staging 里尚未被删掉的 `slice-*.json` 数，`readdir` 机械可数）**≥ 5 时停止补位**，直到一次 `WRITTEN` 降回 `< 5` 再恢复（5 = 排队上限；与捞取阈值 3 分离：3 是开工线，5 是排队线）。**派发等价口径：已派发未落地 = staging 文件数 + 在途 analyzer 数 ≤ 7**（= 排队上限 5 + 在途余量 ≤2）。"池容量 3"只约束**在跑**的并发、**不约束积压** —— 不节流则落地队列无界增长。**多 writer 不可行**：每次落地是 `CURRENT` 所指 gen 的 copy-on-write，下一次必须读到上一次刚切出的 gen；并行会从同一基线分叉、后切者静默丢先切者批次（lost update），且 `repack(G)` 与"只切一次 `CURRENT`"都预设单 writer。稳态上界：**1 个落地 + ≤3 analyzer 在跑 + ≤7 片已完成未落地**（通式 = 排队上限 + 池容量 − 1 = 5 + 3 − 1）。
+- **交接（本组切片 → 1 次落地）**：并行（`--parallel`）由**各 analyzer 自写切片**——`<staging_dir>/slice-NN.json`（`NN` = 派发里的 `slice_id`；`staging_dir` = **run 级目录** `{{PRIVATE_ROOT}}/staging/<project>/<module>/gen-<ts>/`，全 run 共用、按文件名隔离，tmp+rename 原子写），**主命令不写、不转述**（零转录；串行仍内联 `analyzer_output`，一字不变）；落地按 `expected_slice_ids` 读入本组那几份并校验齐/slice_id/schema/commit。staging 是**中间产物、非真相源**：不参与任何门禁/测试读它；落地成功后按片清理（**只删本组那几片文件**），失败保留供排查。
+- **落地 = 确定性脚本**：`node scripts/landing-engine.mjs --context-root … --module … --staging-dir … --expected-slice-ids … --mode init|update --commit … [--plan plan.json] [--write]`。装填（≤30KB、单 Controller 独占容忍 50KB、段 >30KB oversized 独占）、逻辑序 L 重排（计划 `(file,line)` 优先、缺失回退并如实标注）、`index.md` 七列、`sources` 合并、自检（真实 `parseIndexMarkdown`）、`CURRENT` module 级原子切换、按片清理、惰性 GC **全在脚本里**。**不带 `--write` 是干跑**。退出码 0/41(`GEN_INTEGRITY_FAIL`)/42(`METHOD_DRIFT`)/2。理由与 flow 模式同源：纯机械计算不该让模型逐格誊 markdown（"每次都不同"），也不该把每轮落地的大头 token 花在格式化上。
+- **暂停**：`--pause-every` 按**轮**计数（与命令步骤 5 一致）：一轮 = 一次 analyzer→落地；串行一轮 1 批 = 1 轮，并行一轮 = **1 次落地 = 1 次捞取**——**轮次计数只看落地次数、不看每次捞几片**（组大小 3~5 可变；后续调捞取片数无需改本处）——**计数单位是轮不是物理 batch**，否则并行下一轮跨过暂停点且随 N 漂移）。到达暂停点或全部派完时做一次**排空**（停止补位 → 等在途片全部跑完 → **有几个捞几个落地，不足 3 片也捞**），保证"均已落盘并切 CURRENT"的进度口径是真话。
+
 ### 2. `--- route: <method> ---` 锚点
 
 - 每个 HTTP 入口方法体前面必须写一行：`--- route: <HTTP-METHOD> <path> ---`
 - 例：`--- route: POST /api/v1/order/create ---`
 - supplement 模式定位缺口时**依赖此锚点**；无锚点的方法视为私有方法，不参与 route 反查
 - `index.md` 建立 `route → batch-NN.md` 反查表，供 `supperH-bug-analyzer` 快速定位
+- **`<HTTP-METHOD>` 只能是规范集** `GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|ALL`：裸 `@RequestMapping`（未限定 method）一律归一为 `ALL`；`ANY` / `*` / `REQUEST` 一类拼写**不是**合法值 —— 门禁的锚点识别集里没有 `ANY`，它也不享受 `ALL` 的 method 通配，写进锚点等于该 route 永久失联（有真实批次踩过这条）。
+- **`<path>` 必须是可匹配的真值形态**：注解里带 Spring 属性占位符（`${...}`，类级前缀与方法级路径都算）时，先按配置解析成真值再写（解析优先级、"解析不出就保留原文并标 unresolved"的纪律见 `supperH-prelearn-analyzer` 工作流步骤 3）。**禁止**把 `${...}` 原文写进锚点与反查表 —— 门禁的比较键不做占位符展开，原文形态永远匹配不上用户报的 URL。另外，类级前缀与方法级路径拼接后必须**以 `/` 开头**（注解写 `api/x` 时 Spring 生效路径是 `/api/x`；门禁的比较键不补前导斜杠，少了它同样匹配不上）。
 
 ### 3. CURRENT 原子切换（copy-on-write）
 
@@ -80,7 +96,7 @@ description: supperH-prelearn（预学习统筹）— 预学习统筹 skill。�
 2. 从旧代拷贝**未被本次覆盖**的 batch
 3. 用 analyzer 新数据**整体替换**指定 Controller 对应的 batch
 4. 生成新 `index.md`，`learnedAtCommit` = 本次 analyzer 输入的 commit；`sources` 列按**本代实际内容**重算（拷贝过来的 batch 沿用其原有 `sources`，不重写）
-5. **完整度自检**：`index.md` 中覆盖的 Controller 数 ÷ 目标模块 Controller 总数 ≥ 95% → 允许切换；否则报 `GEN_INTEGRITY_FAIL` 且不切
+5. **完整度自检**（分母 = **本轮派发目标切片数**，不是 Controller 数、更不是模块全量）：本轮计划落地的 N 份切片**全部落盘且可解析**（`slice_id` 与计划一致、schema 对齐、无缺号）≥ 95% → 允许切换；否则报 `GEN_INTEGRITY_FAIL` 且不切。巨型 Controller 跨片时**不要求单轮「Controller 覆盖齐」**（那会让只覆盖部分路由的轮次必死）；模块级覆盖率（累计 `coveredControllers ÷ 模块全量` ≥ 95%）由收尾/进度口径判定，**两者分家**——否则中间轮永远过不了闸，「每批即校验即切」与 `--pause-every` / `--parallel` 无从运行
 6. `writeFile("CURRENT.tmp", "<new-ts>")` → `rename("CURRENT.tmp", "CURRENT")`（同文件系统 rename 保证原子）
 
 **任何异常路径**（write/rename 失败）→ 保留旧 CURRENT 指向；新代目录留在原地由下次 GC 清理；**禁止回滚性覆盖旧 CURRENT**。
@@ -203,7 +219,7 @@ coveredControllers: N
 - `kind`：`code`（代码学习）或 `screens`（页面学习）。**页面分区必须 `kind: screens`**，否则 G2 会把它当业务模块。流程学习**不写 `index.md`**，它写 `flow-index.md` 且 frontmatter `kind: flows`；`screens` 与 `flows` 两个保留分区都不参与 bug 快路径的锚点反查（`scripts/fastpath-gate.mjs` 的 G2 按名出局）。
 - `learnedAt`：本次学习完成时刻。
 - `learnedAtCommit`：学习时所在代码库的 HEAD SHA；**缺此项 → G4 新鲜度直接判失败（35）**。必须加引号，见下面「已知类型陷阱」。它仍然是**仓库级** HEAD（不是模块级、不是 batch 级）—— G4b 靠它作 diff 的左端点，而非拿它直接当相等判据。
-- `controllers` / `coveredControllers`：目标总数 / 本 index 覆盖数；比值即 95% 完整度自检输入。
+- `controllers` / `coveredControllers`：目标模块 Controller **全量** / 本 index **累计**覆盖数；比值 = **模块级覆盖率**（收尾/进度口径；快路径门禁不读这两个字段，它只判 index 存在与新鲜度）。每批完整度自检不读这两个字段——其分母是**本轮派发目标**（见 §3），两者分家。
 
 ### 段 2：route 反查表（必须，表头以 `route` 开列）
 
@@ -221,7 +237,8 @@ coveredControllers: N
 - **`route` 必须是第一列**（解析器靠它区分反查表与其它表）；其余六列按**列名**定位，顺序可调，但 writer 一律按上面的标准顺序写
 - 七列**缺一不可**：缺任一列即判格式漂移（32）。特别地，表头丢一根竖线会让 `level` 列整体丢失 —— 一个已学到 L3 的模块会被静默当成 L1、永久判 34，而被归因成"学习深度不足"，所以缺列绝不"尽力解析"
 - **行尾 `|` 可选**（markdown 合法写法）、表头大小写不敏感、允许 `**route**` 加粗与行首 ≤ 3 空格缩进、分隔行风格不限（`|---|---|` / `| :-- | --: |`）；writer 产出的仍是标准写法
-- `route`：`<HTTP-METHOD> <path>`，method 大写，与 batch 里 `--- route: ... ---` 锚点**字面一致**
+- `route`：`<HTTP-METHOD> <path>`，method 大写，与 batch 里 `--- route: ... ---` 锚点**字面一致**。**裸 `@RequestMapping`（未限定 method）→ 统一归一为 `ALL`**：归一化**单点 = writer 机械装填**（analyzer 只记代码里的原始 method，缺省记 `null`，**禁止** analyzer 各自写 `ALL`/`*`/`ANY`——三片拼写不一致会让「字面一致」契约碎裂）。**规范集固定 `GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|ALL`**：`ANY` / `*` / `REQUEST` 等非规范拼写由装填期一并归一为 `ALL`，装填后自检发现规范集之外的 method 即 `METHOD_DRIFT`（不切 CURRENT）—— 这种行匹配不上任何 route 锚点，属静默失效
+- `route` 的 `<path>` 写**解析后的真值**：带 Spring `${...}` 占位符的路径必须按配置展开后再写（规则见 §2）；展开在 analyzer 侧完成，writer 原样装填，**不得回写成占位符原文**
 - `controller`：简单类名（`OrderController`）；脚本按末段后缀匹配，允许锚点传全限定名
 - `batch`：`batch-NN.md` 文件名（不含路径）
 - `lines`：`起始-结束`；无法给出时填 `-`
@@ -238,6 +255,7 @@ coveredControllers: N
 - **形态**：相对代码库根（`EFFECTIVE_ROOT`）的 **POSIX 路径**，`;` 分隔，无空格、无盘符、无 `./` 前缀。与 `git diff --name-only` 的输出同形，否则交集永远为空。
 - **必含 Controller 自身文件**（理由见 `agents/supperH-prelearn-analyzer.md` 步骤 3.5）。不为"省字节"剔掉它 —— 剔了等于打开漏杀口子。
 - **追不全时写 `-`（而不是写空、也不是少写几个）**。`-` = "无法安全判定" → G4b **fail-closed 直接 35**。这一条是本列存在的根基：如果"不知道"被当成"无依赖"，整个修复就是把误杀换成漏杀。
+- **成片 `-` 的常见成因是 analyzer 漏产 `touched_files`**（不是"确实无依赖"；历史批次实案如此）。修复方式是**重学受影响的 Controller**，不是放宽本列判据 —— 放宽等于把误杀换成漏杀。反向反查（`codeFile` 锚点）也一并失效，因为那一侧同样是拿本列倒排。
 - 路径本身含 `;` 或 `|` 的文件（几乎不会发生）→ 该 batch 写 `-`，走 fail-closed。
 - 拷贝过来的 batch 沿用其原有 `sources`，不重新推演（重推没依据）；它的新鲜度由 G4b 的 diff 交集实测得出，不靠信任旧推断 —— 这正是本列顺手解决的"不可审计"问题。
 

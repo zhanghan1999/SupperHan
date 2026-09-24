@@ -34,6 +34,7 @@ const frontmatterOf = (text) => {
 const BOUND_AGENTS = [
   { file: 'supperH-prelearn-writer.md', anchor: 'CONTEXT_ROOT' },
   { file: 'supperH-driver-author.md',   anchor: 'DRIVERS_ROOT' },
+  { file: 'supperH-prelearn-analyzer.md', anchor: 'PRIVATE_ROOT' },
 ];
 // command 入口（primary）侧的放开面同样点名：它们不是 subagent，但同样跨 workspace 写盘。
 const BOUND_COMMANDS = [
@@ -115,9 +116,11 @@ test('红线文案与本名单同步（文档说谎就是评审失效）', () =>
     assert.ok(rules.includes(name), `R2 名单里缺 ${name} —— 红线句子与实际放开面已经不一致`);
   }
   const arch = read(path.join(ROOT, 'docs', 'architecture.md'));
-  assert.match(arch, /只放开 \*\*2 个 subagent \+ 4 个 command\*\*/,
+  assert.match(arch, /只放开 \*\*3 个 subagent \+ 4 个 command\*\*/,
     'architecture §5 的口径没跟上（写少而盘上多 = 下一次 review 拿假数字做判断）');
   assert.match(arch, /agent-permissions\.test\.mjs/, '§5 应指向本测试，否则读者以为这仍是一条靠自觉的规则');
+  assert.ok(!arch.includes('两个 subagent 与'), 'architecture C1 冲突表行残留旧数字（§5 已是三个）');
+  assert.ok(!arch.includes('六者'), 'architecture C1 冲突表行残留旧数字（应为七者）');
 });
 
 test('rules 文件自身合规：不得含双花括号占位符（它们不走 sync 替换）', () => {
@@ -165,4 +168,16 @@ test('deny 的 agent/command：正文不得出现"从/由/直读 私有根"或"�
   }
   assert.deepEqual(offenders, [],
     '这些 deny 角色正文要求"从私有根读/往私有根写"，但 external_directory: deny 让它做不到——读取应改由命令层经 resolve-project.mjs 注入入参（见 supperH-learn 步骤 2 纪律），落盘应下沉进 node（见 resolve-project.mjs --emit-sql）');
+});
+
+test('prelearn-analyzer 窄写护栏：写指令只许指向 staging 切片，不碰 CONTEXT_ROOT / 其它根（S2b）', () => {
+  const text = read(path.join(ROOT, 'agents', 'supperH-prelearn-analyzer.md'));
+  const body = bodyOf(text);
+  const bad = [];
+  for (const line of body.split(/\r?\n/)) {
+    if (/写(?:到|进|入)[\s`]*\{\{(?:CONTEXT|TASKS|DRIVERS)_ROOT\}\}/.test(line)) bad.push('写其它根: ' + line.trim());
+
+  }
+  assert.deepEqual(bad, [], 'analyzer 的写面必须只指向 {{PRIVATE_ROOT}}/staging 切片');
+  assert.match(body, /\{\{PRIVATE_ROOT\}\}\/staging/, 'analyzer 正文必须明写 staging 窄面路径');
 });

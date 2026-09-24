@@ -106,6 +106,8 @@ git clone -b dev https://github.com/zhanghan1999/SupperHan.git
 | `node scripts/driver-registry.mjs` | 登记条目的唯一写入路径：`list` / `add` / `update` / `remove` / `health`。文本手术不 round-trip（注释是字段读法载体）、写前差分过 schema、探活不过不落盘（`--force` 才降级）、删条目要 `--yes` | —（`/supperH-driver` 直调） |
 | `node scripts/migrate-registry.mjs` | legacy 单文件 `project.yaml` → 注册表模型迁移 | `npm run migrate-registry` |
 | `node scripts/flow-engine.mjs` | **流程分区落盘引擎**（`flows` 分区的唯一写入路径与 route 归一化的全仓唯一实现）：`append`（本波各片追加进未启用新代 `flow-parts/`，不校验不切）/ `finalize`（折叠去重 + 生成 `flow-index.md` + 五类端点自检 + 校验 + 切 `CURRENT` 一次）/ `check`（重算 `flow-check.md`，报告不是数据）/ `query`（按归一化 route 现查 prev 与 next）/ `plan`（聚片算法，`--flow-plan` 与它同源） | —（由 supperH-prelearn-writer 经 bash 直调） |
+| `node scripts/landing-engine.mjs` | **code 模式落地引擎**（`/supperH-learn --parallel` 的装填/索引/自检/切 `CURRENT` 全在这一个确定性脚本里）：按 `--expected-slice-ids` 读本组切片 → 逻辑序 L 重排（`--plan` 的 `(file,line)` 优先，含占位符后缀 endsWith 兜底）→ 装填 `batch-*.md` + 七列 `index.md` → 自检 → module 级 `CURRENT` tmp+rename 原子切 → 按片清理 staging；**不带 `--write` 是干跑**；退出码 0（WRITTEN）/41（GEN_INTEGRITY_FAIL）/42（METHOD_DRIFT）/2 | —（由落地调度方直调） |
+| `node scripts/parallel-plan.mjs` | **并行切片计划**（`/supperH-learn --parallel` 的 route 扫描 + 窗口切片，字节确定性、只读）：`--cwd`（经 resolver 解析项目）/ `--root`（纯目录模式，绕开 resolver 供测试）；`--module` / `--controller <fqn>` / `--limit`；退出码 43（route 扫描不完整，`incomplete_files[]` 列出，禁止手搓） | —（`/supperH-learn` 直调） |
 | `node scripts/detect-ide.mjs` | 探测本机 IDE（Qoder / OpenCode / DSH，输出 JSON） | `npm run detect-ide` |
 | `node --test "tests/**/*.test.mjs"` | 全量用例（必须用这个 glob 形态：`node --test tests/` 会把目录本身当成一个测试文件跑，结果永远是一条失败） | `npm test` |
 | 无脚本（人在终端跑） | 启用 `.githooks/pre-commit`：动作是 `git config core.hooksPath .githooks`。`config` 不在 agent 的 git 白名单里（R2），所以它只能人自己做 | `npm run setup:hooks` |
@@ -116,8 +118,9 @@ git clone -b dev https://github.com/zhanghan1999/SupperHan.git
 
 ```
 supper-Han-java/
-├── agents/                11 个 subagent（放开 external_directory 的只有 2 个，各锁一个私有根子目录：
-│                          supperH-prelearn-writer→context/ · supperH-driver-author→drivers/；名单锁在 tests/agent-permissions.test.mjs）
+├── agents/                11 个 subagent（放开 external_directory 的只有 3 个，各锁一个私有根子目录：
+│                          supperH-prelearn-writer→context/ 学习数据 · supperH-prelearn-analyzer→staging/ 并行切片窄面 ·
+│                          supperH-driver-author→drivers/；名单锁在 tests/agent-permissions.test.mjs）
 ├── commands/              6 个 primary command（setup/bootstrap/init/driver/bug/learn）
 ├── skills/                5 个 skill（预学习统筹 / 取数协议 / 修复协议 / 驱动契约 / 现象分诊）
 │                          三条通道标识符一律 supperH- 前缀（IDE 全局命名空间同名会静默互相遮蔽）；名录见 docs/architecture.md §10.18
